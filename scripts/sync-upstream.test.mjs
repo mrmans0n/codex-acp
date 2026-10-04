@@ -53,6 +53,7 @@ function github(f, issues = []) {
   writeFileSync(`${f.root}/bin/gh`, `#!/bin/bash
 printf '%s\\n' "$*" >> "$GH_LOG"
 if [[ "$1 $2" == "issue list" ]]; then cat "$GH_ISSUES"; fi
+if [[ "$1" == api && "$2" == */pulls/* ]]; then git rev-parse HEAD; fi
 if [[ "$1 $2" == "pr create" && "$FAIL_PR" == "true" ]]; then exit 1; fi
 `, {mode: 0o755});
   return {PATH: `${f.root}/bin:${process.env.PATH}`, GH_LOG: `${f.root}/calls`, GH_ISSUES: `${f.root}/issues.json`};
