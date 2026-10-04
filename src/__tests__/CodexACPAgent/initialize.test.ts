@@ -115,6 +115,28 @@ describe('CodexACPAgent - initialize', () => {
         });
     });
 
+    it('advertises provider-neutral goal and async-task extensions to an opted-in client', async () => {
+        const result = await agent.initialize({
+            protocolVersion: acp.PROTOCOL_VERSION,
+            clientCapabilities: {_meta: {goal: {}, "async-tasks": true}},
+        });
+
+        expect(result._meta).toEqual({
+            steering: {supported: true},
+            goal: {
+                version: 1,
+                controlMethod: "_session/goal",
+                actions: ["set", "pause", "resume", "clear"],
+            },
+            "async-tasks": {
+                version: 1,
+                controlMethod: "_session/async_task/stop",
+                actions: ["stop"],
+            },
+        });
+        expect(result._meta).not.toHaveProperty("jetbrains");
+    });
+
     it('should advertise gateway auth when the client opts into gateway auth metadata', async () => {
         const params: acp.InitializeRequest = {
             protocolVersion: acp.PROTOCOL_VERSION,
