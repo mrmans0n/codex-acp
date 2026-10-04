@@ -1,5 +1,5 @@
 import assert from "node:assert/strict";
-import test from "node:test";
+import { test } from "vitest";
 import { prepareAlasPackage, selectAlasVersion } from "./prepare-alas-package.mjs";
 
 const sourceCommit = "a".repeat(40);
