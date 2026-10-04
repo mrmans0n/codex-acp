@@ -31,24 +31,24 @@ function publishedManifests(published) {
 
 export function selectAlasVersion({ upstreamVersion, sourceCommit, published }) {
   const base = stableVersion(upstreamVersion);
-  if (!sourceCommit) throw new Error("source commit is required");
+  if (!FULL_COMMIT.test(String(sourceCommit ?? ""))) {
+    throw new Error("sourceCommit must be a full 40-character git commit");
+  }
 
+  const manifests = publishedManifests(published);
+  const existing = manifests.find((manifest) => manifest?.alasDownstream?.sourceCommit === sourceCommit);
+  if (existing) return { version: existing.version, alreadyPublished: true };
+
+  const versionPattern = new RegExp(`^${base.replaceAll(".", "\\.")}-alas\\.(0|[1-9]\\d*)$`);
   let highestRevision = 0;
-  let existingVersion;
-  for (const manifest of publishedManifests(published)) {
+  for (const manifest of manifests) {
     const version = typeof manifest === "string" ? manifest : manifest?.version;
-    const match = new RegExp(`^${base.replaceAll(".", "\\.")}-alas\\.(0|[1-9]\\d*)$`).exec(version ?? "");
+    const match = versionPattern.exec(version ?? "");
     if (!match) continue;
     const revision = Number(match[1]);
-    if (manifest?.alasDownstream?.sourceCommit === sourceCommit) {
-      existingVersion = version;
-      break;
-    }
     highestRevision = Math.max(highestRevision, revision);
   }
-  return existingVersion
-    ? { version: existingVersion, alreadyPublished: true }
-    : { version: `${base}-alas.${highestRevision + 1}`, alreadyPublished: false };
+  return { version: `${base}-alas.${highestRevision + 1}`, alreadyPublished: false };
 }
 
 export function prepareAlasPackage(packageJson, metadata) {
