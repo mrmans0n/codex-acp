@@ -26,6 +26,8 @@ jobs:
     outputs:
       version: ${{ steps.prepare.outputs.version }}
       source_commit: ${{ steps.source.outputs.commit }}
+      upstream_version: ${{ steps.source.outputs.upstream_version }}
+      upstream_commit: ${{ steps.source.outputs.upstream_commit }}
     steps:
       - uses: actions/checkout@v7
         with:
@@ -51,6 +53,8 @@ jobs:
           echo "ALAS_UPSTREAM_COMMIT=$upstream_commit" >> "$GITHUB_ENV"
           echo "ALAS_SOURCE_COMMIT=$SOURCE_COMMIT" >> "$GITHUB_ENV"
           echo "commit=$SOURCE_COMMIT" >> "$GITHUB_OUTPUT"
+          echo "upstream_version=$upstream_version" >> "$GITHUB_OUTPUT"
+          echo "upstream_commit=$upstream_commit" >> "$GITHUB_OUTPUT"
       - uses: actions/setup-node@v7
         with:
           node-version: "24"
@@ -98,7 +102,7 @@ jobs:
           NODE
       - name: Publish
         if: ${{ steps.prepare.outputs.alreadyPublished != 'true' }}
-        run: npm publish --access public --provenance
+        run: npm publish --access public --provenance --tag latest
 
   release:
     needs: publish
@@ -117,9 +121,13 @@ jobs:
           GH_TOKEN: ${{ github.token }}
           VERSION: ${{ needs.publish.outputs.version }}
           SOURCE_COMMIT: ${{ needs.publish.outputs.source_commit }}
+          UPSTREAM_VERSION: ${{ needs.publish.outputs.upstream_version }}
+          UPSTREAM_COMMIT: ${{ needs.publish.outputs.upstream_commit }}
         run: |
           test -n "$VERSION"
           test -n "$SOURCE_COMMIT"
+          test -n "$UPSTREAM_VERSION"
+          test -n "$UPSTREAM_COMMIT"
           tag="alas-v$VERSION"
           if git show-ref --verify --quiet "refs/tags/$tag"; then
             test "$(git rev-parse "refs/tags/$tag^{commit}")" = "$SOURCE_COMMIT" || {
@@ -133,5 +141,5 @@ jobs:
           if ! gh release view "$tag" --repo "$GITHUB_REPOSITORY" >/dev/null 2>&1; then
             gh release create "$tag" --repo "$GITHUB_REPOSITORY" --verify-tag \
               --target "$SOURCE_COMMIT" --title "$tag" \
-              --notes "npm: @alas-ide/codex-acp@$VERSION. Source: $SOURCE_COMMIT."
+              --notes "npm: @alas-ide/codex-acp@$VERSION. Upstream tag: v$UPSTREAM_VERSION. Upstream commit: $UPSTREAM_COMMIT. Source commit: $SOURCE_COMMIT."
           fi
