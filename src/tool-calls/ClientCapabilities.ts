@@ -1,5 +1,6 @@
 import type * as acp from "@agentclientprotocol/sdk";
 import {
+    AIR_ASYNC_TASKS_KEY,
     AIR_DIFF_PATCH_KEY,
     AIR_PLAN_CONTENT_DELTA_KEY,
     AIR_RAW_INPUT_RENDERING_KEY,
@@ -52,7 +53,7 @@ export class ClientCapabilities {
     readonly airClient: boolean;
     /** The client is AIR or declares `_meta.goal`. */
     readonly goal: boolean;
-    /** The client is AIR or declares `_meta["async-tasks"]`. */
+    /** AIR declares its versioned asyncTasks capability; other clients opt in with literal true. */
     readonly asyncTasks: boolean;
     /** The client declares `_meta.terminal_output`, the Zed convention for command output chunks. */
     readonly terminalOutput: boolean;
@@ -78,7 +79,9 @@ export class ClientCapabilities {
         return new ClientCapabilities({
             airClient,
             goal: airClient || (goal !== null && typeof goal === "object" && !Array.isArray(goal)),
-            asyncTasks: airClient || capabilities?._meta?.["async-tasks"] === true,
+            asyncTasks: airClient
+                ? clientSupportsAirCapability(capabilities, AIR_ASYNC_TASKS_KEY)
+                : capabilities?._meta?.["async-tasks"] === true,
             terminalOutput: capabilities?._meta?.["terminal_output"] === true,
             terminalOutputDelta: capabilities?._meta?.["terminal_output_delta"] === true,
             planUpdates: capabilities?.plan != null,

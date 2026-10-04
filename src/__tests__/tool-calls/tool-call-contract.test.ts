@@ -179,6 +179,15 @@ describe("ACP tool call contract", () => {
 });
 
 describe("ClientCapabilities", () => {
+    it.each([
+        {air: {version: 1, capabilities: []}, enabled: false},
+        {air: {version: 1, capabilities: ["asyncTasks"]}, enabled: true},
+        {air: {capabilities: ["asyncTasks"]}, enabled: false},
+    ])("requires AIR's versioned asyncTasks capability: %s", ({air, enabled}) => {
+        expect(ClientCapabilities.from({_meta: {jetbrains: {air}, "async-tasks": true}}).asyncTasks)
+            .toBe(enabled);
+    });
+
     it.each([true, false, null, {}, [], "true"])("enables async tasks only for literal true: %s", value => {
         expect(ClientCapabilities.from({_meta: {"async-tasks": value}} as never).asyncTasks)
             .toBe(value === true);
