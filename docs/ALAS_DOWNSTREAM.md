@@ -12,8 +12,13 @@ it must be an ancestor of the selected source.
 1. Protect `alas`: require reviewed pull requests and passing checks, block
    force pushes and deletion, and restrict direct pushes. Configure the `npm`
    GitHub environment to allow deployments only from `alas` and require a
-   maintainer approval. Keep the existing upstream workflows disabled in the
-   fork; publishing Alas is manual.
+   maintainer approval. Put `ci.yml`, `sync-upstream.yml`, and `publish-alas.yml`
+   on the fork's default branch, or make `alas` the default branch. GitHub discovers
+   scheduled and manually dispatched workflows from the default branch. Enable
+   these three downstream workflows and allow Actions to create pull requests.
+   Keep `ci.yml` and the sync helper on `alas` too. Disable inherited upstream
+   release automation, including `publish.yml`, so upstream preview and stable
+   releases cannot publish from the fork. Publishing Alas is manual.
 2. An npm maintainer with access to the `@alas-ide` scope signs in with 2FA.
    Check out the reviewed `alas` head, then prepare the first package:
 
@@ -36,14 +41,18 @@ it must be an ancestor of the selected source.
    tarball contains only `dist/index.js`, `README.md`, `LICENSE`, and
    `package.json` before publishing. Use empty registry metadata only when the
    package has never been published.
-3. Run `npm publish --access public` and complete npm's 2FA prompt. This one-time
+3. Run `npm publish --access public --tag latest` and complete npm's 2FA prompt. This one-time
    publication creates the package so its trusted publisher can be configured.
    Run `git restore -- package.json` afterward; never commit the publication
    rewrite.
 4. In the npm package's trusted publisher settings, choose GitHub Actions with
    owner `mrmans0n`, repository `codex-acp`, workflow `publish-alas.yml`, and
-   environment `npm`. The later workflow publishes with provenance through OIDC;
-   it needs no npm token. Remove any temporary publishing token.
+   environment `npm`, and grant direct publication permission. The later workflow
+   publishes with provenance through OIDC. In package publishing access settings,
+   require 2FA and disallow traditional publish tokens. Never store an npm publish
+   token in GitHub Actions. Both manual and automated publications set `--tag latest`
+   so normal installs receive the downstream version even though `-alas.N` is a
+   semver prerelease.
 5. Dispatch the workflow for the same source commit to create its tag and
    release. It reads the published metadata and skips the npm upload.
 
@@ -68,7 +77,55 @@ one; dispatch the intended commit again if needed.
 The npm job has only `contents: read` and `id-token: write`. The dependent tag
 and release job has only `contents: write`. A successful upload or an already
 published source always hands the resolved version to that job. Tags use
-`alas-v<version>` and point to the exact source commit.
+`alas-v<version>` and point to the exact source commit. Release notes record the
+upstream tag, upstream commit, and source commit.
+
+## Upstream synchronization and manual fallback
+
+The daily sync merges into an existing canonical sync branch's remote head. When
+replacing an older-tag PR, it starts from that PR's remote head and merges the
+current `alas` branch and newest stable upstream tag. Maintainer compatibility
+edits carry forward. Pushes are fast-forward only, so a concurrent update stops
+the push. Older PRs close after their replacement exists and CI is dispatched;
+their branches are retained to preserve edits pushed during synchronization.
+
+`GITHUB_TOKEN` cannot push changes to `.github/workflows`. If a clean merge
+changes those files, automation stops before pushing or replacing a PR and opens
+or updates `Upstream synchronization required: vX.Y.Z`. Merge conflicts use the
+same tracked issue. The issue names the tag, affected files, and refs to merge.
+No stored PAT, App credential, or other workflow write credential is needed.
+
+For a manual sync, use your maintainer login with permission to update workflows:
+
+```sh
+tag=vX.Y.Z                         # Use the tag named in the issue.
+branch="sync/upstream-${tag#v}"
+git fetch origin
+git fetch --no-tags https://github.com/agentclientprotocol/codex-acp.git \
+  "+refs/tags/$tag:refs/alas-upstream-tags/$tag"
+```
+
+Start from `origin/$branch` if it exists. Otherwise start from the remote head of
+the older sync PR named in the issue, or `origin/alas` if no sync PR exists:
+
+```sh
+seed=origin/alas                  # Set this to the existing sync PR's remote ref.
+git switch -C "$branch" "$seed"
+git merge --no-edit origin/alas
+# Merge any other older sync PR refs listed in the issue before the upstream tag.
+git merge --no-edit "refs/alas-upstream-tags/$tag"
+```
+
+Resolve any conflicts and run `npm ci`, `npm run typecheck`, `npm test`, and
+`npm run bundle:all`. Inspect workflow changes and keep inherited upstream
+release automation disabled. Push with `git push origin "HEAD:refs/heads/$branch"`,
+open or update its PR into `alas`, and dispatch `ci.yml` on the branch. Close older
+sync PRs after the replacement succeeds; retain their branches until their latest
+commits are accounted for. Never force-push over maintainer edits.
+
+The next sync run closes tracked manual or conflict issues for tags that are
+ancestors of freshly fetched `origin/alas`, including when no new sync is needed.
+It also closes the older generic conflict issue when its recorded tag is merged.
 
 ## Recovery and rollback
 
