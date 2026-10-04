@@ -180,5 +180,15 @@ jobs:
             '.[] | select(.head.ref as $head | $selection[0].staleHeads | index($head)) | .number' \
             /tmp/alas-sync-pulls.json |
           while read -r stale; do
-            gh pr close "$stale" --repo "$GITHUB_REPOSITORY"
+            current_head="$(gh api "repos/$GITHUB_REPOSITORY/pulls/$stale" --jq '.head.sha')"
+            git fetch origin "$current_head"
+            if git merge-base --is-ancestor "$current_head" HEAD; then
+              gh pr close "$stale" --repo "$GITHUB_REPOSITORY"
+            else
+              status=$?
+              if [ "$status" -ne 1 ]; then
+                exit "$status"
+              fi
+              echo "Leaving stale PR $stale open: current head $current_head is not in the pushed replacement. The next sync will retain its edits."
+            fi
           done
