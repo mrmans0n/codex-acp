@@ -1,0 +1,123 @@
+name: Sync stable upstream
+
+on:
+  schedule:
+    - cron: "0 6 * * *"
+  workflow_dispatch:
+
+permissions: {}
+
+concurrency:
+  group: sync-upstream
+  cancel-in-progress: false
+
+jobs:
+  sync:
+    if: ${{ github.repository == 'mrmans0n/codex-acp' }}
+    runs-on: ubuntu-latest
+    timeout-minutes: 15
+    permissions:
+      contents: write
+      pull-requests: write
+      issues: write
+      actions: write
+    env:
+      GH_TOKEN: ${{ github.token }}
+    steps:
+      - uses: actions/checkout@v7
+        with:
+          ref: alas
+          fetch-depth: 0
+      - uses: actions/setup-node@v7
+        with:
+          node-version: "24"
+      - name: Select upstream tag and sync head
+        id: select
+        run: |
+          git fetch origin refs/heads/alas:refs/remotes/origin/alas
+          git fetch --no-tags https://github.com/agentclientprotocol/codex-acp.git \
+            '+refs/tags/*:refs/alas-upstream-tags/*'
+          gh api --paginate --slurp "repos/$GITHUB_REPOSITORY/pulls?state=open&base=alas&per_page=100" \
+            > /tmp/alas-open-pulls.json
+          node --input-type=module <<'NODE'
+          import { execFileSync, spawnSync } from 'node:child_process';
+          import { appendFileSync, readFileSync, writeFileSync } from 'node:fs';
+          import { selectUpstreamSync } from './scripts/select-upstream-sync.mjs';
+          const refs = execFileSync('git', ['for-each-ref', '--format=%(refname)', 'refs/alas-upstream-tags/'], { encoding: 'utf8' });
+          const tags = refs.trim().split('\n').filter(Boolean).map(ref => {
+            const result = spawnSync('git', ['merge-base', '--is-ancestor', ref, 'origin/alas']);
+            if (result.status !== 0 && result.status !== 1) throw new Error(`Cannot check ancestry of ${ref}`);
+            return { name: ref.slice('refs/alas-upstream-tags/'.length), merged: result.status === 0 };
+          });
+          const pulls = JSON.parse(readFileSync('/tmp/alas-open-pulls.json', 'utf8')).flat()
+            .filter(pr => pr.head.repo?.full_name === process.env.GITHUB_REPOSITORY);
+          writeFileSync('/tmp/alas-sync-pulls.json', JSON.stringify(pulls));
+          const selection = selectUpstreamSync({ tags, openHeads: pulls.map(pr => pr.head.ref) });
+          if (selection) {
+            writeFileSync('/tmp/alas-sync-selection.json', JSON.stringify(selection));
+            appendFileSync(process.env.GITHUB_OUTPUT, `tag=${selection.tag}\nbranch=${selection.branch}\n`);
+          }
+          NODE
+      - name: Merge upstream on the canonical sync branch
+        if: ${{ steps.select.outputs.tag != '' }}
+        id: merge
+        env:
+          TAG: ${{ steps.select.outputs.tag }}
+          BRANCH: ${{ steps.select.outputs.branch }}
+        run: |
+          git config user.name "github-actions[bot]"
+          git config user.email "github-actions[bot]@users.noreply.github.com"
+          git ls-remote --heads origin "refs/heads/$BRANCH" > /tmp/alas-sync-remote.txt
+          expected="$(awk '{print $1}' /tmp/alas-sync-remote.txt)"
+          git checkout -B "$BRANCH" origin/alas
+          if ! git merge --no-edit "refs/alas-upstream-tags/$TAG"; then
+            git diff --name-only --diff-filter=U > /tmp/alas-sync-conflicts.txt
+            git merge --abort
+            test -s /tmp/alas-sync-conflicts.txt
+            echo "conflict=true" >> "$GITHUB_OUTPUT"
+            exit 0
+          fi
+          git push --force-with-lease="refs/heads/$BRANCH:$expected" origin "HEAD:refs/heads/$BRANCH"
+      - name: Create or update the conflict issue
+        if: ${{ steps.merge.outputs.conflict == 'true' }}
+        env:
+          TAG: ${{ steps.select.outputs.tag }}
+        run: |
+          title="Upstream synchronization conflict"
+          gh issue list --repo "$GITHUB_REPOSITORY" --state open \
+            --search "in:title \"$title\"" --limit 100 --json number,title > /tmp/alas-sync-issues.json
+          issue="$(jq -r --arg title "$title" '[.[] | select(.title == $title)][0].number // empty' /tmp/alas-sync-issues.json)"
+          {
+            echo "Merging upstream tag $TAG into alas failed. The merge was aborted; alas was preserved."
+            echo
+            echo "Conflicting files:"
+            cat /tmp/alas-sync-conflicts.txt
+          } > /tmp/alas-sync-issue.md
+          if [ -n "$issue" ]; then
+            gh issue edit "$issue" --repo "$GITHUB_REPOSITORY" --title "$title" --body-file /tmp/alas-sync-issue.md
+          else
+            gh issue create --repo "$GITHUB_REPOSITORY" --title "$title" --body-file /tmp/alas-sync-issue.md
+          fi
+          exit 1
+      - name: Create or update one sync PR and request CI
+        if: ${{ steps.select.outputs.tag != '' && steps.merge.outputs.conflict != 'true' }}
+        env:
+          TAG: ${{ steps.select.outputs.tag }}
+          BRANCH: ${{ steps.select.outputs.branch }}
+        run: |
+          pr="$(jq -r --arg branch "$BRANCH" '[.[] | select(.head.ref == $branch)][0].number // empty' /tmp/alas-sync-pulls.json)"
+          printf 'Merge stable upstream tag %s into alas. Downstream patches are retained. Publication remains manual.\n' "$TAG" > /tmp/alas-sync-pr.md
+          if [ -n "$pr" ]; then
+            gh pr edit "$pr" --repo "$GITHUB_REPOSITORY" --title "chore: sync upstream $TAG" --body-file /tmp/alas-sync-pr.md
+          else
+            gh pr create --repo "$GITHUB_REPOSITORY" --base alas --head "$BRANCH" \
+              --title "chore: sync upstream $TAG" --body-file /tmp/alas-sync-pr.md
+          fi
+          jq -r --slurpfile selection /tmp/alas-sync-selection.json \
+            '.[] | select(.head.ref as $head | $selection[0].staleHeads | index($head)) | .number' \
+            /tmp/alas-sync-pulls.json |
+          while read -r stale; do
+            gh pr close "$stale" --repo "$GITHUB_REPOSITORY" --delete-branch
+          done
+          # Token-created pushes and PRs require an explicit CI dispatch.
+          gh workflow run ci.yml --repo "$GITHUB_REPOSITORY" --ref "$BRANCH"
