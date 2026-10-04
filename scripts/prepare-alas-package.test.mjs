@@ -40,6 +40,26 @@ test("reuses the published version for the same source commit", () => {
   );
 });
 
+test("reuses a source commit published under another upstream base", () => {
+  assert.deepEqual(
+    selectAlasVersion({
+      upstreamVersion: "2.1.1",
+      sourceCommit,
+      published: [
+        { version: "2.1.0-alas.4", alasDownstream: { sourceCommit } },
+      ],
+    }),
+    { version: "2.1.0-alas.4", alreadyPublished: true },
+  );
+});
+
+test("requires a full source commit hash", () => {
+  assert.throws(
+    () => selectAlasVersion({ upstreamVersion: "2.1.1", sourceCommit: "abc1234", published: [] }),
+    /full 40-character git commit/,
+  );
+});
+
 test("prepares publish-only package metadata", () => {
   const upstreamPackage = {
     name: "@agentclientprotocol/codex-acp",
