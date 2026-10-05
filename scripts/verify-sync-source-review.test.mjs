@@ -5,7 +5,10 @@ import {tmpdir} from "node:os";
 import {join} from "node:path";
 import {test} from "vitest";
 import {buildSyncCandidate} from "./sync-candidate.mjs";
-import {verifySyncSourceReview} from "./verify-sync-source-review.mjs";
+import {
+  verifyReconstructedPatchState,
+  verifySyncSourceReview,
+} from "./verify-sync-source-review.mjs";
 
 const git = (cwd, ...args) => execFileSync("git", args, {
   cwd,
@@ -255,6 +258,75 @@ test("rejects a same-tree integration that substitutes an unreviewed exact candi
       sourceCommit: forgedIntegration,
       alasRef: "alas-forged-integration",
     }), /exact candidate ancestry|integration commit/i);
+  } finally {
+    rmSync(f.root, {recursive: true, force: true});
+  }
+});
+
+test("independently rejects adaptation ledger state when the exact adaptation is absent from candidate ancestry", () => {
+  const f = fixture();
+  try {
+    const adaptation = f.preserved[0];
+    const review = structuredClone(f.review);
+    review.patches[0].resolution = {
+      action: "adapt",
+      commit: adaptation,
+      automatic: false,
+      rationale: "Reviewed adaptation.",
+      tests: ["downstream.test.ts"],
+    };
+    const ledger = structuredClone(f.ledger);
+    ledger.patches[0].appliedCommit = adaptation;
+    ledger.patches[0].disposition = "active";
+    assert.throws(() => verifyReconstructedPatchState({
+      cwd: f.cwd,
+      reconstructed: {
+        appliedPatches: ["downstream"],
+        appliedAdaptations: [{patch: "downstream", commit: adaptation}],
+        missingLedgerPatches: [],
+        manualReview: false,
+        exactCandidateCommit: f.exactCandidateCommit,
+        preservedSyncCommits: f.preserved,
+        appliedPreservedAdaptations: [],
+      },
+      review,
+      ledger,
+    }), /adaptation.*ancestry|ancestry.*adaptation/i);
+  } finally {
+    rmSync(f.root, {recursive: true, force: true});
+  }
+});
+
+test("independently rejects a retained applied commit absent from exact candidate ancestry", () => {
+  const f = fixture();
+  try {
+    const applied = f.preserved[0];
+    const review = structuredClone(f.review);
+    review.patches[0].commit = applied;
+    review.patches[0].appliedCommit = applied;
+    review.patches[0].resolution = {
+      action: "retain",
+      automatic: false,
+      rationale: "Retain the authenticated prior adaptation.",
+      tests: ["downstream.test.ts"],
+    };
+    const ledger = structuredClone(f.ledger);
+    ledger.patches[0].appliedCommit = applied;
+    ledger.patches[0].disposition = "active";
+    assert.throws(() => verifyReconstructedPatchState({
+      cwd: f.cwd,
+      reconstructed: {
+        appliedPatches: ["downstream"],
+        appliedAdaptations: [],
+        missingLedgerPatches: [],
+        manualReview: false,
+        exactCandidateCommit: f.exactCandidateCommit,
+        preservedSyncCommits: f.preserved,
+        appliedPreservedAdaptations: [],
+      },
+      review,
+      ledger,
+    }), /retained.*ancestry|ancestry.*retained/i);
   } finally {
     rmSync(f.root, {recursive: true, force: true});
   }
