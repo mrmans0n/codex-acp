@@ -5,6 +5,7 @@ import {tmpdir} from "node:os";
 import {join} from "node:path";
 import {test} from "vitest";
 import {verifyAlasSource} from "./verify-alas-source.mjs";
+import {verifySyncReviewArtifact} from "./sync-review.mjs";
 
 const git = (cwd, ...args) => execFileSync("git", args, {
   cwd,
@@ -26,21 +27,30 @@ function fixture() {
   git(cwd, "init", "-b", "upstream");
   git(cwd, "config", "user.name", "Fixture");
   git(cwd, "config", "user.email", "fixture@example.test");
-  writeFileSync(join(cwd, "package.json"), '{"version":"2.1.0"}\n');
+  writeFileSync(join(cwd, "package.json"), '{"version":"2.0.0"}\n');
   git(cwd, "add", ".");
-  git(cwd, "commit", "-m", "stable");
-  const stable = git(cwd, "rev-parse", "HEAD");
+  git(cwd, "commit", "-m", "previous stable");
+  const previous = git(cwd, "rev-parse", "HEAD");
+  git(cwd, "tag", "v2.0.0");
+  writeFileSync(join(cwd, "package.json"), '{"version":"2.1.0"}\n');
+  const stable = commitFile(cwd, "stable.txt", "stable\n", "stable");
   git(cwd, "tag", "v2.1.0");
   const preview = commitFile(cwd, "preview.txt", "preview\n", "post-stable preview");
 
-  git(cwd, "checkout", "-b", "clean", stable);
-  const clean = commitFile(cwd, "downstream.txt", "downstream\n", "downstream");
+  git(cwd, "checkout", "-b", "clean", previous);
+  const downstream = commitFile(cwd, "downstream.txt", "downstream\n", "downstream");
+  git(cwd, "checkout", "-b", "exact", stable);
+  commitFile(cwd, "downstream.txt", "downstream\n", "downstream");
+  const exact = git(cwd, "rev-parse", "HEAD");
+  git(cwd, "checkout", "clean");
+  git(cwd, "merge", "--no-ff", "exact", "-m", "chore: integrate exact upstream test");
+  const clean = git(cwd, "rev-parse", "HEAD");
   git(cwd, "branch", "alas-clean", clean);
 
   git(cwd, "checkout", "-b", "contaminated", preview);
   const contaminated = commitFile(cwd, "downstream.txt", "downstream\n", "downstream");
   git(cwd, "branch", "alas-contaminated", contaminated);
-  return {root, cwd, stable, clean, contaminated};
+  return {root, cwd, previous, stable, downstream, exact, clean, contaminated};
 }
 
 test("accepts a source whose merge-base with upstream main is exactly the declared stable tag", () => {
@@ -53,7 +63,12 @@ test("accepts a source whose merge-base with upstream main is exactly the declar
       upstreamTag: "v2.1.0",
       upstreamMainRef: "upstream",
       packageVersion: "2.1.0",
-    }), {sourceCommit: f.clean, upstreamVersion: "2.1.0", upstreamCommit: f.stable});
+    }), {
+      sourceCommit: f.clean,
+      upstreamVersion: "2.1.0",
+      upstreamCommit: f.stable,
+      reviewBaseTag: "v2.0.0",
+    });
   } finally {
     rmSync(f.root, {recursive: true, force: true});
   }
@@ -70,6 +85,56 @@ test("rejects post-tag upstream contamination even when the stable tag is an anc
       upstreamMainRef: "upstream",
       packageVersion: "2.1.0",
     }), /merge-base.*exactly.*v2\.1\.0/i);
+  } finally {
+    rmSync(f.root, {recursive: true, force: true});
+  }
+});
+
+test("rejects a forged sync-review fromTag using the base derived from integration history", () => {
+  const f = fixture();
+  try {
+    const source = verifyAlasSource({
+      cwd: f.cwd,
+      sourceCommit: f.clean,
+      alasRef: "alas-clean",
+      upstreamTag: "v2.1.0",
+      upstreamMainRef: "upstream",
+      packageVersion: "2.1.0",
+    });
+    const classifications = [{
+      name: "downstream",
+      commit: f.downstream,
+      patchId: "a".repeat(40),
+      classification: "unaffected",
+      overlappingFiles: [],
+      tests: ["downstream.test.ts"],
+    }];
+    const review = {
+      schemaVersion: 1,
+      fromTag: "v2.1.0",
+      toTag: "v2.1.0",
+      toCommit: f.stable,
+      patches: [{
+        name: "downstream",
+        commit: f.downstream,
+        patchId: "a".repeat(40),
+        classification: "unaffected",
+        overlappingFiles: [],
+        resolution: {
+          action: "retain",
+          automatic: true,
+          rationale: "No equivalent or overlapping upstream stable change was detected.",
+          tests: ["downstream.test.ts"],
+        },
+      }],
+    };
+    assert.throws(() => verifySyncReviewArtifact({
+      review,
+      fromTag: source.reviewBaseTag,
+      toTag: "v2.1.0",
+      toCommit: f.stable,
+      classifications,
+    }), /fromTag mismatch/i);
   } finally {
     rmSync(f.root, {recursive: true, force: true});
   }
