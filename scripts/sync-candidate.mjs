@@ -145,6 +145,8 @@ function isGeneratedIntegrationMerge(cwd, commit, alasRef, upstreamRef, targetCo
   const parents = git(cwd, ["show", "-s", "--format=%P", commit]).split(/\s+/);
   if (subject !== `chore: integrate exact upstream ${targetCommit.slice(0, 12)}` ||
       parents.length < 2 || parents.length > 3) return false;
+  if (parents.length === 3 &&
+      (parents[2] === parents[0] || !isAncestor(cwd, parents[0], parents[2]))) return false;
   const alasCommit = git(cwd, ["rev-parse", `${alasRef}^{commit}`]);
   const mergeTree = git(cwd, ["rev-parse", `${commit}^{tree}`]);
   const exactTree = git(cwd, ["rev-parse", `${parents[1]}^{tree}`]);
