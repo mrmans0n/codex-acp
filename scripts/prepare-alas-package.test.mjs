@@ -31,26 +31,64 @@ test("reuses the published version for the same source commit", () => {
   assert.deepEqual(
     selectAlasVersion({
       upstreamVersion: "2.1.1",
+      upstreamCommit,
       sourceCommit,
       published: [
-        { version: "2.1.1-alas.2", alasDownstream: { sourceCommit } },
+        {
+          version: "2.1.1-alas.2",
+          alasDownstream: {upstreamVersion: "2.1.1", upstreamCommit, sourceCommit},
+        },
       ],
     }),
     { version: "2.1.1-alas.2", alreadyPublished: true },
   );
 });
 
-test("reuses a source commit published under another upstream base", () => {
-  assert.deepEqual(
-    selectAlasVersion({
+test("rejects a source commit already published with mismatched upstream metadata", () => {
+  assert.throws(
+    () => selectAlasVersion({
       upstreamVersion: "2.1.1",
+      upstreamCommit,
       sourceCommit,
       published: [
-        { version: "2.1.0-alas.4", alasDownstream: { sourceCommit } },
+        {
+          version: "2.1.0-alas.4",
+          alasDownstream: {
+            upstreamVersion: "2.1.0",
+            upstreamCommit: "c".repeat(40),
+            sourceCommit,
+          },
+        },
       ],
     }),
-    { version: "2.1.0-alas.4", alreadyPublished: true },
+    /already published.*metadata mismatch/i,
   );
+});
+
+test("rejects a source commit published under a malformed or ambiguous downstream version", () => {
+  for (const published of [
+    [{
+      version: "2.1.1-alas.not-a-revision",
+      alasDownstream: {upstreamVersion: "2.1.1", upstreamCommit, sourceCommit},
+    }],
+    [
+      {
+        version: "2.1.1-alas.1",
+        alasDownstream: {upstreamVersion: "2.1.1", upstreamCommit, sourceCommit},
+      },
+      {
+        version: "2.1.1-alas.2",
+        alasDownstream: {upstreamVersion: "2.1.1", upstreamCommit, sourceCommit},
+      },
+    ],
+  ]) {
+    assert.throws(() => selectAlasVersion({
+      upstreamVersion: "2.1.1",
+      upstreamCommit,
+      sourceCommit,
+      published,
+    }), /metadata mismatch|ambiguous/i);
+  }
 });
 
 test("requires a full source commit hash", () => {
