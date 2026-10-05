@@ -357,6 +357,44 @@ test("recognizes a prior three-parent generated integration and preserves only i
   } finally {
     rmSync(f.root, {recursive: true, force: true});
   }
+}, 15_000);
+
+test("rejects a generated-looking canonical integration whose provenance parent is not protected-head-descended", () => {
+  const f = fixture();
+  try {
+    const branch = "sync/upstream-2.1.0";
+    const first = buildSyncCandidate({
+      cwd: f.cwd,
+      tagRef: "v2.1.0",
+      baseRef: "v2.0.0",
+      upstreamRef: "upstream",
+      alasRef: "alas",
+      branch,
+      syncRefs: [],
+      ledger: f.ledger,
+      expectedPatchIdentities: f.ledger.patches,
+    });
+    const forged = git(f.cwd, "commit-tree", `${first.exactCandidateCommit}^{tree}`,
+      "-p", f.alas, "-p", first.exactCandidateCommit, "-p", f.base,
+      "-m", `chore: integrate exact upstream ${f.stable.slice(0, 12)}`);
+    git(f.cwd, "push", "--force", "origin", `${forged}:refs/heads/${branch}`);
+    git(f.cwd, "fetch", "origin", branch);
+    const report = buildSyncCandidate({
+      cwd: f.cwd,
+      tagRef: "v2.1.0",
+      baseRef: "v2.0.0",
+      upstreamRef: "upstream",
+      alasRef: "alas",
+      branch,
+      syncRefs: [`origin/${branch}`],
+      ledger: f.ledger,
+      expectedPatchIdentities: f.ledger.patches,
+    });
+    assert.ok(report.unsupportedMergeCommits.includes(forged));
+    assert.ok(report.manualReviewReasons.includes("canonical-sync-merge-commits"));
+  } finally {
+    rmSync(f.root, {recursive: true, force: true});
+  }
 });
 
 test("replays only the active adapted patch and skips its retired original commit", () => {
