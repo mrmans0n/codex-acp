@@ -11,6 +11,11 @@ on:
         description: Exact stable upstream tag (vX.Y.Z)
         required: true
         type: string
+      hotfix:
+        description: Republish the latest upstream version with reviewed fork commits, without a new sync
+        required: false
+        default: false
+        type: boolean
 
 permissions: {}
 
@@ -52,6 +57,7 @@ jobs:
         env:
           SOURCE_COMMIT: ${{ inputs.source_commit }}
           UPSTREAM_TAG: ${{ inputs.upstream_tag }}
+          HOTFIX: ${{ inputs.hotfix }}
         run: |
           set -o pipefail
           [[ "$UPSTREAM_TAG" =~ ^v(0|[1-9][0-9]*)\.(0|[1-9][0-9]*)\.(0|[1-9][0-9]*)$ ]]
@@ -66,10 +72,31 @@ jobs:
           import {execFileSync} from 'node:child_process';
           import {readFileSync} from 'node:fs';
           import {validatePatchLedger} from './scripts/downstream-patches.mjs';
+          import {verifyAlasHotfix} from './scripts/verify-alas-hotfix.mjs';
           import {verifySyncSourceReview} from './scripts/verify-sync-source-review.mjs';
           import {verifyUpstreamRelease} from './scripts/upstream-release.mjs';
 
           const packageVersion = JSON.parse(readFileSync('package.json', 'utf8')).version;
+          if (process.env.HOTFIX === 'true') {
+            // The latest publication of this upstream version already passed the release and sync
+            // review checks. A hotfix only adds fork commits on top of it.
+            validatePatchLedger(JSON.parse(readFileSync('docs/alas-downstream-patches.json', 'utf8')));
+            const packumentResponse = await fetch('https://registry.npmjs.org/@alas-ide%2Fcodex-acp', {
+              headers: {'cache-control': 'no-cache'},
+            });
+            if (!packumentResponse.ok) throw new Error(`npm packument returned ${packumentResponse.status}`);
+            const result = verifyAlasHotfix({
+              cwd: process.cwd(),
+              sourceCommit: process.env.SOURCE_COMMIT,
+              alasRef: 'origin/alas',
+              upstreamTag: process.env.UPSTREAM_TAG,
+              upstreamMainRef: 'refs/alas-upstream-main',
+              packageVersion,
+              packument: await packumentResponse.json(),
+            });
+            process.stdout.write(`${JSON.stringify(result)}\n`);
+            process.exit(0);
+          }
           const release = JSON.parse(readFileSync('/tmp/alas-upstream-release.json', 'utf8'));
           const npmResponse = await fetch('https://registry.npmjs.org/@agentclientprotocol%2Fcodex-acp/latest');
           if (!npmResponse.ok) throw new Error(`npm latest returned ${npmResponse.status}`);
@@ -212,6 +239,7 @@ jobs:
             echo
             echo "- Source commit: \`${{ inputs.source_commit }}\`"
             echo "- Upstream tag: \`${{ inputs.upstream_tag }}\`"
+            echo "- Hotfix: **${{ inputs.hotfix }}**"
             echo "- Source/release/review verification: **${SOURCE_OUTCOME:-skipped}**"
             echo "- npm ci: **${INSTALL_OUTCOME:-skipped}**"
             echo "- Typecheck: **${TYPECHECK_OUTCOME:-skipped}**"
