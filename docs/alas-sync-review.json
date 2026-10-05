@@ -1,8 +1,9 @@
 {
-  "schemaVersion": 1,
+  "schemaVersion": 2,
   "fromTag": "v2.1.0",
   "toTag": "v2.1.1",
   "toCommit": "68d7d2d5ddfc0ed5746f9f6130892dda685e65dd",
+  "canonicalHead": null,
   "patches": [
     {
       "name": "goal-opt-in",
@@ -43,5 +44,7 @@
         ]
       }
     }
-  ]
+  ],
+  "preservedCommits": [],
+  "resolved": true
 }
