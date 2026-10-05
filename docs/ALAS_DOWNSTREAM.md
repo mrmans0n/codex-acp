@@ -202,6 +202,35 @@ The dependent release job creates an immutable `alas-v<version>` tag and a
 GitHub release at the exact source commit. Existing matching artifacts are
 accepted; tags are never moved.
 
+### Hotfix publication
+
+A reviewed fork fix that cannot wait for the next stable upstream tag can be
+republished on the upstream version Alas already ships. Dispatch with
+`hotfix=true` and the upstream tag of the latest publication:
+
+```sh
+gh workflow run publish-alas.yml --repo mrmans0n/codex-acp --ref alas \
+  -f source_commit="$(git rev-parse HEAD)" \
+  -f upstream_tag=vX.Y.Z -f hotfix=true
+```
+
+Instead of the upstream release, merge-base, and sync review checks, a hotfix
+requires that:
+
+- the source is exactly the fetched protected branch head;
+- the declared tag matches `package.json`'s upstream version;
+- the source descends from the source of the latest published
+  `X.Y.Z-alas.N`, whose metadata names the same tag and tag commit;
+- `git merge-base SOURCE_COMMIT upstream/main` equals that publication's
+  merge-base, so the hotfix adds no upstream history; and
+- the patch ledger is valid.
+
+Everything after the source gate is unchanged, including tests, the E2E gate,
+the tarball check, provenance, and the read-back. The next revision number is
+allocated as usual. A hotfix inherits the upstream content of the publication it
+builds on, including any upstream commits past the tag; it never adds more.
+Fork commits on `alas` are replayed by the next stable sync.
+
 ## Trusted publisher setup
 
 For a package that has never been published, first configure the npm trusted
@@ -213,8 +242,8 @@ a local npm token.
 
 Never republish or repair an existing npm version. In particular, historical
 `2.1.1-alas.1` remains immutable even though its source contains upstream
-`v2.1.2-preview.1`; publish a new reviewed revision only after a clean exact-tag
-source reaches `alas`.
+`v2.1.2-preview.1`. Until a clean exact-tag source reaches `alas`, only hotfix
+publications build on it, and they carry the same preview content.
 
 ## Recovery and rollback
 
