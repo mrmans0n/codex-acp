@@ -46,6 +46,38 @@ export function validatePatchLedger(ledger, {expectedPatchIdentities = KNOWN_PAT
           (!Array.isArray(patch.retiredCommits) || patch.retiredCommits.some((commit) => !FULL_COMMIT.test(String(commit))))) {
         errors.push(`${prefix}.retiredCommits must be an array of full commit SHAs when present`);
       }
+      const disposition = patch?.disposition ?? "active";
+      const retiredCommits = patch?.retiredCommits ?? [];
+      if (!["active", "dropped"].includes(disposition)) {
+        errors.push(`${prefix}.disposition must be active or dropped`);
+      }
+      if (patch?.appliedCommit !== undefined && patch.appliedCommit === patch.commit) {
+        errors.push(`${prefix}.appliedCommit must differ from the anchored original commit`);
+      }
+      if (patch?.appliedCommit !== undefined && retiredCommits.includes(patch.appliedCommit)) {
+        errors.push(`${prefix}.appliedCommit must not also be retired`);
+      }
+      if (patch?.appliedCommit !== undefined &&
+          (disposition !== "active" || !retiredCommits.includes(patch.commit))) {
+        errors.push(`${prefix}.appliedCommit requires active disposition and the original commit in retiredCommits`);
+      }
+      if (disposition === "dropped" &&
+          (patch?.appliedCommit !== undefined || !retiredCommits.includes(patch.commit))) {
+        errors.push(`${prefix}.dropped disposition requires no appliedCommit and the original commit in retiredCommits`);
+      }
+      if (patch?.appliedCommit !== undefined || disposition === "dropped") {
+        const transition = patch?.lastResolution;
+        const expectedAction = disposition === "dropped" ? "drop" : "adapt";
+        if (!transition || transition.action !== expectedAction ||
+            !STABLE_TAG.test(String(transition.fromTag ?? "")) ||
+            !STABLE_TAG.test(String(transition.toTag ?? "")) ||
+            !FULL_COMMIT.test(String(transition.originalCommit ?? "")) ||
+            !retiredCommits.includes(transition.originalCommit) ||
+            (expectedAction === "adapt" && transition.replacementCommit !== patch.appliedCommit) ||
+            (expectedAction === "drop" && transition.replacementCommit !== undefined)) {
+          errors.push(`${prefix}.lastResolution must authenticate the ${expectedAction} transition for the current patch state`);
+        }
+      }
       if (names.has(patch?.name)) errors.push(`duplicate patch name ${patch.name}`);
       if (commits.has(patch?.commit)) errors.push(`duplicate patch commit ${patch.commit}`);
       names.add(patch?.name);

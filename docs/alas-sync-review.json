@@ -7,7 +7,10 @@
   "patches": [
     {
       "name": "goal-opt-in",
+      "originalCommit": "97aa595ba69c62e896375ea2442358d45d66af74",
       "commit": "97aa595ba69c62e896375ea2442358d45d66af74",
+      "appliedCommit": null,
+      "disposition": "active",
       "patchId": "64e57b3b5c0f2d9e33b97e1b0072a53e8e19faf7",
       "classification": "overlap",
       "overlappingFiles": [
@@ -27,7 +30,10 @@
     },
     {
       "name": "async-tasks-opt-in",
+      "originalCommit": "16817016d25a9eed9f3dc7cd1cbdf446569e179d",
       "commit": "16817016d25a9eed9f3dc7cd1cbdf446569e179d",
+      "appliedCommit": null,
+      "disposition": "active",
       "patchId": "fc7312b1b446af367c92a5bd9dbe52a9e7653132",
       "classification": "overlap",
       "overlappingFiles": [

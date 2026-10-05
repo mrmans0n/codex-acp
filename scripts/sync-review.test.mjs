@@ -6,6 +6,7 @@ import {
   verifySyncReviewArtifact,
   verifyPatchLedgerTransition,
 } from "./sync-review.mjs";
+import {validatePatchLedger} from "./downstream-patches.mjs";
 
 const toCommit = "a".repeat(40);
 const classifications = [
@@ -163,6 +164,53 @@ test("derives the exact committed ledger transition from the previous ledger and
       expectedPatchIdentities: classifications,
     }), /exact.*transition|transition.*exact/i);
   }
+});
+
+test("retain preserves the authenticated adaptation transition for the active applied commit", () => {
+  const original = "1".repeat(40);
+  const applied = "2".repeat(40);
+  const previousLedger = {
+    schemaVersion: 2,
+    baseTag: "v2.1.0",
+    patches: [{
+      name: "adapted-patch",
+      commit: original,
+      appliedCommit: applied,
+      upstreamPr: null,
+      files: ["adapted-patch.ts"],
+      tests: ["adapted-patch.test.ts"],
+      disposition: "active",
+      retiredCommits: [original],
+      lastResolution: {
+        fromTag: "v2.0.0",
+        toTag: "v2.1.0",
+        originalCommit: original,
+        action: "adapt",
+        replacementCommit: applied,
+      },
+    }],
+    retiredCommits: [],
+    preservedTransitions: [],
+  };
+  const review = createSyncReview({
+    fromTag: "v2.1.0",
+    toTag: "v2.2.0",
+    toCommit,
+    classifications: [{
+      ...previousLedger.patches[0],
+      originalCommit: original,
+      commit: applied,
+      patchId: "a".repeat(40),
+      classification: "unaffected",
+      overlappingFiles: [],
+    }],
+  });
+  const advanced = advancePatchLedger({ledger: previousLedger, review});
+  assert.deepEqual(advanced.patches[0].lastResolution, previousLedger.patches[0].lastResolution);
+  assert.deepEqual(
+    validatePatchLedger(advanced, {expectedPatchIdentities: [{name: "adapted-patch", commit: original}]}),
+    advanced,
+  );
 });
 
 test("accepts explicit retain adapt or drop resolutions with rationale and tests", () => {
