@@ -6,7 +6,9 @@ and stable version. Publication rewrites only the runner's manifest to
 `X.Y.Z-alas.N` and records `alasDownstream.upstreamVersion`, `upstreamCommit`,
 and `sourceCommit`.
 
-Publication is always a human-dispatched, environment-approved action. The npm
+Publication is always a human-dispatched action. The `npm` environment accepts
+deployments only from protected branches and has no required reviewers, so the
+dispatch itself is the publication decision. The npm
 job retains only `contents: read` and `id-token: write`; npm authentication uses
 OIDC provenance, not a stored token.
 
@@ -196,7 +198,8 @@ target tag, is rejected.
 After the source gate, the workflow runs `npm ci`, typecheck, unit and
 maintenance tests through `npm test`, all platform bundles, and the package
 build. It checks the dry-run tarball before `npm publish --provenance --tag
-latest`. The `npm` environment approval remains the human publication gate.
+latest`. Dispatching the workflow is the human publication gate; the `npm`
+environment does not wait for a separate approval.
 
 The dependent release job creates an immutable `alas-v<version>` tag and a
 GitHub release at the exact source commit. Existing matching artifacts are
@@ -237,7 +240,7 @@ For a package that has never been published, first configure the npm trusted
 publisher for owner `mrmans0n`, repository `codex-acp`, workflow
 `publish-alas.yml`, environment `npm`, with direct publication permission.
 Require 2FA and disallow traditional publish tokens. The first upload still runs
-through the environment-approved workflow; do not publish interactively or use
+through the workflow; do not publish interactively or use
 a local npm token.
 
 Never republish or repair an existing npm version. In particular, historical
