@@ -62,10 +62,13 @@ GitHub/npm/tag disagreement fails closed and is written to the job summary.
 `scripts/sync-candidate.mjs` first builds and retains an exact-tag candidate.
 It classifies the functional ledger patches, follows the committed sync-review
 resolutions, and replays fork-only commits from `origin/alas`. Stable patch IDs
-exclude non-ledger cherry-picks that are already on upstream `main`; equivalents
-that are absent from the target stable tag are reported as upstream-later and
-are not replayed. Known ledger patches are governed by their recomputed
-classification and explicit review resolution instead of that generic rule.
+exclude non-ledger cherry-picks that are already on upstream `main`, whether
+they came from protected `alas` or the canonical same-version sync branch.
+Equivalents absent from the target stable tag are reported as upstream-later
+and are not replayed. Canonical exclusions require manual review because they
+discard a maintainer edit from the candidate. Known ledger patches remain
+governed by their recomputed classification and explicit review resolution
+instead of that generic rule.
 
 The workflow then creates the canonical `sync/upstream-X.Y.Z` integration PR
 branch from the current protected `origin/alas` head and makes an explicit
@@ -81,8 +84,10 @@ Only the canonical same-version sync branch may contribute additional review
 commits. Those commits are preserved and always reported as manual-review.
 Older or otherwise stale sync heads are listed with their commit counts but are
 never replayed automatically. The workflow updates its unprotected candidate
-branches with remote-head leases; promotion is exclusively a protected PR merge
-into `alas`, and protected `alas` history is never rewritten.
+branches with explicit `--force-with-lease` checks against their fetched remote
+heads. This is limited to owned `sync/*` candidate branches. The helper refuses
+`alas` as a push target, promotion is exclusively a protected PR merge, and
+protected `alas` history is never rewritten.
 
 When the stable delta changes workflow files, the exact candidate restores the
 current downstream `.github/workflows` tree and lists the upstream paths for
@@ -176,13 +181,17 @@ following:
 - the declared tag matches `package.json`'s upstream version;
 - `git merge-base SOURCE_COMMIT upstream/main` is exactly that tag commit; and
 - `docs/alas-sync-review.json` matches recomputed classifications for its
-  `fromTag`, the declared `toTag`/`toCommit`, and contains no unresolved manual
-  resolution.
+  independently derived base tag, the declared `toTag`/`toCommit`, and contains
+  no unresolved manual resolution.
 
 The merge-base equality is intentionally stricter than an ancestry check. Any
 post-tag upstream or preview commit in the source causes publication to stop,
 even when the declared stable tag is also an ancestor. GitHub/npm disagreement
-or a stale review artifact stops before build or publication.
+or a stale review artifact stops before build or publication. The workflow does
+not trust `review.fromTag`: it finds the exact-tag integration merge in the
+protected source ancestry and derives the review base from that merge's first
+parent `package.json` version. A forged `fromTag`, including one equal to the
+target tag, is rejected.
 
 After the source gate, the workflow runs `npm ci`, typecheck, unit and
 maintenance tests through `npm test`, all platform bundles, and the package

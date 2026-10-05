@@ -87,12 +87,12 @@ jobs:
           const classifications = classifyDownstreamPatches({
             cwd: process.cwd(),
             ledger,
-            baseRef: review.fromTag,
+            baseRef: result.reviewBaseTag,
             targetRef: process.env.UPSTREAM_TAG,
           });
           verifySyncReviewArtifact({
             review,
-            fromTag: review.fromTag,
+            fromTag: result.reviewBaseTag,
             toTag: process.env.UPSTREAM_TAG,
             toCommit: result.upstreamCommit,
             classifications,

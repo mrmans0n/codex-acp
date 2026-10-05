@@ -143,6 +143,19 @@ test("refuses to push a sync candidate directly to the protected alas branch", (
   }
 });
 
+test("refuses to force-update branches outside the owned sync namespace", () => {
+  const f = fixture();
+  try {
+    assert.throws(() => pushSyncCandidate({
+      cwd: f.cwd,
+      branch: "main",
+      expectedRemoteSha: "",
+    }), /owned sync/i);
+  } finally {
+    rmSync(f.root, {recursive: true, force: true});
+  }
+});
+
 test("detects a concurrent update on every source sync branch before retiring it", () => {
   const f = fixture();
   try {
@@ -310,6 +323,47 @@ test("excludes and reports a non-ledger cherry-pick equivalent to upstream main 
       upstreamCommit: f.preview,
     }]);
     assert.equal(report.appliedDownstreamCommits.includes(cherryPickedPreview), false);
+  } finally {
+    rmSync(f.root, {recursive: true, force: true});
+  }
+});
+
+test("excludes and reports canonical sync commits equivalent to the stable tag or later upstream main", () => {
+  const f = fixture();
+  try {
+    const branch = "sync/upstream-2.1.0";
+    git(f.cwd, "checkout", branch);
+    git(f.cwd, "cherry-pick", f.stable);
+    const stableEquivalent = git(f.cwd, "rev-parse", "HEAD");
+    git(f.cwd, "cherry-pick", f.preview);
+    const laterEquivalent = git(f.cwd, "rev-parse", "HEAD");
+    git(f.cwd, "push", "--force", "origin", branch);
+
+    const report = buildSyncCandidate({
+      cwd: f.cwd,
+      tagRef: "v2.1.0",
+      baseRef: "v2.0.0",
+      upstreamRef: "upstream",
+      alasRef: "alas",
+      branch,
+      syncRefs: [`origin/${branch}`],
+      ledger: f.ledger,
+    });
+
+    assert.deepEqual(report.excludedCanonicalUpstreamEquivalents, [{
+      commit: stableEquivalent,
+      upstreamCommit: f.stable,
+    }]);
+    assert.deepEqual(report.excludedCanonicalUpstreamLaterEquivalents, [{
+      commit: laterEquivalent,
+      upstreamCommit: f.preview,
+    }]);
+    assert.equal(report.preservedSyncCommits.includes(stableEquivalent), false);
+    assert.equal(report.preservedSyncCommits.includes(laterEquivalent), false);
+    assert.equal(existsSync(join(f.cwd, "preview-only.txt")), false);
+    assert.ok(report.manualReviewReasons.includes("excluded-canonical-sync-upstream-equivalents"));
+    assert.ok(report.manualReviewReasons.includes("excluded-canonical-sync-upstream-later-equivalents"));
+    assert.equal(report.manualReview, true);
   } finally {
     rmSync(f.root, {recursive: true, force: true});
   }

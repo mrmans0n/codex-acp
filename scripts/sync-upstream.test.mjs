@@ -11,6 +11,7 @@ const e2e = readFileSync(join(workflowsDir, "e2e.yml"), "utf8");
 const upstreamPublish = readFileSync(join(workflowsDir, "publish.yml"), "utf8");
 const checkoutSha = "3d3c42e5aac5ba805825da76410c181273ba90b1";
 const setupNodeSha = "820762786026740c76f36085b0efc47a31fe5020";
+const createGitHubAppTokenV3Sha = "bcd2ba49218906704ab6c1aa796996da409d3eb1";
 
 test("pins checkout and setup-node to the reviewed full SHAs in every workflow", () => {
   for (const name of readdirSync(workflowsDir).filter((entry) => entry.endsWith(".yml"))) {
@@ -20,6 +21,18 @@ test("pins checkout and setup-node to the reviewed full SHAs in every workflow",
       assert.equal(match[2], expected, `${name}: ${match[1]}`);
     }
   }
+});
+
+test("pins create-github-app-token v3 to the reviewed official full SHA", () => {
+  let uses = 0;
+  for (const name of readdirSync(workflowsDir).filter((entry) => entry.endsWith(".yml"))) {
+    const workflow = readFileSync(join(workflowsDir, name), "utf8");
+    for (const match of workflow.matchAll(/uses:\s*actions\/create-github-app-token@([^\s]+)/g)) {
+      uses += 1;
+      assert.equal(match[1], createGitHubAppTokenV3Sha, name);
+    }
+  }
+  assert.equal(uses, 3);
 });
 
 test("sync maintenance has no GitHub Issues dependency and persists manual review in a draft PR", () => {
@@ -55,7 +68,7 @@ test("sync keeps an exact candidate and pushes only a protected-branch-descended
   assert.match(sync, /exactCandidateCommit/);
   assert.match(sync, /integrationCommit/);
   assert.match(sync, /pushSyncCandidate[\s\S]*ref:\s*report\.exactBranch/);
-  assert.doesNotMatch(sync, /HEAD:refs\/heads\/alas|push[^\n]*\balas\b/);
+  assert.doesNotMatch(sync, /HEAD:refs\/heads\/alas|\bgit\s+push[^\n]*\balas\b/);
 });
 
 test("sync reports stale heads without replay and marks preserved canonical edits for manual review", () => {
@@ -68,6 +81,9 @@ test("sync commits a review artifact and publish recomputes and verifies it", ()
   for (const workflow of [sync, publish]) assert.match(workflow, /alas-sync-review\.json/);
   assert.match(publish, /classifyDownstreamPatches/);
   assert.match(publish, /verifySyncReviewArtifact/);
+  assert.match(publish, /baseRef:\s*result\.reviewBaseTag/);
+  assert.match(publish, /fromTag:\s*result\.reviewBaseTag/);
+  assert.doesNotMatch(publish, /baseRef:\s*review\.fromTag|fromTag:\s*review\.fromTag/);
 });
 
 test("maintenance failures always write a durable summary and update an existing draft PR when possible", () => {
