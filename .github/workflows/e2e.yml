@@ -11,14 +11,23 @@ jobs:
   e2e:
     runs-on: ubuntu-latest
     timeout-minutes: 30
+    env:
+      OPENAI_API_KEY: ${{ secrets.OPENAI_API_KEY }}
     permissions:
       contents: read
     steps:
-      - uses: actions/checkout@v7
-      - uses: actions/setup-node@v7
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1
+      - uses: actions/setup-node@820762786026740c76f36085b0efc47a31fe5020
         with:
           node-version: '24'
+      - name: Record missing-key E2E waiver
+        if: ${{ env.OPENAI_API_KEY == '' }}
+        run: |
+          echo "::notice::E2E waived because OPENAI_API_KEY is not configured."
+          echo "## E2E waived" >> "$GITHUB_STEP_SUMMARY"
+          echo "OPENAI_API_KEY is absent, so npm run test:e2e was not run." >> "$GITHUB_STEP_SUMMARY"
       - name: Configure sandboxing
+        if: ${{ env.OPENAI_API_KEY != '' }}
         timeout-minutes: 15
         run: |
           # Acquire::*::Timeout only guards a single socket operation, so a mirror
@@ -51,11 +60,11 @@ jobs:
             sudo sysctl -w kernel.apparmor_restrict_unprivileged_userns=0
           fi
       - name: Install dependencies
+        if: ${{ env.OPENAI_API_KEY != '' }}
         run: npm ci
       - name: Run e2e tests
+        if: ${{ env.OPENAI_API_KEY != '' }}
         # The suite drives a live model, so a wedged turn hangs instead of
         # failing. Bound it well above the ~2min happy path.
         timeout-minutes: 15
-        env:
-          OPENAI_API_KEY: ${{ secrets.OPENAI_API_KEY }}
         run: npm run test:e2e
