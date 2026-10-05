@@ -7,6 +7,10 @@ on:
         description: Full commit at the head of the protected alas branch
         required: true
         type: string
+      upstream_tag:
+        description: Exact stable upstream tag (vX.Y.Z)
+        required: true
+        type: string
 
 permissions: {}
 
@@ -29,36 +33,53 @@ jobs:
       upstream_version: ${{ steps.source.outputs.upstream_version }}
       upstream_commit: ${{ steps.source.outputs.upstream_commit }}
     steps:
-      - uses: actions/checkout@v7
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1
         with:
           ref: alas
           fetch-depth: 0
           persist-credentials: false
-      - name: Verify source and upstream base
-        id: source
-        env:
-          SOURCE_COMMIT: ${{ inputs.source_commit }}
-        run: |
-          [[ "$SOURCE_COMMIT" =~ ^[0-9a-f]{40}$ ]]
-          git fetch origin refs/heads/alas:refs/remotes/origin/alas
-          test "$SOURCE_COMMIT" = "$(git rev-parse origin/alas)"
-          git checkout --detach "$SOURCE_COMMIT"
-          upstream_version="$(node -p "require('./package.json').version")"
-          [[ "$upstream_version" =~ ^(0|[1-9][0-9]*)\.(0|[1-9][0-9]*)\.(0|[1-9][0-9]*)$ ]]
-          git fetch https://github.com/agentclientprotocol/codex-acp.git \
-            "refs/tags/v$upstream_version:refs/alas-upstream"
-          upstream_commit="$(git rev-list -n 1 refs/alas-upstream)"
-          git merge-base --is-ancestor "$upstream_commit" "$SOURCE_COMMIT"
-          echo "ALAS_UPSTREAM_VERSION=$upstream_version" >> "$GITHUB_ENV"
-          echo "ALAS_UPSTREAM_COMMIT=$upstream_commit" >> "$GITHUB_ENV"
-          echo "ALAS_SOURCE_COMMIT=$SOURCE_COMMIT" >> "$GITHUB_ENV"
-          echo "commit=$SOURCE_COMMIT" >> "$GITHUB_OUTPUT"
-          echo "upstream_version=$upstream_version" >> "$GITHUB_OUTPUT"
-          echo "upstream_commit=$upstream_commit" >> "$GITHUB_OUTPUT"
-      - uses: actions/setup-node@v7
+      - uses: actions/setup-node@820762786026740c76f36085b0efc47a31fe5020
         with:
           node-version: "24"
           registry-url: https://registry.npmjs.org
+      - name: Verify source and exact upstream base
+        id: source
+        env:
+          SOURCE_COMMIT: ${{ inputs.source_commit }}
+          UPSTREAM_TAG: ${{ inputs.upstream_tag }}
+        run: |
+          [[ "$UPSTREAM_TAG" =~ ^v(0|[1-9][0-9]*)\.(0|[1-9][0-9]*)\.(0|[1-9][0-9]*)$ ]]
+          git fetch origin refs/heads/alas:refs/remotes/origin/alas
+          git fetch --no-tags https://github.com/agentclientprotocol/codex-acp.git \
+            "+refs/tags/$UPSTREAM_TAG:refs/tags/$UPSTREAM_TAG" \
+            '+refs/heads/main:refs/alas-upstream-main'
+          git checkout --detach "$SOURCE_COMMIT"
+          node --input-type=module <<'NODE' > /tmp/alas-source.json
+          import {readFileSync} from 'node:fs';
+          import {verifyAlasSource} from './scripts/verify-alas-source.mjs';
+          const packageVersion = JSON.parse(readFileSync('package.json', 'utf8')).version;
+          const result = verifyAlasSource({
+            cwd: process.cwd(),
+            sourceCommit: process.env.SOURCE_COMMIT,
+            alasRef: 'origin/alas',
+            upstreamTag: process.env.UPSTREAM_TAG,
+            upstreamMainRef: 'refs/alas-upstream-main',
+            packageVersion,
+          });
+          process.stdout.write(`${JSON.stringify(result)}\n`);
+          NODE
+          node --input-type=module <<'NODE'
+          import {appendFileSync, readFileSync} from 'node:fs';
+          const result = JSON.parse(readFileSync('/tmp/alas-source.json', 'utf8'));
+          appendFileSync(process.env.GITHUB_ENV,
+            `ALAS_UPSTREAM_VERSION=${result.upstreamVersion}\n` +
+            `ALAS_UPSTREAM_COMMIT=${result.upstreamCommit}\n` +
+            `ALAS_SOURCE_COMMIT=${result.sourceCommit}\n`);
+          appendFileSync(process.env.GITHUB_OUTPUT,
+            `commit=${result.sourceCommit}\n` +
+            `upstream_version=${result.upstreamVersion}\n` +
+            `upstream_commit=${result.upstreamCommit}\n`);
+          NODE
       - uses: oven-sh/setup-bun@0c5077e51419868618aeaa5fe8019c62421857d6
         with:
           bun-version: 1.3.11
@@ -69,7 +90,7 @@ jobs:
       - name: Read published manifests
         run: |
           node --input-type=module <<'NODE'
-          import { writeFileSync } from 'node:fs';
+          import {writeFileSync} from 'node:fs';
           const response = await fetch('https://registry.npmjs.org/@alas-ide%2Fcodex-acp');
           if (!response.ok && response.status !== 404) {
             throw new Error(`npm registry returned ${response.status}`);
@@ -82,8 +103,8 @@ jobs:
           ALAS_PUBLISHED_JSON="$(cat /tmp/alas-published.json)" \
             node scripts/prepare-alas-package.mjs > /tmp/alas-prepared.json
           node --input-type=module <<'NODE' >> "$GITHUB_OUTPUT"
-          import { readFileSync } from 'node:fs';
-          const { version, alreadyPublished } = JSON.parse(readFileSync('/tmp/alas-prepared.json', 'utf8'));
+          import {readFileSync} from 'node:fs';
+          const {version, alreadyPublished} = JSON.parse(readFileSync('/tmp/alas-prepared.json', 'utf8'));
           console.log(`version=${version}`);
           console.log(`alreadyPublished=${alreadyPublished}`);
           NODE
@@ -92,11 +113,11 @@ jobs:
         run: |
           npm pack --dry-run --json > /tmp/alas-pack.json
           node --input-type=module <<'NODE'
-          import { readFileSync } from 'node:fs';
+          import {readFileSync} from 'node:fs';
           const manifest = JSON.parse(readFileSync('package.json', 'utf8'));
-          const [{ files }] = JSON.parse(readFileSync('/tmp/alas-pack.json', 'utf8'));
-          const paths = files.map(file => file.path);
-          if (!paths.includes('dist/index.js') || paths.some(path => !manifest.files.includes(path))) {
+          const [{files}] = JSON.parse(readFileSync('/tmp/alas-pack.json', 'utf8'));
+          const paths = files.map((file) => file.path);
+          if (!paths.includes('dist/index.js') || paths.some((path) => !manifest.files.includes(path))) {
             throw new Error(`Unexpected package contents: ${paths.join(', ')}`);
           }
           NODE
@@ -111,7 +132,7 @@ jobs:
     permissions:
       contents: write
     steps:
-      - uses: actions/checkout@v7
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1
         with:
           ref: ${{ needs.publish.outputs.source_commit }}
           fetch-depth: 0
