@@ -17,7 +17,10 @@ function assertCommitOrNull(value, field) {
 function classificationRecord(patch) {
   return {
     name: patch.name,
+    originalCommit: patch.originalCommit ?? patch.commit,
     commit: patch.commit,
+    appliedCommit: patch.appliedCommit ?? null,
+    disposition: patch.disposition ?? "active",
     patchId: patch.patchId,
     classification: patch.classification,
     overlappingFiles: [...patch.overlappingFiles],
@@ -26,7 +29,10 @@ function classificationRecord(patch) {
 
 function sameClassification(left, right) {
   return left?.name === right.name &&
+    left?.originalCommit === right.originalCommit &&
     left?.commit === right.commit &&
+    left?.appliedCommit === right.appliedCommit &&
+    left?.disposition === right.disposition &&
     left?.patchId === right.patchId &&
     left?.classification === right.classification &&
     JSON.stringify(left?.overlappingFiles) === JSON.stringify(right.overlappingFiles);
@@ -45,6 +51,14 @@ function samePreservedIdentity(left, right) {
 }
 
 function automaticResolution(patch) {
+  if (patch.disposition === "dropped") {
+    return {
+      action: "drop",
+      automatic: true,
+      rationale: "The authenticated prior patch ledger transition retired this patch.",
+      tests: [...patch.tests],
+    };
+  }
   return {
     action: "retain",
     automatic: true,
@@ -57,6 +71,16 @@ function unresolvedResolution() {
   return {action: null, automatic: false, rationale: "", tests: []};
 }
 
+function automaticResolutionValid(patch) {
+  const dropped = patch.disposition === "dropped";
+  return patch.resolution?.action === (dropped ? "drop" : "retain") &&
+    patch.resolution?.automatic === true &&
+    patch.resolution?.rationale === (dropped
+      ? "The authenticated prior patch ledger transition retired this patch."
+      : "No equivalent or overlapping upstream stable change was detected.") &&
+    Array.isArray(patch.resolution?.tests) && patch.resolution.tests.length > 0;
+}
+
 function manualResolutionValid(resolution) {
   return MANUAL_ACTIONS.has(resolution?.action) &&
     (resolution.action !== "adapt" || FULL_COMMIT.test(String(resolution.commit ?? ""))) &&
@@ -67,11 +91,8 @@ function manualResolutionValid(resolution) {
 }
 
 function reviewResolved(review) {
-  return review.patches.every((patch) => patch.classification === "unaffected"
-    ? patch.resolution?.action === "retain" &&
-      patch.resolution?.automatic === true &&
-      patch.resolution?.rationale === "No equivalent or overlapping upstream stable change was detected." &&
-      Array.isArray(patch.resolution?.tests) && patch.resolution.tests.length > 0
+  return review.patches.every((patch) => patch.resolution?.automatic === true
+    ? automaticResolutionValid(patch)
     : manualResolutionValid(patch.resolution)) &&
     review.preservedCommits.every((entry) => manualResolutionValid(entry.resolution));
 }
@@ -110,7 +131,7 @@ export function createSyncReview({
     canonicalHead,
     patches: classifications.map((patch) => {
       const record = classificationRecord(patch);
-      if (patch.classification === "unaffected") {
+      if (patch.disposition === "dropped" || patch.classification === "unaffected") {
         return {...record, resolution: automaticResolution(patch)};
       }
       const previous = previousByName.get(patch.name);
@@ -165,7 +186,7 @@ export function verifySyncReviewArtifact({
       throw new Error(`sync review classification mismatch for ${expected.name}`);
     }
     const resolution = actual.resolution;
-    if (expected.classification === "unaffected") {
+    if (classifications[index].disposition === "dropped" || expected.classification === "unaffected") {
       const automatic = automaticResolution(classifications[index]);
       if (!isDeepStrictEqual(resolution, automatic)) {
         throw new Error(`unaffected patch ${expected.name} must use the automatic retain resolution`);
@@ -242,7 +263,12 @@ export function advancePatchLedger({ledger, review}) {
       throw new Error(`Patch ledger does not contain reviewed commit ${item?.commit ?? patch.name}`);
     }
     const retiredCommits = [...new Set(patch.retiredCommits ?? [])];
-    const result = {...patch, lastResolution: patchTransition(review, item)};
+    const preserveStateTransition = item.resolution.action === "retain" && patch.appliedCommit !== undefined ||
+      item.resolution.action === "drop" && patch.disposition === "dropped";
+    const result = {
+      ...patch,
+      lastResolution: preserveStateTransition ? patch.lastResolution : patchTransition(review, item),
+    };
     if (item.resolution.action === "drop") {
       retiredCommits.push(currentCommit);
       delete result.appliedCommit;
