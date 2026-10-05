@@ -108,7 +108,19 @@ test("classifies the currently applied adaptation while retaining the anchored o
     const ledger = {
       ...f.ledger,
       patches: f.ledger.patches.map((patch, index) => index === 0
-        ? {...patch, appliedCommit: adapted, retiredCommits: [original], disposition: "active"}
+        ? {
+          ...patch,
+          appliedCommit: adapted,
+          retiredCommits: [original],
+          disposition: "active",
+          lastResolution: {
+            fromTag: "v0.9.0",
+            toTag: "v1.0.0",
+            originalCommit: original,
+            action: "adapt",
+            replacementCommit: adapted,
+          },
+        }
         : patch),
     };
     const [result] = classifyDownstreamPatches({
@@ -132,6 +144,91 @@ test("requires a versioned ledger with patch identity, upstream PR field, files,
     {expectedPatchIdentities: [{name: "incomplete", commit: "1".repeat(40)}]},
   ),
     /commit.*upstreamPr.*files.*tests/s);
+});
+
+test("rejects unauthenticated or internally inconsistent adapted and dropped ledger states", () => {
+  const original = "1".repeat(40);
+  const adapted = "2".repeat(40);
+  const basePatch = {
+    name: "patch",
+    commit: original,
+    upstreamPr: null,
+    files: ["patch.ts"],
+    tests: ["patch.test.ts"],
+  };
+  const ledger = (patch) => ({schemaVersion: 2, baseTag: "v1.0.0", patches: [patch]});
+  const cases = [
+    {...basePatch, disposition: "invented"},
+    {...basePatch, disposition: "active", appliedCommit: adapted, retiredCommits: []},
+    {...basePatch, disposition: "dropped", appliedCommit: adapted, retiredCommits: [original]},
+    {...basePatch, disposition: "dropped", retiredCommits: []},
+    {
+      ...basePatch,
+      disposition: "active",
+      appliedCommit: adapted,
+      retiredCommits: [original],
+      lastResolution: {fromTag: "v0.9.0", toTag: "v1.0.0", originalCommit: original, action: "retain"},
+    },
+  ];
+  for (const patch of cases) {
+    assert.throws(
+      () => validatePatchLedger(ledger(patch), {expectedPatchIdentities: [basePatch]}),
+      /disposition|appliedCommit|retiredCommits|lastResolution|adapt|drop/i,
+    );
+  }
+});
+
+test("accepts an authenticated chained adaptation from the previously applied commit", () => {
+  const original = "1".repeat(40);
+  const previous = "2".repeat(40);
+  const adapted = "3".repeat(40);
+  assert.doesNotThrow(() => validatePatchLedger({
+    schemaVersion: 2,
+    baseTag: "v1.1.0",
+    patches: [{
+      name: "patch",
+      commit: original,
+      appliedCommit: adapted,
+      upstreamPr: null,
+      files: ["patch.ts"],
+      tests: ["patch.test.ts"],
+      disposition: "active",
+      retiredCommits: [original, previous],
+      lastResolution: {
+        fromTag: "v1.0.0",
+        toTag: "v1.1.0",
+        originalCommit: previous,
+        action: "adapt",
+        replacementCommit: adapted,
+      },
+    }],
+  }, {expectedPatchIdentities: [{name: "patch", commit: original}]}));
+});
+
+test("rejects a stale applied commit that is already retired", () => {
+  const original = "1".repeat(40);
+  const stale = "2".repeat(40);
+  assert.throws(() => validatePatchLedger({
+    schemaVersion: 2,
+    baseTag: "v1.0.0",
+    patches: [{
+      name: "patch",
+      commit: original,
+      appliedCommit: stale,
+      upstreamPr: null,
+      files: ["patch.ts"],
+      tests: ["patch.test.ts"],
+      disposition: "active",
+      retiredCommits: [original, stale],
+      lastResolution: {
+        fromTag: "v0.9.0",
+        toTag: "v1.0.0",
+        originalCommit: original,
+        action: "adapt",
+        replacementCommit: stale,
+      },
+    }],
+  }, {expectedPatchIdentities: [{name: "patch", commit: original}]}), /appliedCommit.*retired|retired.*appliedCommit/i);
 });
 
 test("anchors the production ledger to the two known functional patch identities", () => {

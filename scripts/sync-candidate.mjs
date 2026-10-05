@@ -81,6 +81,65 @@ function cherryPick(cwd, commit) {
   return false;
 }
 
+function changedPaths(cwd, commit) {
+  return lines(git(cwd, ["diff-tree", "--no-commit-id", "--name-only", "-r", commit]));
+}
+
+function bindExactAdaptation(cwd, {
+  commit,
+  patch,
+  tagCommit,
+  upstreamRef,
+  requireExactStableParent = true,
+}) {
+  const parents = git(cwd, ["show", "-s", "--format=%P", commit]).split(/\s+/).filter(Boolean);
+  if (parents.length !== 1) {
+    throw new Error(`Adaptation commit ${commit} for ${patch.name} must have exactly one parent`);
+  }
+  if (requireExactStableParent) {
+    const mergeBase = git(cwd, ["merge-base", commit, upstreamRef]);
+    if (mergeBase !== tagCommit || parents[0] !== tagCommit) {
+      throw new Error(`Adaptation commit ${commit} for ${patch.name} must directly descend from exact stable ${tagCommit}`);
+    }
+  } else if (isAncestor(cwd, commit, upstreamRef)) {
+    throw new Error(`Authenticated patch commit ${commit} for ${patch.name} is already contained in upstream`);
+  }
+  const allowedPaths = new Set([...patch.files, ...patch.tests]);
+  const paths = changedPaths(cwd, commit);
+  const unexpected = paths.filter((path) => !allowedPaths.has(path));
+  if (paths.length === 0 || unexpected.length > 0 || !paths.some((path) => patch.files.includes(path))) {
+    throw new Error(`Adaptation commit ${commit} for ${patch.name} has unproven tree effect: ${unexpected.join(", ") || "no declared patch file changed"}`);
+  }
+  const currentHead = git(cwd, ["rev-parse", "HEAD"]);
+  const result = spawnSync("git", ["cherry-pick", "--no-commit", commit], {
+    cwd,
+    encoding: "utf8",
+    stdio: "pipe",
+  });
+  if (result.status !== 0) {
+    spawnSync("git", ["cherry-pick", "--abort"], {cwd, encoding: "utf8", stdio: "pipe"});
+    spawnSync("git", ["reset", "--hard", currentHead], {cwd, encoding: "utf8", stdio: "pipe"});
+    return false;
+  }
+  const tree = git(cwd, ["write-tree"]);
+  const currentTree = git(cwd, ["rev-parse", `${currentHead}^{tree}`]);
+  if (tree === currentTree) {
+    git(cwd, ["reset", "--hard", currentHead]);
+    throw new Error(`Adaptation commit ${commit} for ${patch.name} has no independently applied tree effect`);
+  }
+  const boundCommit = git(cwd, [
+    "commit-tree", tree,
+    "-p", currentHead,
+    "-p", commit,
+    "-m", `chore: bind exact adaptation ${commit.slice(0, 12)} for ${patch.name}`,
+  ], {env: deterministicCommitEnv(cwd, commit)});
+  git(cwd, ["reset", "--hard", boundCommit]);
+  if (!isAncestor(cwd, commit, boundCommit) || git(cwd, ["rev-parse", `${boundCommit}^{tree}`]) !== tree) {
+    throw new Error(`Adaptation commit ${commit} for ${patch.name} was not bound exactly into the candidate`);
+  }
+  return true;
+}
+
 function commitsBetween(cwd, base, head) {
   return lines(git(cwd, ["rev-list", "--reverse", "--no-merges", `${base}..${head}`]));
 }
@@ -154,6 +213,30 @@ function isGeneratedIntegrationMerge(cwd, commit, alasRef, upstreamRef, targetCo
     git(cwd, ["merge-base", commit, upstreamRef]) === targetCommit;
 }
 
+function isGeneratedPatchBinding(cwd, commit) {
+  const parents = git(cwd, ["show", "-s", "--format=%P", commit]).split(/\s+/).filter(Boolean);
+  if (parents.length !== 2) return false;
+  const subject = git(cwd, ["show", "-s", "--format=%s", commit]);
+  const subjectPrefix = `chore: bind exact adaptation ${parents[1].slice(0, 12)} for `;
+  if (!subject.startsWith(subjectPrefix) || subject.length === subjectPrefix.length ||
+      isAncestor(cwd, parents[1], parents[0])) return false;
+  const boundPaths = lines(git(cwd, ["diff", "--name-only", parents[0], commit])).sort();
+  const exactPaths = changedPaths(cwd, parents[1]).sort();
+  if (boundPaths.length === 0 || JSON.stringify(boundPaths) !== JSON.stringify(exactPaths)) return false;
+  const exactParents = git(cwd, ["show", "-s", "--format=%P", parents[1]]).split(/\s+/).filter(Boolean);
+  if (exactParents.length !== 1) return false;
+  const reconstructed = spawnSync("git", [
+    "merge-tree", "--write-tree", "--merge-base", exactParents[0], parents[0], parents[1],
+  ], {
+    cwd,
+    encoding: "utf8",
+    stdio: "pipe",
+  });
+  if (reconstructed.status !== 0) return false;
+  const reconstructedTree = lines(reconstructed.stdout)[0];
+  return reconstructedTree === git(cwd, ["rev-parse", `${commit}^{tree}`]);
+}
+
 function discoverCanonicalCandidates({
   cwd,
   canonicalRef,
@@ -187,6 +270,7 @@ function discoverCanonicalCandidates({
       }
       continue;
     }
+    if (isGeneratedPatchBinding(cwd, commit)) continue;
     if (isReviewOnlyCommit(cwd, commit, reviewPath, ledgerPath)) continue;
     result.push(commit);
   }
@@ -316,7 +400,8 @@ export function buildSyncCandidate({
     canonicalSourceHead = head;
     canonicalHead = head;
     for (const merge of lines(git(cwd, ["rev-list", "--reverse", "--merges", `${alasRef}..${ref}`]))) {
-      if (!isGeneratedIntegrationMerge(cwd, merge, alasRef, upstreamRef, tagCommit)) {
+      if (!isGeneratedIntegrationMerge(cwd, merge, alasRef, upstreamRef, tagCommit) &&
+          !isGeneratedPatchBinding(cwd, merge)) {
         unsupportedMergeCommits.push(merge);
       }
     }
@@ -368,34 +453,72 @@ export function buildSyncCandidate({
   const exactBranch = `${branch}-exact`;
   git(cwd, ["checkout", "-B", exactBranch, tagCommit]);
   const appliedPatches = [];
+  const appliedAdaptations = [];
   const appliedDownstreamCommits = [];
   const appliedSyncCommits = [];
+  const appliedPreservedAdaptations = [];
   const excludedUpstreamEquivalents = [];
   const excludedUpstreamLaterEquivalents = [];
   const excludedCanonicalUpstreamEquivalents = [];
   const excludedCanonicalUpstreamLaterEquivalents = [];
   const conflicts = [];
   const seenLedgerPatches = new Set();
+  const seenNonLedgerPatchIds = new Set();
   for (const commit of downstreamCommits) {
     const id = patchId(cwd, commit);
-    const patch = id ? ledgerByPatchId.get(id) : undefined;
+    const matchingPatch = id ? ledgerByPatchId.get(id) : undefined;
+    if (matchingPatch && commit !== matchingPatch.commit) continue;
+    const patch = matchingPatch;
     if (retiredCommits.has(commit) && !patch) continue;
     if (patch) {
       seenLedgerPatches.add(patch.name);
-      if (patch.classification !== "unaffected" &&
-          reviewByName.get(patch.name)?.resolution?.action !== "retain") continue;
+      const resolution = reviewByName.get(patch.name)?.resolution;
+      if (resolution?.action === "drop") continue;
+      if (resolution?.action === "adapt") {
+        if (!bindExactAdaptation(cwd, {
+          commit: resolution.commit,
+          patch,
+          tagCommit,
+          upstreamRef,
+        })) {
+          conflicts.push({commit: resolution.commit, kind: "adaptation", patch: patch.name});
+          break;
+        }
+        appliedDownstreamCommits.push(resolution.commit);
+        appliedPatches.push(patch.name);
+        appliedAdaptations.push({patch: patch.name, commit: resolution.commit});
+        continue;
+      }
+      if (resolution?.action === "retain") {
+        if (!bindExactAdaptation(cwd, {
+          commit: patch.commit,
+          patch,
+          tagCommit,
+          upstreamRef,
+          requireExactStableParent: false,
+        })) {
+          conflicts.push({commit: patch.commit, kind: "retained-patch", patch: patch.name});
+          break;
+        }
+        appliedDownstreamCommits.push(patch.commit);
+        appliedPatches.push(patch.name);
+        continue;
+      }
+      if (patch.classification !== "unaffected") continue;
     } else if (id && upstreamPatchIds.has(id)) {
       const equivalent = {commit, upstreamCommit: upstreamPatchIds.get(id)};
       if (targetPatchIds.has(id)) excludedUpstreamEquivalents.push(equivalent);
       else excludedUpstreamLaterEquivalents.push(equivalent);
       continue;
     }
+    if (!patch && id && seenNonLedgerPatchIds.has(id)) continue;
     if (!cherryPick(cwd, commit)) {
       conflicts.push({commit, kind: "downstream", ...(patch ? {patch: patch.name} : {})});
       break;
     }
     appliedDownstreamCommits.push(commit);
     if (patch) appliedPatches.push(patch.name);
+    else if (id) seenNonLedgerPatchIds.add(id);
   }
   if (conflicts.length === 0) {
     for (const entry of preserved) {
@@ -415,8 +538,26 @@ export function buildSyncCandidate({
       }
       const resolution = preservedReviewByCommit.get(commit)?.resolution;
       if (resolution?.action === "drop") continue;
-      const selectedCommit = resolution?.action === "adapt" ? resolution.commit : commit;
-      if (!cherryPick(cwd, selectedCommit)) {
+      if (resolution?.action === "adapt") {
+        const preservedFiles = changedPaths(cwd, commit);
+        if (!bindExactAdaptation(cwd, {
+          commit: resolution.commit,
+          patch: {
+            name: `preserved canonical commit ${commit}`,
+            files: preservedFiles,
+            tests: [],
+          },
+          tagCommit,
+          upstreamRef,
+        })) {
+          conflicts.push({commit: resolution.commit, kind: "canonical-sync-adaptation"});
+          break;
+        }
+        appliedSyncCommits.push(resolution.commit);
+        appliedPreservedAdaptations.push({commit, replacementCommit: resolution.commit});
+        continue;
+      }
+      if (!cherryPick(cwd, commit)) {
         conflicts.push({commit, kind: "canonical-sync-review", ...(patch ? {patch: patch.name} : {})});
         break;
       }
@@ -424,12 +565,15 @@ export function buildSyncCandidate({
     }
   }
   const missingLedgerPatches = classifications
-    .filter((patch) => patch.classification === "unaffected" && !seenLedgerPatches.has(patch.name))
+    .filter((patch) => ["retain", "adapt"].includes(reviewByName.get(patch.name)?.resolution?.action) &&
+      !seenLedgerPatches.has(patch.name))
     .map((patch) => patch.name);
 
   const workflowChanges = lines(git(cwd, ["diff", "--name-only", baseRef, tagRef, "--", ".github/workflows"]));
   if (workflowChanges.length > 0) restoreWorkflowTree(cwd, alasRef, tagCommit);
-  const advancedLedger = syncReviewError ? ledger : advancePatchLedger({ledger, review: syncReview});
+  const advancedLedger = syncReviewError || conflicts.length > 0 || missingLedgerPatches.length > 0
+    ? ledger
+    : advancePatchLedger({ledger, review: syncReview});
   writeSyncArtifacts(cwd, reviewPath, syncReview, ledgerPath, advancedLedger);
   const exactCandidateCommit = git(cwd, ["rev-parse", "HEAD"]);
   const exactMergeBase = git(cwd, ["merge-base", exactCandidateCommit, upstreamRef]);
@@ -451,7 +595,9 @@ export function buildSyncCandidate({
   if (conflicts.length > 0) manualReviewReasons.push("cherry-pick-conflicts");
   if (missingLedgerPatches.length > 0) manualReviewReasons.push("missing-ledger-patches");
   if (unsupportedMergeCommits.length > 0) manualReviewReasons.push("canonical-sync-merge-commits");
-  if (appliedSyncCommits.length > 0) manualReviewReasons.push("preserved-canonical-sync-commits");
+  if (appliedSyncCommits.length > 0 && syncReviewError) {
+    manualReviewReasons.push("preserved-canonical-sync-commits");
+  }
   if (excludedCanonicalUpstreamEquivalents.length > 0) {
     manualReviewReasons.push("excluded-canonical-sync-upstream-equivalents");
   }
@@ -468,6 +614,7 @@ export function buildSyncCandidate({
     previousMergeBases,
     classifications,
     appliedPatches,
+    appliedAdaptations,
     appliedDownstreamCommits,
     excludedUpstreamEquivalents,
     excludedUpstreamLaterEquivalents,
@@ -480,6 +627,7 @@ export function buildSyncCandidate({
     syncReviewError,
     missingLedgerPatches,
     preservedSyncCommits: appliedSyncCommits,
+    appliedPreservedAdaptations,
     syncHeads,
     staleSyncHeads,
     workflowChanges,
