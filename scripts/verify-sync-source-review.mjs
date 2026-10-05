@@ -66,6 +66,79 @@ function verifySourceTree(cwd, sourceCommit, candidateCommit) {
   }
 }
 
+function isAncestor(cwd, ancestor, descendant) {
+  const result = spawnSync("git", ["merge-base", "--is-ancestor", ancestor, descendant], {
+    cwd,
+    encoding: "utf8",
+    stdio: "pipe",
+  });
+  if (result.status === 0) return true;
+  if (result.status === 1) return false;
+  throw new Error(result.stderr || `Cannot compare ${ancestor} with ${descendant}`);
+}
+
+export function verifyReconstructedPatchState({cwd, reconstructed, review, ledger}) {
+  if (reconstructed.manualReview || reconstructed.missingLedgerPatches.length > 0) {
+    throw new Error("Independently reconstructed candidate still requires manual review or has missing ledger patches");
+  }
+  const ledgerByName = new Map(ledger.patches.map((patch) => [patch.name, patch]));
+  const expectedAppliedPatches = review.patches
+    .filter((patch) => ["retain", "adapt"].includes(patch.resolution.action))
+    .map((patch) => patch.name);
+  if (!isDeepStrictEqual(reconstructed.appliedPatches, expectedAppliedPatches)) {
+    throw new Error("Reconstructed appliedPatches do not exactly match committed review resolutions");
+  }
+  const expectedAdaptations = review.patches
+    .filter((patch) => patch.resolution.action === "adapt")
+    .map((patch) => ({patch: patch.name, commit: patch.resolution.commit}));
+  if (!isDeepStrictEqual(reconstructed.appliedAdaptations, expectedAdaptations)) {
+    throw new Error("Reconstructed adaptations do not exactly match committed review resolutions");
+  }
+  const expectedPreservedCommits = review.preservedCommits
+    .filter((entry) => ["retain", "adapt"].includes(entry.resolution.action))
+    .map((entry) => entry.resolution.action === "adapt" ? entry.resolution.commit : entry.commit);
+  if (!isDeepStrictEqual(reconstructed.preservedSyncCommits, expectedPreservedCommits)) {
+    throw new Error("Reconstructed preserved commits do not exactly match committed review resolutions");
+  }
+  const expectedPreservedAdaptations = review.preservedCommits
+    .filter((entry) => entry.resolution.action === "adapt")
+    .map((entry) => ({commit: entry.commit, replacementCommit: entry.resolution.commit}));
+  if (!isDeepStrictEqual(reconstructed.appliedPreservedAdaptations, expectedPreservedAdaptations)) {
+    throw new Error("Reconstructed preserved adaptations do not exactly match committed review resolutions");
+  }
+  for (const patch of review.patches) {
+    const ledgerPatch = ledgerByName.get(patch.name);
+    if (!ledgerPatch) throw new Error(`Committed ledger is missing reviewed patch ${patch.name}`);
+    if (patch.resolution.action === "adapt") {
+      if (ledgerPatch.appliedCommit !== patch.resolution.commit || ledgerPatch.disposition !== "active") {
+        throw new Error(`Committed ledger adaptation for ${patch.name} does not match the exact reviewed commit`);
+      }
+      if (!isAncestor(cwd, patch.resolution.commit, reconstructed.exactCandidateCommit)) {
+        throw new Error(`Exact adaptation ${patch.resolution.commit} for ${patch.name} is absent from candidate ancestry`);
+      }
+    } else if (patch.resolution.action === "drop") {
+      if (ledgerPatch.disposition !== "dropped" || ledgerPatch.appliedCommit !== undefined) {
+        throw new Error(`Committed ledger drop for ${patch.name} does not match the reviewed resolution`);
+      }
+    } else {
+      const retainedCommit = ledgerPatch.appliedCommit ?? ledgerPatch.commit;
+      if (ledgerPatch.disposition !== "active" || patch.commit !== retainedCommit) {
+        throw new Error(`Committed ledger retain for ${patch.name} does not match the exact reviewed commit`);
+      }
+      if (!isAncestor(cwd, retainedCommit, reconstructed.exactCandidateCommit)) {
+        throw new Error(`Exact retained commit ${retainedCommit} for ${patch.name} is absent from candidate ancestry`);
+      }
+    }
+  }
+  for (const entry of review.preservedCommits) {
+    if (entry.resolution.action === "adapt" &&
+        !isAncestor(cwd, entry.resolution.commit, reconstructed.exactCandidateCommit)) {
+      throw new Error(`Exact preserved adaptation ${entry.resolution.commit} is absent from candidate ancestry`);
+    }
+  }
+  return true;
+}
+
 export function verifySyncSourceReview({
   cwd,
   sourceCommit,
@@ -164,6 +237,7 @@ export function verifySyncSourceReview({
     if (!isDeepStrictEqual(reconstructed.advancedLedger, ledger)) {
       throw new Error("Committed patch ledger does not match the independently reconstructed ledger transition");
     }
+    verifyReconstructedPatchState({cwd, reconstructed, review, ledger});
     if (reconstructed.exactCandidateCommit !== source.exactCandidateCommit) {
       throw new Error("Publication source exact candidate ancestry does not match independent reconstruction");
     }
