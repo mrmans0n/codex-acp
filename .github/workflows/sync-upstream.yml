@@ -15,7 +15,7 @@ jobs:
   sync:
     if: ${{ github.repository == 'mrmans0n/codex-acp' }}
     runs-on: ubuntu-latest
-    timeout-minutes: 15
+    timeout-minutes: 20
     permissions:
       contents: write
       pull-requests: write
@@ -30,53 +30,89 @@ jobs:
       - uses: actions/setup-node@820762786026740c76f36085b0efc47a31fe5020
         with:
           node-version: "24"
-      - name: Select the newest stable tag
+      - name: Select and verify the newest stable release
         id: select
         run: |
+          set -o pipefail
           git fetch origin refs/heads/alas:refs/remotes/origin/alas
           git fetch --no-tags https://github.com/agentclientprotocol/codex-acp.git \
             '+refs/tags/*:refs/alas-upstream-tags/*' \
             '+refs/heads/main:refs/alas-upstream-main'
-          gh api --paginate --slurp "repos/$GITHUB_REPOSITORY/pulls?state=open&base=alas&per_page=100" \
+          gh api --paginate --slurp \
+            "repos/agentclientprotocol/codex-acp/releases?per_page=100" \
+            > /tmp/alas-upstream-releases.json
+          gh api --paginate --slurp \
+            "repos/$GITHUB_REPOSITORY/pulls?state=open&base=alas&per_page=100" \
             > /tmp/alas-open-pulls.json
-          node --input-type=module <<'NODE'
+          node --input-type=module 2> >(tee /tmp/alas-select-error.txt >&2) <<'NODE'
           import {execFileSync, spawnSync} from 'node:child_process';
           import {appendFileSync, readFileSync, writeFileSync} from 'node:fs';
-          import {selectUpstreamSync} from './scripts/select-upstream-sync.mjs';
+          import {
+            selectNewestStableRelease,
+            verifyUpstreamRelease,
+          } from './scripts/upstream-release.mjs';
 
-          const refs = execFileSync('git', ['for-each-ref', '--format=%(refname)', 'refs/alas-upstream-tags/'], {encoding: 'utf8'});
-          const tags = refs.trim().split('\n').filter(Boolean).map((ref) => {
-            const result = spawnSync('git', ['merge-base', '--is-ancestor', ref, 'origin/alas']);
-            if (result.status !== 0 && result.status !== 1) throw new Error(`Cannot check ancestry of ${ref}`);
-            return {name: ref.slice('refs/alas-upstream-tags/'.length), merged: result.status === 0};
-          });
+          const packageVersion = JSON.parse(readFileSync('package.json', 'utf8')).version;
+          const releases = JSON.parse(readFileSync('/tmp/alas-upstream-releases.json', 'utf8')).flat();
           const pulls = JSON.parse(readFileSync('/tmp/alas-open-pulls.json', 'utf8')).flat()
             .filter((pr) => pr.head.repo?.full_name === process.env.GITHUB_REPOSITORY);
           writeFileSync('/tmp/alas-sync-pulls.json', JSON.stringify(pulls));
-          const selection = selectUpstreamSync({tags, openHeads: pulls.map((pr) => pr.head.ref)});
-          if (selection) {
-            if (!selection.baseTag) throw new Error(`No merged stable base tag exists for ${selection.tag}`);
-            writeFileSync('/tmp/alas-sync-selection.json', JSON.stringify(selection));
-            appendFileSync(process.env.GITHUB_OUTPUT,
-              `tag=${selection.tag}\nbranch=${selection.branch}\nbase_tag=${selection.baseTag}\n`);
+          const release = selectNewestStableRelease({currentVersion: packageVersion, releases});
+          if (!release) {
+            writeFileSync('/tmp/alas-sync-selection.json', JSON.stringify({packageVersion, noUpdate: true}));
+            process.exit(0);
           }
+
+          const tag = release.tag_name;
+          const baseTag = `v${packageVersion}`;
+          const branch = `sync/upstream-${tag.slice(1)}`;
+          appendFileSync(process.env.GITHUB_OUTPUT,
+            `tag=${tag}\nbranch=${branch}\nbase_tag=${baseTag}\n`);
+          const tagRef = `refs/alas-upstream-tags/${tag}`;
+          const baseRef = `refs/alas-upstream-tags/${baseTag}`;
+          const tagCommit = execFileSync('git', ['rev-parse', `${tagRef}^{commit}`], {encoding: 'utf8'}).trim();
+          execFileSync('git', ['rev-parse', `${baseRef}^{commit}`], {encoding: 'utf8'});
+          const baseMerged = spawnSync('git', ['merge-base', '--is-ancestor', baseRef, 'origin/alas']);
+          if (baseMerged.status !== 0) {
+            throw new Error(`package.json upstream base ${baseTag} is not contained in origin/alas`);
+          }
+          const npmResponse = await fetch('https://registry.npmjs.org/@agentclientprotocol%2Fcodex-acp/latest');
+          if (!npmResponse.ok) throw new Error(`npm latest returned ${npmResponse.status}`);
+          const npm = await npmResponse.json();
+          const verified = verifyUpstreamRelease({tag, tagCommit, release, npm});
+          const stableSync = /^sync\/upstream-(0|[1-9]\d*)\.(0|[1-9]\d*)\.(0|[1-9]\d*)$/;
+          const staleHeads = [...new Set(pulls.map((pr) => pr.head.ref))]
+            .filter((head) => stableSync.test(head) && head !== branch);
+          writeFileSync('/tmp/alas-sync-selection.json', JSON.stringify({
+            tag,
+            baseTag,
+            branch,
+            staleHeads,
+            packageVersion,
+            verified,
+          }, null, 2));
           NODE
-      - name: Fetch sync branches
+      - name: Fetch canonical and stale sync branches
+        id: fetch
         if: ${{ steps.select.outputs.tag != '' }}
         env:
           BRANCH: ${{ steps.select.outputs.branch }}
         run: |
           : > /tmp/alas-sync-refs.txt
+          : > /tmp/alas-sync-canonical.txt
+          : > /tmp/alas-sync-exact.txt
           git ls-remote --heads origin "refs/heads/$BRANCH" > /tmp/alas-sync-canonical.txt
           if [ -s /tmp/alas-sync-canonical.txt ]; then
             git fetch origin "+refs/heads/$BRANCH:refs/remotes/origin/$BRANCH"
             printf 'origin/%s\n' "$BRANCH" >> /tmp/alas-sync-refs.txt
           fi
+          exact_branch="$BRANCH-exact"
+          git ls-remote --heads origin "refs/heads/$exact_branch" > /tmp/alas-sync-exact.txt
           jq -r '.staleHeads[]' /tmp/alas-sync-selection.json | while read -r head; do
             git fetch origin "+refs/heads/$head:refs/remotes/origin/$head"
             printf 'origin/%s\n' "$head" >> /tmp/alas-sync-refs.txt
           done
-      - name: Build and safely push the exact-tag candidate
+      - name: Build and safely push exact and integration candidates
         if: ${{ steps.select.outputs.tag != '' }}
         id: candidate
         env:
@@ -87,126 +123,193 @@ jobs:
           git config user.name "github-actions[bot]"
           git config user.email "github-actions[bot]@users.noreply.github.com"
           node --input-type=module <<'NODE'
-          import {appendFileSync, readFileSync, writeFileSync} from 'node:fs';
+          import {appendFileSync, existsSync, readFileSync, writeFileSync} from 'node:fs';
           import {
             buildSyncCandidate,
             pushSyncCandidate,
-            verifyRemoteSyncHeads,
           } from './scripts/sync-candidate.mjs';
 
-          const ledger = JSON.parse(readFileSync('docs/alas-downstream-patches.json', 'utf8'));
-          const syncRefs = readFileSync('/tmp/alas-sync-refs.txt', 'utf8').trim().split('\n').filter(Boolean);
           const branch = process.env.BRANCH;
-          const report = buildSyncCandidate({
-            cwd: process.cwd(),
-            tagRef: `refs/alas-upstream-tags/${process.env.TAG}`,
-            baseRef: `refs/alas-upstream-tags/${process.env.BASE_TAG}`,
-            upstreamRef: 'refs/alas-upstream-main',
-            alasRef: 'origin/alas',
+          let report = {
+            tag: process.env.TAG,
             branch,
-            syncRefs,
-            ledger,
-          });
-          const staleHeads = report.syncHeads.filter(({ref}) => ref !== `origin/${branch}`);
-          report.concurrentChanges = verifyRemoteSyncHeads({cwd: process.cwd(), syncHeads: staleHeads});
-          if (report.concurrentChanges.length > 0) report.manualReview = true;
-          const canonical = report.syncHeads.find(({ref}) => ref === `origin/${branch}`);
+            manualReview: true,
+            pushed: false,
+            exactPushed: false,
+          };
           try {
+            const ledger = JSON.parse(readFileSync('docs/alas-downstream-patches.json', 'utf8'));
+            const syncRefs = existsSync('/tmp/alas-sync-refs.txt')
+              ? readFileSync('/tmp/alas-sync-refs.txt', 'utf8').trim().split('\n').filter(Boolean)
+              : [];
+            report = buildSyncCandidate({
+              cwd: process.cwd(),
+              tagRef: `refs/alas-upstream-tags/${process.env.TAG}`,
+              baseRef: `refs/alas-upstream-tags/${process.env.BASE_TAG}`,
+              upstreamRef: 'refs/alas-upstream-main',
+              alasRef: 'origin/alas',
+              branch,
+              syncRefs,
+              ledger,
+              fromTag: process.env.BASE_TAG,
+              toTag: process.env.TAG,
+              reviewPath: 'docs/alas-sync-review.json',
+            });
+            const canonical = report.syncHeads.find(({ref}) => ref === `origin/${branch}`);
+            const exactExpected = existsSync('/tmp/alas-sync-exact.txt')
+              ? readFileSync('/tmp/alas-sync-exact.txt', 'utf8').trim().split(/\s+/)[0] ?? ''
+              : '';
+            pushSyncCandidate({
+              cwd: process.cwd(),
+              branch: report.exactBranch,
+              expectedRemoteSha: exactExpected,
+              ref: report.exactBranch,
+            });
+            report.exactPushed = true;
             pushSyncCandidate({
               cwd: process.cwd(),
               branch,
               expectedRemoteSha: canonical?.head ?? '',
+              ref: report.integrationCommit,
             });
             report.pushed = true;
           } catch (error) {
-            report.pushed = false;
-            report.pushError = error.message;
-            report.manualReview = true;
-          }
-          const lateChanges = verifyRemoteSyncHeads({cwd: process.cwd(), syncHeads: staleHeads});
-          if (lateChanges.length > 0) {
-            report.concurrentChanges = lateChanges;
+            report.fatalError = error instanceof Error ? error.message : String(error);
+            report.pushError = report.fatalError;
             report.manualReview = true;
           }
           writeFileSync('/tmp/alas-sync-report.json', `${JSON.stringify(report, null, 2)}\n`);
           appendFileSync(process.env.GITHUB_OUTPUT,
-            `manualReview=${report.manualReview}\npushed=${report.pushed}\n`);
+            `manualReview=${report.manualReview}\npushed=${report.pushed}\nexactPushed=${report.exactPushed}\n`);
+          if (report.fatalError) process.exitCode = 1;
           NODE
-      - name: Write sync report and PR body
-        if: ${{ steps.select.outputs.tag != '' }}
+      - name: Always write durable report and update the draft PR when possible
+        if: ${{ always() }}
         env:
           TAG: ${{ steps.select.outputs.tag }}
           BRANCH: ${{ steps.select.outputs.branch }}
+          SELECT_OUTCOME: ${{ steps.select.outcome }}
+          FETCH_OUTCOME: ${{ steps.fetch.outcome }}
+          CANDIDATE_OUTCOME: ${{ steps.candidate.outcome }}
+          MANUAL: ${{ steps.candidate.outputs.manualReview }}
+          PUSHED: ${{ steps.candidate.outputs.pushed }}
         run: |
-          test -n "$GITHUB_STEP_SUMMARY"
+          set -Eeuo pipefail
+          trap 'status=$?; if [ "$status" -ne 0 ]; then printf "\nPR/report update failed with status %s.\n" "$status" >> "$GITHUB_STEP_SUMMARY"; fi' EXIT
           node --input-type=module <<'NODE'
-          import {readFileSync, writeFileSync, appendFileSync} from 'node:fs';
-          const report = JSON.parse(readFileSync('/tmp/alas-sync-report.json', 'utf8'));
+          import {appendFileSync, existsSync, readFileSync, writeFileSync} from 'node:fs';
+          const readJson = (path, fallback) => existsSync(path)
+            ? JSON.parse(readFileSync(path, 'utf8'))
+            : fallback;
+          const selection = readJson('/tmp/alas-sync-selection.json', {});
+          const report = readJson('/tmp/alas-sync-report.json', {});
+          const tag = process.env.TAG || selection.tag || 'unknown';
+          const branch = process.env.BRANCH || selection.branch || '';
           const lines = [
-            `## Stable upstream sync: ${process.env.TAG}`,
+            `## Stable upstream sync: ${tag}`,
             '',
-            `Candidate branch: \`${process.env.BRANCH}\``,
-            `Exact stable base: \`${report.tagCommit}\``,
-            `Candidate commit: \`${report.candidateCommit}\``,
-            '',
-            '### Downstream patch classification',
-            'Possible classifications: unaffected, absorbed, overlap.',
-            ...report.classifications.map((patch) =>
-              `- **${patch.name}**: **${patch.classification}**${patch.overlappingFiles.length ? ` (${patch.overlappingFiles.join(', ')})` : ''}`),
+            `Selection: **${process.env.SELECT_OUTCOME}**`,
+            `Branch fetch: **${process.env.FETCH_OUTCOME || 'skipped'}**`,
+            `Candidate: **${process.env.CANDIDATE_OUTCOME || 'skipped'}**`,
           ];
-          if (report.conflicts.length) {
-            lines.push('', '### conflict', ...report.conflicts.map((item) => `- ${item.kind}: \`${item.commit}\``));
+          if (selection.noUpdate) lines.push('', `No stable release newer than package.json ${selection.packageVersion}.`);
+          if (branch) lines.push('', `Integration PR branch: \`${branch}\``);
+          if (report.exactBranch) lines.push(`Exact-tag branch: \`${report.exactBranch}\``);
+          if (report.tagCommit) lines.push(`Exact stable commit: \`${report.tagCommit}\``);
+          if (report.exactCandidateCommit) lines.push(`Exact candidate: \`${report.exactCandidateCommit}\``);
+          if (report.integrationCommit) lines.push(`Integration merge: \`${report.integrationCommit}\``);
+          if (report.classifications?.length) {
+            lines.push('', '### Recomputed patch classifications',
+              'Possible classifications: unaffected, absorbed, overlap.', ...report.classifications.map((patch) =>
+              `- **${patch.name}**: **${patch.classification}**${patch.overlappingFiles.length ? ` (${patch.overlappingFiles.join(', ')})` : ''}`));
           }
-          if (report.workflowChanges.length) {
-            lines.push('', '### workflowChanges', ...report.workflowChanges.map((path) => `- \`${path}\``));
+          if (report.syncReview?.patches?.length) {
+            lines.push('', '### Sync review resolutions', ...report.syncReview.patches.map((patch) =>
+              `- **${patch.name}**: ${patch.resolution.action ?? 'unresolved'}${patch.resolution.automatic ? ' (automatic)' : ' (manual)'}`));
           }
-          if (report.unsupportedMergeCommits.length) {
-            lines.push('', '### Sync-branch merge commits requiring review',
+          if (report.syncReviewError) lines.push('', '### Sync review blocker', report.syncReviewError);
+          if (report.excludedUpstreamLaterEquivalents?.length) {
+            lines.push('', '### Excluded upstream-later equivalents', ...report.excludedUpstreamLaterEquivalents.map((item) =>
+              `- downstream \`${item.commit}\` equals upstream/main \`${item.upstreamCommit}\` but is absent from the target stable tag`));
+          }
+          if (report.preservedSyncCommits?.length) {
+            lines.push('', '### Preserved canonical same-version edits (manual review: preserved-canonical-sync-commits)',
+              ...report.preservedSyncCommits.map((commit) => `- \`${commit}\``));
+          }
+          if (report.staleSyncHeads?.length) {
+            lines.push('', '### Stale sync heads reported but not replayed', ...report.staleSyncHeads.map((head) =>
+              `- \`${head.ref}\` at \`${head.head}\`: ${head.commits.length} non-upstream commit(s)`));
+          }
+          if (report.unsupportedMergeCommits?.length) {
+            lines.push('', '### Canonical sync merge commits requiring manual review',
               ...report.unsupportedMergeCommits.map((commit) => `- \`${commit}\``));
           }
-          if (report.missingLedgerPatches.length) {
-            lines.push('', '### Ledger patches missing from origin/alas',
-              ...report.missingLedgerPatches.map((name) => `- **${name}**`));
-          }
-          if (report.concurrentChanges.length) {
-            lines.push('', '### Concurrent sync-branch changes', ...report.concurrentChanges.map((change) =>
-              `- \`${change.branch}\`: expected \`${change.expected}\`, found \`${change.actual}\``));
-          }
-          if (report.pushError) lines.push('', '### Push failure', '```', report.pushError, '```');
-          lines.push('', report.manualReview
-            ? '**manualReview required. This PR must remain draft and this workflow fails closed.**'
-            : 'All patches are unaffected; CI is requested automatically. Publication remains manual and environment-gated.');
+          if (report.workflowChanges?.length) lines.push('', '### workflowChanges (upstream workflow changes)', ...report.workflowChanges.map((path) => `- \`${path}\``));
+          if (report.conflicts?.length) lines.push('', '### conflict', ...report.conflicts.map((item) => `- ${item.kind}: \`${item.commit}\``));
+          if (report.missingLedgerPatches?.length) lines.push('', '### Missing ledger patches', ...report.missingLedgerPatches.map((name) => `- **${name}**`));
+          const errors = [
+            existsSync('/tmp/alas-select-error.txt') ? readFileSync('/tmp/alas-select-error.txt', 'utf8').trim() : '',
+            report.pushError || '',
+            report.fatalError || '',
+          ].filter(Boolean);
+          if (errors.length) lines.push('', '### Failure details', '```text', ...errors, '```');
+          const blocked = process.env.SELECT_OUTCOME === 'failure' ||
+            process.env.FETCH_OUTCOME === 'failure' ||
+            process.env.CANDIDATE_OUTCOME === 'failure' ||
+            report.manualReview || (tag !== 'unknown' && !selection.noUpdate && !report.pushed);
+          lines.push('', blocked
+            ? '**Manual review required. The integration PR must remain draft.**'
+            : selection.noUpdate
+              ? 'No synchronization was required.'
+              : 'The exact candidate and integration branch passed automated maintenance gates.');
           const body = `${lines.join('\n')}\n`;
           writeFileSync('/tmp/alas-sync-pr.md', body);
           appendFileSync(process.env.GITHUB_STEP_SUMMARY, body);
           NODE
-      - name: Create or update persistent sync PR
-        if: ${{ steps.select.outputs.tag != '' && steps.candidate.outputs.pushed == 'true' }}
-        env:
-          TAG: ${{ steps.select.outputs.tag }}
-          BRANCH: ${{ steps.select.outputs.branch }}
-          MANUAL: ${{ steps.candidate.outputs.manualReview }}
-        run: |
+
+          if [ -z "${BRANCH:-}" ] || [ ! -f /tmp/alas-sync-pulls.json ]; then
+            exit 0
+          fi
           pr="$(jq -r --arg branch "$BRANCH" '[.[] | select(.head.ref == $branch)][0].number // empty' /tmp/alas-sync-pulls.json)"
           draft="$(jq -r --arg branch "$BRANCH" '[.[] | select(.head.ref == $branch)][0].draft // false' /tmp/alas-sync-pulls.json)"
+          blocked=true
+          if [ "$SELECT_OUTCOME" = success ] && [ "${FETCH_OUTCOME:-skipped}" != failure ] \
+            && [ "${CANDIDATE_OUTCOME:-skipped}" = success ] && [ "${MANUAL:-true}" != true ] \
+            && [ "${PUSHED:-false}" = true ]; then
+            blocked=false
+          fi
           if [ -n "$pr" ]; then
             gh pr edit "$pr" --repo "$GITHUB_REPOSITORY" \
               --title "chore: sync upstream $TAG" --body-file /tmp/alas-sync-pr.md
-            if [ "$MANUAL" = true ] && [ "$draft" != true ]; then
+            if [ "$blocked" = true ] && [ "$draft" != true ]; then
               gh pr ready "$pr" --repo "$GITHUB_REPOSITORY" --undo
-            elif [ "$MANUAL" != true ] && [ "$draft" = true ]; then
+            elif [ "$blocked" = false ] && [ "$draft" = true ]; then
               gh pr ready "$pr" --repo "$GITHUB_REPOSITORY"
             fi
-          elif [ "$MANUAL" = true ]; then
-            gh pr create --repo "$GITHUB_REPOSITORY" --base alas --head "$BRANCH" --draft \
-              --title "chore: sync upstream $TAG" --body-file /tmp/alas-sync-pr.md
-          else
-            gh pr create --repo "$GITHUB_REPOSITORY" --base alas --head "$BRANCH" \
-              --title "chore: sync upstream $TAG" --body-file /tmp/alas-sync-pr.md
+          elif [ "${PUSHED:-false}" = true ]; then
+            if [ "$blocked" = true ]; then
+              gh pr create --repo "$GITHUB_REPOSITORY" --base alas --head "$BRANCH" --draft \
+                --title "chore: sync upstream $TAG" --body-file /tmp/alas-sync-pr.md
+            else
+              gh pr create --repo "$GITHUB_REPOSITORY" --base alas --head "$BRANCH" \
+                --title "chore: sync upstream $TAG" --body-file /tmp/alas-sync-pr.md
+            fi
           fi
-          gh workflow run ci.yml --repo "$GITHUB_REPOSITORY" --ref "$BRANCH"
-      - name: Fail closed when manual review is required
-        if: ${{ steps.select.outputs.tag != '' && (steps.candidate.outputs.manualReview == 'true' || steps.candidate.outputs.pushed != 'true') }}
+          if [ "$blocked" = false ]; then
+            gh workflow run ci.yml --repo "$GITHUB_REPOSITORY" --ref "$BRANCH"
+          fi
+      - name: Fail closed when synchronization is blocked
+        if: ${{ always() && steps.select.outputs.tag != '' }}
+        env:
+          SELECT_OUTCOME: ${{ steps.select.outcome }}
+          FETCH_OUTCOME: ${{ steps.fetch.outcome }}
+          CANDIDATE_OUTCOME: ${{ steps.candidate.outcome }}
+          MANUAL: ${{ steps.candidate.outputs.manualReview }}
+          PUSHED: ${{ steps.candidate.outputs.pushed }}
         run: |
-          echo "Manual review is required; see the job summary and persistent draft PR."
-          exit 1
+          if [ "$SELECT_OUTCOME" != success ] || [ "${FETCH_OUTCOME:-skipped}" = failure ] \
+            || [ "${CANDIDATE_OUTCOME:-skipped}" != success ] || [ "${MANUAL:-true}" = true ] \
+            || [ "${PUSHED:-false}" != true ]; then
+            echo "Manual review is required; see the durable job summary and draft PR."
+            exit 1
+          fi
