@@ -77,12 +77,11 @@ test("sync reports stale heads without replay and marks preserved canonical edit
   assert.match(sync, /preserved-canonical-sync-commits/);
 });
 
-test("sync commits a review artifact and publish recomputes and verifies it", () => {
+test("sync commits provenance artifacts and publish independently reconstructs and verifies them", () => {
   for (const workflow of [sync, publish]) assert.match(workflow, /alas-sync-review\.json/);
-  assert.match(publish, /classifyDownstreamPatches/);
-  assert.match(publish, /verifySyncReviewArtifact/);
-  assert.match(publish, /baseRef:\s*result\.reviewBaseTag/);
-  assert.match(publish, /fromTag:\s*result\.reviewBaseTag/);
+  assert.match(publish, /validatePatchLedger/);
+  assert.match(publish, /verifySyncSourceReview/);
+  assert.match(publish, /verify-sync-source-review\.mjs/);
   assert.doesNotMatch(publish, /baseRef:\s*review\.fromTag|fromTag:\s*review\.fromTag/);
 });
 
@@ -106,7 +105,7 @@ test("e2e and upstream publish visibly waive live e2e when OPENAI_API_KEY is abs
 test("publish verifies the declared stable tag against the exact upstream-main merge-base", () => {
   assert.match(publish, /upstream_tag:/);
   assert.match(publish, /refs\/alas-upstream-main/);
-  assert.match(publish, /verify-alas-source\.mjs/);
+  assert.match(publish, /verify-sync-source-review\.mjs/);
   assert.doesNotMatch(publish, /merge-base --is-ancestor/);
   assert.match(publish, /environment: npm/);
   assert.match(publish, /id-token: write/);

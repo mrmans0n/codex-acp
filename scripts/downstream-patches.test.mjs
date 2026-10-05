@@ -6,6 +6,7 @@ import {join} from "node:path";
 import {test} from "vitest";
 import {
   classifyDownstreamPatches,
+  KNOWN_PATCH_IDENTITIES,
   validatePatchLedger,
 } from "./downstream-patches.mjs";
 import {verifySyncReviewArtifact} from "./sync-review.mjs";
@@ -48,7 +49,8 @@ function fixture() {
   const target = git(cwd, "rev-parse", "HEAD");
 
   const ledger = {
-    schemaVersion: 1,
+    schemaVersion: 2,
+    baseTag: "v1.0.0",
     patches: [
       {name: "absorbed", commit: absorbed, upstreamPr: 1, files: ["absorbed.txt"], tests: ["absorbed.test.ts"]},
       {name: "overlap", commit: overlap, upstreamPr: 2, files: ["overlap.txt"], tests: ["overlap.test.ts"]},
@@ -66,6 +68,7 @@ test("classifies downstream patches by stable patch equivalence before path over
       ledger: f.ledger,
       baseRef: f.base,
       targetRef: f.target,
+      expectedPatchIdentities: f.ledger.patches,
     });
     assert.deepEqual(result.map(({name, classification}) => ({name, classification})), [
       {name: "absorbed", classification: "absorbed"},
@@ -85,9 +88,10 @@ test("recognizes an equivalent patch already present before the previous stable 
     const baseAfterEquivalent = upstreamCommits[0];
     const result = classifyDownstreamPatches({
       cwd: f.cwd,
-      ledger: {schemaVersion: 1, patches: [f.ledger.patches[0]]},
+      ledger: {schemaVersion: 2, baseTag: "v1.0.0", patches: [f.ledger.patches[0]]},
       baseRef: baseAfterEquivalent,
       targetRef: f.target,
+      expectedPatchIdentities: [f.ledger.patches[0]],
     });
     assert.equal(result[0].classification, "absorbed");
   } finally {
@@ -95,9 +99,78 @@ test("recognizes an equivalent patch already present before the previous stable 
   }
 });
 
+test("classifies the currently applied adaptation while retaining the anchored original identity", () => {
+  const f = fixture();
+  try {
+    git(f.cwd, "checkout", "downstream");
+    const original = f.ledger.patches[0].commit;
+    const adapted = commitFile(f.cwd, "absorbed.txt", "adapted downstream\n", "adapt absorbed patch");
+    const ledger = {
+      ...f.ledger,
+      patches: f.ledger.patches.map((patch, index) => index === 0
+        ? {...patch, appliedCommit: adapted, retiredCommits: [original], disposition: "active"}
+        : patch),
+    };
+    const [result] = classifyDownstreamPatches({
+      cwd: f.cwd,
+      ledger,
+      baseRef: f.base,
+      targetRef: f.target,
+      expectedPatchIdentities: f.ledger.patches,
+    });
+    assert.equal(result.originalCommit, original);
+    assert.equal(result.commit, adapted);
+    assert.equal(result.classification, "overlap");
+  } finally {
+    rmSync(f.root, {recursive: true, force: true});
+  }
+});
+
 test("requires a versioned ledger with patch identity, upstream PR field, files, and tests", () => {
-  assert.throws(() => validatePatchLedger({schemaVersion: 1, patches: [{name: "incomplete"}]}),
+  assert.throws(() => validatePatchLedger(
+    {schemaVersion: 2, baseTag: "v1.0.0", patches: [{name: "incomplete"}]},
+    {expectedPatchIdentities: [{name: "incomplete", commit: "1".repeat(40)}]},
+  ),
     /commit.*upstreamPr.*files.*tests/s);
+});
+
+test("anchors the production ledger to the two known functional patch identities", () => {
+  const ledger = JSON.parse(readFileSync(
+    new URL("../docs/alas-downstream-patches.json", import.meta.url),
+    "utf8",
+  ));
+  assert.deepEqual(
+    ledger.patches.map(({name, commit}) => ({name, commit})),
+    KNOWN_PATCH_IDENTITIES,
+  );
+  assert.deepEqual(validatePatchLedger(ledger), ledger);
+});
+
+test("rejects duplicate, missing, renamed, swapped, and unexpected functional patch identities", () => {
+  const ledger = JSON.parse(readFileSync(
+    new URL("../docs/alas-downstream-patches.json", import.meta.url),
+    "utf8",
+  ));
+  const cases = [
+    {...ledger, patches: [ledger.patches[0], ledger.patches[0]]},
+    {...ledger, patches: [ledger.patches[0]]},
+    {...ledger, patches: [...ledger.patches].reverse()},
+    {...ledger, patches: ledger.patches.map((patch, index) => index === 0 ? {...patch, name: "renamed"} : patch)},
+    {...ledger, patches: [
+      {...ledger.patches[0], commit: ledger.patches[1].commit},
+      {...ledger.patches[1], commit: ledger.patches[0].commit},
+    ]},
+    {...ledger, patches: [...ledger.patches, {
+      name: "invented-functional-patch",
+      commit: "f".repeat(40),
+      upstreamPr: null,
+      files: ["invented.ts"],
+      tests: ["invented.test.ts"],
+    }]},
+  ];
+  for (const candidate of cases) {
+    assert.throws(() => validatePatchLedger(candidate), /known functional patch|duplicate|missing|unexpected|identity/i);
+  }
 });
 
 test("the committed ledger matches the exact downstream patch commits", () => {
