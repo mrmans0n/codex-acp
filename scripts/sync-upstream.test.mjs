@@ -7,6 +7,7 @@ const root = new URL("..", import.meta.url).pathname;
 const workflowsDir = join(root, ".github/workflows");
 const sync = readFileSync(join(workflowsDir, "sync-upstream.yml"), "utf8");
 const publish = readFileSync(join(workflowsDir, "publish-alas.yml"), "utf8");
+const ci = readFileSync(join(workflowsDir, "ci.yml"), "utf8");
 const e2e = readFileSync(join(workflowsDir, "e2e.yml"), "utf8");
 const upstreamPublish = readFileSync(join(workflowsDir, "publish.yml"), "utf8");
 const checkoutSha = "3d3c42e5aac5ba805825da76410c181273ba90b1";
@@ -21,6 +22,10 @@ test("pins checkout and setup-node to the reviewed full SHAs in every workflow",
       assert.equal(match[2], expected, `${name}: ${match[1]}`);
     }
   }
+});
+
+test("CI fetches full history and tags required by the committed patch ledger tests", () => {
+  assert.match(ci, /actions\/checkout@[^\n]+\n\s+with:\n\s+fetch-depth:\s*0/);
 });
 
 test("pins create-github-app-token v3 to the reviewed official full SHA", () => {
