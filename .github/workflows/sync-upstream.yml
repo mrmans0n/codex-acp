@@ -229,8 +229,20 @@ jobs:
           }
           if (report.syncReviewError) lines.push('', '### Sync review blocker', report.syncReviewError);
           if (report.excludedUpstreamLaterEquivalents?.length) {
-            lines.push('', '### Excluded upstream-later equivalents', ...report.excludedUpstreamLaterEquivalents.map((item) =>
+            lines.push('', '### Excluded upstream-later equivalents from protected alas', ...report.excludedUpstreamLaterEquivalents.map((item) =>
               `- downstream \`${item.commit}\` equals upstream/main \`${item.upstreamCommit}\` but is absent from the target stable tag`));
+          }
+          if (report.excludedCanonicalUpstreamEquivalents?.length) {
+            lines.push('', '### Excluded canonical sync equivalents already in the target stable tag',
+              'Manual review: excluded-canonical-sync-upstream-equivalents.',
+              ...report.excludedCanonicalUpstreamEquivalents.map((item) =>
+                `- canonical \`${item.commit}\` equals target stable commit \`${item.upstreamCommit}\``));
+          }
+          if (report.excludedCanonicalUpstreamLaterEquivalents?.length) {
+            lines.push('', '### Excluded canonical sync upstream-later equivalents',
+              'Manual review: excluded-canonical-sync-upstream-later-equivalents.',
+              ...report.excludedCanonicalUpstreamLaterEquivalents.map((item) =>
+                `- canonical \`${item.commit}\` equals upstream/main \`${item.upstreamCommit}\` but is absent from the target stable tag`));
           }
           if (report.preservedSyncCommits?.length) {
             lines.push('', '### Preserved canonical same-version edits (manual review: preserved-canonical-sync-commits)',

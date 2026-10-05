@@ -227,6 +227,8 @@ export function buildSyncCandidate({
   const appliedSyncCommits = [];
   const excludedUpstreamEquivalents = [];
   const excludedUpstreamLaterEquivalents = [];
+  const excludedCanonicalUpstreamEquivalents = [];
+  const excludedCanonicalUpstreamLaterEquivalents = [];
   const conflicts = [];
   const seenLedgerPatches = new Set();
   for (const commit of downstreamCommits) {
@@ -249,18 +251,30 @@ export function buildSyncCandidate({
     appliedDownstreamCommits.push(commit);
     if (patch) appliedPatches.push(patch.name);
   }
-  const missingLedgerPatches = classifications
-    .filter((patch) => patch.classification === "unaffected" && !seenLedgerPatches.has(patch.name))
-    .map((patch) => patch.name);
   if (conflicts.length === 0) {
     for (const commit of preserved) {
+      const id = patchId(cwd, commit);
+      const patch = id ? ledgerByPatchId.get(id) : undefined;
+      if (patch) {
+        seenLedgerPatches.add(patch.name);
+        if (patch.classification !== "unaffected" &&
+            reviewByName.get(patch.name)?.resolution?.action !== "retain") continue;
+      } else if (id && upstreamPatchIds.has(id)) {
+        const equivalent = {commit, upstreamCommit: upstreamPatchIds.get(id)};
+        if (targetPatchIds.has(id)) excludedCanonicalUpstreamEquivalents.push(equivalent);
+        else excludedCanonicalUpstreamLaterEquivalents.push(equivalent);
+        continue;
+      }
       if (!cherryPick(cwd, commit)) {
-        conflicts.push({commit, kind: "canonical-sync-review"});
+        conflicts.push({commit, kind: "canonical-sync-review", ...(patch ? {patch: patch.name} : {})});
         break;
       }
       appliedSyncCommits.push(commit);
     }
   }
+  const missingLedgerPatches = classifications
+    .filter((patch) => patch.classification === "unaffected" && !seenLedgerPatches.has(patch.name))
+    .map((patch) => patch.name);
 
   const workflowChanges = lines(git(cwd, ["diff", "--name-only", baseRef, tagRef, "--", ".github/workflows"]));
   if (workflowChanges.length > 0) restoreWorkflowTree(cwd, alasRef);
@@ -285,6 +299,12 @@ export function buildSyncCandidate({
   if (missingLedgerPatches.length > 0) manualReviewReasons.push("missing-ledger-patches");
   if (unsupportedMergeCommits.length > 0) manualReviewReasons.push("canonical-sync-merge-commits");
   if (appliedSyncCommits.length > 0) manualReviewReasons.push("preserved-canonical-sync-commits");
+  if (excludedCanonicalUpstreamEquivalents.length > 0) {
+    manualReviewReasons.push("excluded-canonical-sync-upstream-equivalents");
+  }
+  if (excludedCanonicalUpstreamLaterEquivalents.length > 0) {
+    manualReviewReasons.push("excluded-canonical-sync-upstream-later-equivalents");
+  }
 
   return {
     tagCommit,
@@ -298,6 +318,8 @@ export function buildSyncCandidate({
     appliedDownstreamCommits,
     excludedUpstreamEquivalents,
     excludedUpstreamLaterEquivalents,
+    excludedCanonicalUpstreamEquivalents,
+    excludedCanonicalUpstreamLaterEquivalents,
     syncReview,
     syncReviewError,
     missingLedgerPatches,
@@ -326,6 +348,9 @@ export function verifyRemoteSyncHeads({cwd, syncHeads, remote = "origin"}) {
 export function pushSyncCandidate({cwd, branch, expectedRemoteSha = "", remote = "origin", ref = "HEAD"}) {
   if (branch === "alas" || branch === "refs/heads/alas") {
     throw new Error("Refusing to push a sync candidate directly to protected alas");
+  }
+  if (!branch.startsWith("sync/")) {
+    throw new Error(`Refusing to force-update branch outside the owned sync namespace: ${branch}`);
   }
   const lease = `--force-with-lease=refs/heads/${branch}:${expectedRemoteSha}`;
   try {
