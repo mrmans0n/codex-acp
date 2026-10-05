@@ -29,17 +29,30 @@ function publishedManifests(published) {
   throw new Error("published data must be an array or npm packument object");
 }
 
-export function selectAlasVersion({ upstreamVersion, sourceCommit, published }) {
+export function selectAlasVersion({ upstreamVersion, upstreamCommit, sourceCommit, published }) {
   const base = stableVersion(upstreamVersion);
   if (!FULL_COMMIT.test(String(sourceCommit ?? ""))) {
     throw new Error("sourceCommit must be a full 40-character git commit");
   }
 
   const manifests = publishedManifests(published);
-  const existing = manifests.find((manifest) => manifest?.alasDownstream?.sourceCommit === sourceCommit);
-  if (existing) return { version: existing.version, alreadyPublished: true };
-
   const versionPattern = new RegExp(`^${base.replaceAll(".", "\\.")}-alas\\.(0|[1-9]\\d*)$`);
+  const existingMatches = manifests.filter((manifest) => manifest?.alasDownstream?.sourceCommit === sourceCommit);
+  if (existingMatches.length > 1) {
+    throw new Error(`Source commit ${sourceCommit} is already published ambiguously under multiple versions`);
+  }
+  const [existing] = existingMatches;
+  if (existing) {
+    const metadata = existing.alasDownstream ?? {};
+    if (!versionPattern.test(existing.version ?? "") ||
+        metadata.upstreamVersion !== base ||
+        metadata.upstreamCommit !== upstreamCommit ||
+        metadata.sourceCommit !== sourceCommit) {
+      throw new Error(`Source commit ${sourceCommit} is already published with metadata mismatch`);
+    }
+    return { version: existing.version, alreadyPublished: true };
+  }
+
   let highestRevision = 0;
   for (const manifest of manifests) {
     const version = typeof manifest === "string" ? manifest : manifest?.version;
@@ -63,6 +76,7 @@ export function prepareAlasPackage(packageJson, metadata) {
   const upstreamVersion = stableVersion(metadata?.upstreamVersion);
   const { version } = selectAlasVersion({
     upstreamVersion,
+    upstreamCommit: metadata.upstreamCommit,
     sourceCommit: metadata.sourceCommit,
     published: metadata.published,
   });
@@ -104,6 +118,7 @@ function main() {
   writeFileSync(packagePath, `${JSON.stringify(prepared, null, 2)}\n`);
   const { alreadyPublished } = selectAlasVersion({
     upstreamVersion: process.env.ALAS_UPSTREAM_VERSION,
+    upstreamCommit: process.env.ALAS_UPSTREAM_COMMIT,
     sourceCommit: process.env.ALAS_SOURCE_COMMIT,
     published,
   });
