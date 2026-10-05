@@ -46,7 +46,7 @@ jobs:
       # Generating a GitHub token, so that PRs and tags created by
       # the release-please-action can trigger actions workflows.
       - name: Generate GitHub token
-        uses: actions/create-github-app-token@v3
+        uses: actions/create-github-app-token@bcd2ba49218906704ab6c1aa796996da409d3eb1 # v3
         id: generate-token
         with:
           app-id: ${{ secrets.RELEASE_PLZ_APP_ID }}
@@ -71,9 +71,9 @@ jobs:
   # rather than `needs` alone decides whether a release is happening, because on
   # workflow_dispatch the release-please job is skipped.
   #
-  # Deliberately not in the `release` environment: OPENAI_API_KEY is a repository
-  # secret, so this needs nothing from it, and staying out keeps the job off the
-  # environment's deployment branch policy.
+  # Deliberately not in the `release` environment: when the repository-level
+  # OPENAI_API_KEY is unavailable, the job records a visible E2E waiver instead
+  # of borrowing a release-environment secret or silently running without one.
   verify:
     needs: [release-please]
     if: ${{ always() && ((github.event_name == 'workflow_dispatch' && inputs.channel == 'stable' && inputs.publish_npm) || needs.release-please.outputs.release_created == 'true') }}
@@ -85,14 +85,23 @@ jobs:
     timeout-minutes: 40
     permissions:
       contents: read
+    env:
+      OPENAI_API_KEY: ${{ secrets.OPENAI_API_KEY }}
     steps:
-      - uses: actions/checkout@v7
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1
         with:
           ref: ${{ github.event_name == 'workflow_dispatch' && inputs.ref || github.ref }}
-      - uses: actions/setup-node@v7
+      - uses: actions/setup-node@820762786026740c76f36085b0efc47a31fe5020
         with:
           node-version: "24"
+      - name: Record missing-key E2E waiver
+        if: ${{ env.OPENAI_API_KEY == '' }}
+        run: |
+          echo "::notice::E2E waived because OPENAI_API_KEY is not configured."
+          echo "## E2E waived" >> "$GITHUB_STEP_SUMMARY"
+          echo "OPENAI_API_KEY is absent, so npm run test:e2e was not run." >> "$GITHUB_STEP_SUMMARY"
       - name: Configure sandboxing
+        if: ${{ env.OPENAI_API_KEY != '' }}
         timeout-minutes: 15
         run: |
           # Acquire::*::Timeout only guards a single socket operation, so a mirror
@@ -128,11 +137,10 @@ jobs:
       - run: npm run typecheck
       - run: npm test
       - name: Run e2e tests
+        if: ${{ env.OPENAI_API_KEY != '' }}
         # The suite drives a live model, so a wedged turn hangs instead of
         # failing. Bound it well above the ~3min happy path.
         timeout-minutes: 15
-        env:
-          OPENAI_API_KEY: ${{ secrets.OPENAI_API_KEY }}
         run: npm run test:e2e
 
   publish-npm:
@@ -148,11 +156,11 @@ jobs:
     outputs:
       version: ${{ steps.publish.outputs.version }}
     steps:
-      - uses: actions/checkout@v7
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1
         with:
           ref: ${{ github.event_name == 'workflow_dispatch' && inputs.ref || github.ref }}
       # Setup .npmrc file to publish to npm
-      - uses: actions/setup-node@v7
+      - uses: actions/setup-node@820762786026740c76f36085b0efc47a31fe5020
         with:
           node-version: "24"
           registry-url: "https://registry.npmjs.org"
@@ -199,7 +207,7 @@ jobs:
       group: publish-npm-preview
       cancel-in-progress: false
     steps:
-      - uses: actions/checkout@v7
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1
         with:
           # Publish the exact pushed commit, or the explicitly requested manual ref.
           ref: ${{ github.event_name == 'workflow_dispatch' && inputs.ref || github.sha }}
@@ -208,7 +216,7 @@ jobs:
           # shallow-clone tag caveat.
           fetch-depth: 0
       # Setup .npmrc file to publish to npm
-      - uses: actions/setup-node@v7
+      - uses: actions/setup-node@820762786026740c76f36085b0efc47a31fe5020
         with:
           node-version: "24"
           registry-url: "https://registry.npmjs.org"
@@ -334,7 +342,7 @@ jobs:
           exit 1
 
       - name: Generate token scoped to the registry repo
-        uses: actions/create-github-app-token@v3
+        uses: actions/create-github-app-token@bcd2ba49218906704ab6c1aa796996da409d3eb1 # v3
         id: registry-token
         with:
           app-id: ${{ secrets.REGISTRY_UPDATER_APP_ID }}

@@ -1,0 +1,56 @@
+{
+  "schemaVersion": 2,
+  "fromTag": "v2.1.0",
+  "toTag": "v2.1.1",
+  "toCommit": "68d7d2d5ddfc0ed5746f9f6130892dda685e65dd",
+  "canonicalHead": null,
+  "patches": [
+    {
+      "name": "goal-opt-in",
+      "originalCommit": "97aa595ba69c62e896375ea2442358d45d66af74",
+      "commit": "97aa595ba69c62e896375ea2442358d45d66af74",
+      "appliedCommit": null,
+      "disposition": "active",
+      "patchId": "64e57b3b5c0f2d9e33b97e1b0072a53e8e19faf7",
+      "classification": "overlap",
+      "overlappingFiles": [
+        "docs/air-extensions.md",
+        "src/CodexAcpServer.ts",
+        "src/CodexEventHandler.ts"
+      ],
+      "resolution": {
+        "action": "retain",
+        "automatic": false,
+        "rationale": "The v2.1.1 changes on these paths handle legacy AIR answers, imported attachments, and readable service errors; they do not replace the downstream goal capability opt-in contract.",
+        "tests": [
+          "src/__tests__/CodexACPAgent/initialize.test.ts",
+          "src/__tests__/CodexACPAgent/thread-goal-events.test.ts"
+        ]
+      }
+    },
+    {
+      "name": "async-tasks-opt-in",
+      "originalCommit": "16817016d25a9eed9f3dc7cd1cbdf446569e179d",
+      "commit": "16817016d25a9eed9f3dc7cd1cbdf446569e179d",
+      "appliedCommit": null,
+      "disposition": "active",
+      "patchId": "fc7312b1b446af367c92a5bd9dbe52a9e7653132",
+      "classification": "overlap",
+      "overlappingFiles": [
+        "src/CodexAcpServer.ts"
+      ],
+      "resolution": {
+        "action": "retain",
+        "automatic": false,
+        "rationale": "The v2.1.1 CodexAcpServer change preserves imported attachments and does not implement provider-neutral async task capability negotiation or task lifecycle handling.",
+        "tests": [
+          "src/__tests__/CodexACPAgent/async-tasks.test.ts",
+          "src/__tests__/CodexACPAgent/initialize.test.ts",
+          "src/__tests__/tool-calls/tool-call-contract.test.ts"
+        ]
+      }
+    }
+  ],
+  "preservedCommits": [],
+  "resolved": true
+}

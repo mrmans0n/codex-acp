@@ -1,0 +1,61 @@
+{
+  "schemaVersion": 2,
+  "baseTag": "v2.1.1",
+  "patches": [
+    {
+      "name": "goal-opt-in",
+      "commit": "97aa595ba69c62e896375ea2442358d45d66af74",
+      "upstreamPr": 583,
+      "files": [
+        "docs/air-extensions.md",
+        "src/CodexAcpServer.ts",
+        "src/CodexEventHandler.ts",
+        "src/ThreadGoalSnapshot.ts",
+        "src/__tests__/CodexACPAgent/initialize.test.ts",
+        "src/__tests__/CodexACPAgent/thread-goal-events.test.ts",
+        "src/tool-calls/ClientCapabilities.ts"
+      ],
+      "tests": [
+        "src/__tests__/CodexACPAgent/initialize.test.ts",
+        "src/__tests__/CodexACPAgent/thread-goal-events.test.ts"
+      ],
+      "disposition": "active",
+      "retiredCommits": [],
+      "lastResolution": {
+        "fromTag": "v2.1.0",
+        "toTag": "v2.1.1",
+        "originalCommit": "97aa595ba69c62e896375ea2442358d45d66af74",
+        "action": "retain"
+      }
+    },
+    {
+      "name": "async-tasks-opt-in",
+      "commit": "16817016d25a9eed9f3dc7cd1cbdf446569e179d",
+      "upstreamPr": null,
+      "files": [
+        "src/CodexAcpServer.ts",
+        "src/__tests__/CodexACPAgent/async-tasks.test.ts",
+        "src/__tests__/CodexACPAgent/initialize.test.ts",
+        "src/__tests__/tool-calls/tool-call-contract.test.ts",
+        "src/async-tasks/AsyncTaskExtension.ts",
+        "src/async-tasks/CodexBackgroundTerminalTasks.ts",
+        "src/tool-calls/ClientCapabilities.ts"
+      ],
+      "tests": [
+        "src/__tests__/CodexACPAgent/async-tasks.test.ts",
+        "src/__tests__/CodexACPAgent/initialize.test.ts",
+        "src/__tests__/tool-calls/tool-call-contract.test.ts"
+      ],
+      "disposition": "active",
+      "retiredCommits": [],
+      "lastResolution": {
+        "fromTag": "v2.1.0",
+        "toTag": "v2.1.1",
+        "originalCommit": "16817016d25a9eed9f3dc7cd1cbdf446569e179d",
+        "action": "retain"
+      }
+    }
+  ],
+  "retiredCommits": [],
+  "preservedTransitions": []
+}
