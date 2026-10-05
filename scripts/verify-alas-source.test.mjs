@@ -43,7 +43,7 @@ function fixture() {
   commitFile(cwd, "downstream.txt", "downstream\n", "downstream");
   const exact = git(cwd, "rev-parse", "HEAD");
   git(cwd, "checkout", "clean");
-  git(cwd, "merge", "--no-ff", "exact", "-m", "chore: integrate exact upstream test");
+  git(cwd, "merge", "--no-ff", "exact", "-m", `chore: integrate exact upstream ${stable.slice(0, 12)}`);
   const clean = git(cwd, "rev-parse", "HEAD");
   git(cwd, "branch", "alas-clean", clean);
 
@@ -68,7 +68,107 @@ test("accepts a source whose merge-base with upstream main is exactly the declar
       upstreamVersion: "2.1.0",
       upstreamCommit: f.stable,
       reviewBaseTag: "v2.0.0",
+      integrationCommit: f.clean,
+      exactCandidateCommit: f.exact,
+      previousAlas: f.downstream,
+      canonicalHead: null,
     });
+  } finally {
+    rmSync(f.root, {recursive: true, force: true});
+  }
+});
+
+test("accepts only a normal protected-branch merge wrapper around the reviewed integration", () => {
+  const f = fixture();
+  try {
+    const wrapper = git(f.cwd, "commit-tree", `${f.clean}^{tree}`,
+      "-p", `${f.clean}^1`, "-p", f.clean, "-m", "Merge pull request #42 from sync/upstream-2.1.0");
+    git(f.cwd, "branch", "alas-wrapper", wrapper);
+    assert.deepEqual(verifyAlasSource({
+      cwd: f.cwd,
+      sourceCommit: wrapper,
+      alasRef: "alas-wrapper",
+      upstreamTag: "v2.1.0",
+      upstreamMainRef: "upstream",
+      packageVersion: "2.1.0",
+    }), {
+      sourceCommit: wrapper,
+      upstreamVersion: "2.1.0",
+      upstreamCommit: f.stable,
+      reviewBaseTag: "v2.0.0",
+      integrationCommit: f.clean,
+      exactCandidateCommit: f.exact,
+      previousAlas: f.downstream,
+      canonicalHead: null,
+    });
+  } finally {
+    rmSync(f.root, {recursive: true, force: true});
+  }
+});
+
+test("rejects protected-branch wrappers with a changed tree or the wrong first parent", () => {
+  const f = fixture();
+  try {
+    git(f.cwd, "checkout", "-B", "wrapper-tree", f.clean);
+    const changed = commitFile(f.cwd, "unreviewed.txt", "unreviewed\n", "unreviewed wrapper tree");
+    const badTree = git(f.cwd, "commit-tree", `${changed}^{tree}`,
+      "-p", `${f.clean}^1`, "-p", f.clean, "-m", "Merge pull request #43");
+    const badParent = git(f.cwd, "commit-tree", `${f.clean}^{tree}`,
+      "-p", f.previous, "-p", f.clean, "-m", "Merge pull request #44");
+    for (const [branch, sourceCommit] of [["alas-wrapper-tree", badTree], ["alas-wrapper-parent", badParent]]) {
+      git(f.cwd, "branch", branch, sourceCommit);
+      assert.throws(() => verifyAlasSource({
+        cwd: f.cwd,
+        sourceCommit,
+        alasRef: branch,
+        upstreamTag: "v2.1.0",
+        upstreamMainRef: "upstream",
+        packageVersion: "2.1.0",
+      }), /reviewed protected integration/i);
+    }
+  } finally {
+    rmSync(f.root, {recursive: true, force: true});
+  }
+});
+
+test("rejects a redundant or arbitrary canonical parent that is not a descendant of the previous protected head", () => {
+  const f = fixture();
+  try {
+    const forged = git(f.cwd, "commit-tree", `${f.exact}^{tree}`,
+      "-p", f.downstream, "-p", f.exact, "-p", f.previous,
+      "-m", `chore: integrate exact upstream ${f.stable.slice(0, 12)}`);
+    git(f.cwd, "branch", "alas-forged-canonical", forged);
+    assert.throws(() => verifyAlasSource({
+      cwd: f.cwd,
+      sourceCommit: forged,
+      alasRef: "alas-forged-canonical",
+      upstreamTag: "v2.1.0",
+      upstreamMainRef: "upstream",
+      packageVersion: "2.1.0",
+    }), /reviewed protected integration/i);
+  } finally {
+    rmSync(f.root, {recursive: true, force: true});
+  }
+});
+
+test("rejects arbitrary commits after the reviewed integration even when tree-identical or metadata-only", () => {
+  const f = fixture();
+  try {
+    git(f.cwd, "checkout", "-B", "post-integration", f.clean);
+    git(f.cwd, "commit", "--allow-empty", "-m", "empty post-integration commit");
+    const empty = git(f.cwd, "rev-parse", "HEAD");
+    const metadata = commitFile(f.cwd, "docs-review.json", "{}\n", "review-only metadata after integration");
+    for (const [branch, sourceCommit] of [["alas-post-empty", empty], ["alas-post-metadata", metadata]]) {
+      git(f.cwd, "branch", branch, sourceCommit);
+      assert.throws(() => verifyAlasSource({
+        cwd: f.cwd,
+        sourceCommit,
+        alasRef: branch,
+        upstreamTag: "v2.1.0",
+        upstreamMainRef: "upstream",
+        packageVersion: "2.1.0",
+      }), /reviewed integration|protected integration|source commit/i);
+    }
   } finally {
     rmSync(f.root, {recursive: true, force: true});
   }
@@ -110,10 +210,11 @@ test("rejects a forged sync-review fromTag using the base derived from integrati
       tests: ["downstream.test.ts"],
     }];
     const review = {
-      schemaVersion: 1,
+      schemaVersion: 2,
       fromTag: "v2.1.0",
       toTag: "v2.1.0",
       toCommit: f.stable,
+      canonicalHead: null,
       patches: [{
         name: "downstream",
         commit: f.downstream,
@@ -127,6 +228,8 @@ test("rejects a forged sync-review fromTag using the base derived from integrati
           tests: ["downstream.test.ts"],
         },
       }],
+      preservedCommits: [],
+      resolved: true,
     };
     assert.throws(() => verifySyncReviewArtifact({
       review,
