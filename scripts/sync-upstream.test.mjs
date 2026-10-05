@@ -10,6 +10,7 @@ const publish = readFileSync(join(workflowsDir, "publish-alas.yml"), "utf8");
 const ci = readFileSync(join(workflowsDir, "ci.yml"), "utf8");
 const e2e = readFileSync(join(workflowsDir, "e2e.yml"), "utf8");
 const upstreamPublish = readFileSync(join(workflowsDir, "publish.yml"), "utf8");
+const publicationVerifier = readFileSync(join(root, "scripts/verify-alas-publication.mjs"), "utf8");
 const checkoutSha = "3d3c42e5aac5ba805825da76410c181273ba90b1";
 const setupNodeSha = "820762786026740c76f36085b0efc47a31fe5020";
 const createGitHubAppTokenV3Sha = "bcd2ba49218906704ab6c1aa796996da409d3eb1";
@@ -98,13 +99,33 @@ test("maintenance failures always write a durable summary and update an existing
   assert.match(publish, /GITHUB_STEP_SUMMARY/);
 });
 
-test("e2e and upstream publish visibly waive live e2e when OPENAI_API_KEY is absent", () => {
-  for (const workflow of [e2e, upstreamPublish]) {
+test("e2e, upstream publish, and protected Alas publish visibly waive live e2e when OPENAI_API_KEY is absent", () => {
+  for (const workflow of [e2e, upstreamPublish, publish]) {
     assert.match(workflow, /OPENAI_API_KEY/);
     assert.match(workflow, /if:\s*\$\{\{[^\n]*OPENAI_API_KEY[^\n]*!=\s*''/);
     assert.match(workflow, /E2E.*waived|waived.*E2E/i);
     assert.match(workflow, /GITHUB_STEP_SUMMARY/);
+    assert.match(workflow, /npm run test:e2e/);
   }
+});
+
+test("protected Alas publication reads back npm provenance, immutable tag, and exact GitHub release", () => {
+  assert.match(publish, /verify-alas-publication\.mjs/);
+  assert.match(publicationVerifier, /dist-tags|dist\.integrity|attestations|provenance/);
+  assert.match(publicationVerifier, /alasDownstream/);
+  assert.match(publish, /git\/ref\/tags|git\/refs\/tags|refs\/tags/);
+  assert.match(publish, /gh release view[\s\S]*targetCommitish/);
+  assert.match(publish, /alreadyPublished/);
+  assert.match(publish, /npm audit signatures/);
+  assert.match(publish, /--include-attestations/);
+  assert.match(publish, /alas-attestation\.json[\s\S]*verifyInstalledPublication|verifyInstalledPublication[\s\S]*alas-attestation\.json/);
+  assert.match(publish, /attestations\.url|npm\/v1\/attestations/);
+  assert.match(publish, /expectedRepository:[\s\S]*GITHUB_REPOSITORY|GITHUB_REPOSITORY[\s\S]*expectedRepository:/);
+  assert.match(publish, /expectedWorkflowPath:[\s\S]*publish-alas\.yml/);
+  assert.match(publish, /expectedWorkflowRef:[\s\S]*refs\/heads\/alas/);
+  assert.match(publicationVerifier, /resolvedDependencies[\s\S]*gitCommit/);
+  assert.match(publish, /package-lock\.json[\s\S]*EXPECTED_INTEGRITY|EXPECTED_INTEGRITY[\s\S]*package-lock\.json/);
+  assert.match(publish, /Post-publication read-back|Publication verification/i);
 });
 
 test("publish verifies the declared stable tag against the exact upstream-main merge-base", () => {
