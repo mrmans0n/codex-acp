@@ -1,6 +1,6 @@
 #!/usr/bin/env node
 
-import {execFileSync} from "node:child_process";
+import {execFileSync, spawnSync} from "node:child_process";
 
 const FULL_COMMIT = /^[0-9a-f]{40}$/i;
 const STABLE_TAG = /^v(0|[1-9]\d*)\.(0|[1-9]\d*)\.(0|[1-9]\d*)$/;
@@ -24,32 +24,66 @@ function compareVersions(left, right) {
   return 0;
 }
 
-function deriveReviewBaseTag({cwd, sourceCommit, upstreamCommit, upstreamMainRef, upstreamVersion}) {
-  const commits = git(cwd, "rev-list", "--topo-order", sourceCommit).split("\n").filter(Boolean);
-  for (const commit of commits) {
-    const subject = git(cwd, "show", "-s", "--format=%s", commit);
-    if (!subject.startsWith("chore: integrate exact upstream ")) continue;
-    const parents = git(cwd, "show", "-s", "--format=%P", commit).split(/\s+/).filter(Boolean);
-    if (parents.length !== 2) continue;
-    if (git(cwd, "rev-parse", `${commit}^{tree}`) !== git(cwd, "rev-parse", `${parents[1]}^{tree}`)) continue;
-    if (git(cwd, "merge-base", commit, upstreamMainRef) !== upstreamCommit) continue;
+function parents(cwd, commit) {
+  return git(cwd, "show", "-s", "--format=%P", commit).split(/\s+/).filter(Boolean);
+}
 
-    let manifest;
-    try {
-      manifest = JSON.parse(git(cwd, "show", `${parents[0]}:package.json`));
-    } catch (error) {
-      throw new Error(`Cannot read package version from integration first parent ${parents[0]}: ${error.message}`);
-    }
-    const baseVersion = manifest?.version;
-    if (!STABLE_VERSION.test(String(baseVersion ?? ""))) {
-      throw new Error(`Integration first parent package version must be stable, got ${JSON.stringify(baseVersion)}`);
-    }
-    if (compareVersions(baseVersion, upstreamVersion) >= 0) {
-      throw new Error(`Integration review base v${baseVersion} must precede v${upstreamVersion}`);
-    }
-    return `v${baseVersion}`;
+function isAncestor(cwd, ancestor, descendant) {
+  return spawnSync("git", ["merge-base", "--is-ancestor", ancestor, descendant], {
+    cwd,
+    encoding: "utf8",
+    stdio: "pipe",
+  }).status === 0;
+}
+
+function isReviewedIntegration({cwd, commit, upstreamCommit, upstreamMainRef}) {
+  const commitParents = parents(cwd, commit);
+  if (commitParents.length < 2 || commitParents.length > 3) return false;
+  if (commitParents.length === 3 &&
+      (commitParents[2] === commitParents[0] || !isAncestor(cwd, commitParents[0], commitParents[2]))) {
+    return false;
   }
-  throw new Error(`Cannot derive review base from protected alas integration ancestry at ${sourceCommit}`);
+  const subject = git(cwd, "show", "-s", "--format=%s", commit);
+  if (subject !== `chore: integrate exact upstream ${upstreamCommit.slice(0, 12)}`) return false;
+  if (git(cwd, "rev-parse", `${commit}^{tree}`) !== git(cwd, "rev-parse", `${commitParents[1]}^{tree}`)) {
+    return false;
+  }
+  if (git(cwd, "merge-base", commit, upstreamMainRef) !== upstreamCommit) return false;
+  return git(cwd, "merge-base", commitParents[1], upstreamMainRef) === upstreamCommit;
+}
+
+function resolveReviewedIntegration({cwd, sourceCommit, upstreamCommit, upstreamMainRef}) {
+  if (isReviewedIntegration({cwd, commit: sourceCommit, upstreamCommit, upstreamMainRef})) {
+    return sourceCommit;
+  }
+  const sourceParents = parents(cwd, sourceCommit);
+  if (sourceParents.length === 2 &&
+      isReviewedIntegration({cwd, commit: sourceParents[1], upstreamCommit, upstreamMainRef})) {
+    const integrationParents = parents(cwd, sourceParents[1]);
+    const sourceTree = git(cwd, "rev-parse", `${sourceCommit}^{tree}`);
+    const integrationTree = git(cwd, "rev-parse", `${sourceParents[1]}^{tree}`);
+    if (sourceParents[0] === integrationParents[0] && sourceTree === integrationTree) {
+      return sourceParents[1];
+    }
+  }
+  throw new Error(`source commit ${sourceCommit} is not the reviewed protected integration result`);
+}
+
+function deriveReviewBaseTag({cwd, previousAlas, upstreamVersion}) {
+  let manifest;
+  try {
+    manifest = JSON.parse(git(cwd, "show", `${previousAlas}:package.json`));
+  } catch (error) {
+    throw new Error(`Cannot read package version from integration first parent ${previousAlas}: ${error.message}`);
+  }
+  const baseVersion = manifest?.version;
+  if (!STABLE_VERSION.test(String(baseVersion ?? ""))) {
+    throw new Error(`Integration first parent package version must be stable, got ${JSON.stringify(baseVersion)}`);
+  }
+  if (compareVersions(baseVersion, upstreamVersion) >= 0) {
+    throw new Error(`Integration review base v${baseVersion} must precede v${upstreamVersion}`);
+  }
+  return `v${baseVersion}`;
 }
 
 export function verifyAlasSource({
@@ -79,12 +113,25 @@ export function verifyAlasSource({
   if (mergeBase !== upstreamCommit) {
     throw new Error(`merge-base with upstream main must be exactly ${upstreamTag} (${upstreamCommit}), got ${mergeBase}`);
   }
-  const reviewBaseTag = deriveReviewBaseTag({
+  const integrationCommit = resolveReviewedIntegration({
     cwd,
     sourceCommit,
     upstreamCommit,
     upstreamMainRef,
-    upstreamVersion,
   });
-  return {sourceCommit, upstreamVersion, upstreamCommit, reviewBaseTag};
+  const integrationParents = parents(cwd, integrationCommit);
+  const previousAlas = integrationParents[0];
+  const exactCandidateCommit = integrationParents[1];
+  const canonicalHead = integrationParents[2] ?? null;
+  const reviewBaseTag = deriveReviewBaseTag({cwd, previousAlas, upstreamVersion});
+  return {
+    sourceCommit,
+    upstreamVersion,
+    upstreamCommit,
+    reviewBaseTag,
+    integrationCommit,
+    exactCandidateCommit,
+    previousAlas,
+    canonicalHead,
+  };
 }

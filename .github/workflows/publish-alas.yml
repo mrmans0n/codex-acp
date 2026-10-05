@@ -62,9 +62,8 @@ jobs:
           node --input-type=module 2> >(tee /tmp/alas-publish-error.txt >&2) <<'NODE' > /tmp/alas-source.json
           import {execFileSync} from 'node:child_process';
           import {readFileSync} from 'node:fs';
-          import {classifyDownstreamPatches} from './scripts/downstream-patches.mjs';
-          import {verifyAlasSource} from './scripts/verify-alas-source.mjs';
-          import {verifySyncReviewArtifact} from './scripts/sync-review.mjs';
+          import {validatePatchLedger} from './scripts/downstream-patches.mjs';
+          import {verifySyncSourceReview} from './scripts/verify-sync-source-review.mjs';
           import {verifyUpstreamRelease} from './scripts/upstream-release.mjs';
 
           const packageVersion = JSON.parse(readFileSync('package.json', 'utf8')).version;
@@ -74,28 +73,18 @@ jobs:
           const npm = await npmResponse.json();
           const tagCommit = execFileSync('git', ['rev-parse', `${process.env.UPSTREAM_TAG}^{commit}`], {encoding: 'utf8'}).trim();
           verifyUpstreamRelease({tag: process.env.UPSTREAM_TAG, tagCommit, release, npm});
-          const result = verifyAlasSource({
+          const ledger = JSON.parse(readFileSync('docs/alas-downstream-patches.json', 'utf8'));
+          const review = JSON.parse(readFileSync('docs/alas-sync-review.json', 'utf8'));
+          validatePatchLedger(ledger);
+          const result = verifySyncSourceReview({
             cwd: process.cwd(),
             sourceCommit: process.env.SOURCE_COMMIT,
             alasRef: 'origin/alas',
             upstreamTag: process.env.UPSTREAM_TAG,
             upstreamMainRef: 'refs/alas-upstream-main',
             packageVersion,
-          });
-          const ledger = JSON.parse(readFileSync('docs/alas-downstream-patches.json', 'utf8'));
-          const review = JSON.parse(readFileSync('docs/alas-sync-review.json', 'utf8'));
-          const classifications = classifyDownstreamPatches({
-            cwd: process.cwd(),
-            ledger,
-            baseRef: result.reviewBaseTag,
-            targetRef: process.env.UPSTREAM_TAG,
-          });
-          verifySyncReviewArtifact({
             review,
-            fromTag: result.reviewBaseTag,
-            toTag: process.env.UPSTREAM_TAG,
-            toCommit: result.upstreamCommit,
-            classifications,
+            ledger,
           });
           process.stdout.write(`${JSON.stringify(result)}\n`);
           NODE
