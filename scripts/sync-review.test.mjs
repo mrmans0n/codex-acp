@@ -115,6 +115,62 @@ test("requires the exact canonical head and complete ordered preserved commit me
   }
 });
 
+test("carries reviewed resolutions to a new canonical head of the same stable transition", () => {
+  const resolution = {
+    action: "adapt",
+    commit: "8".repeat(40),
+    automatic: false,
+    rationale: "Adapted to the new stable contract.",
+    tests: ["overlap.test.ts"],
+  };
+  const recorded = createSyncReview({
+    fromTag: "v2.1.0",
+    toTag: "v2.2.0",
+    toCommit,
+    classifications,
+    canonicalHead: "4".repeat(40),
+  });
+  recorded.patches[1].resolution = resolution;
+
+  // The maintainer commit that records the resolution becomes the new canonical branch head.
+  const rerun = createSyncReview({
+    fromTag: "v2.1.0",
+    toTag: "v2.2.0",
+    toCommit,
+    classifications,
+    canonicalHead: null,
+    previousReview: recorded,
+  });
+  assert.equal(rerun.canonicalHead, null);
+  assert.deepEqual(rerun.patches[1].resolution, resolution);
+  assert.equal(rerun.resolved, true);
+  assert.deepEqual(verifySyncReviewArtifact({
+    review: rerun,
+    fromTag: "v2.1.0",
+    toTag: "v2.2.0",
+    toCommit,
+    classifications,
+  }), rerun);
+
+  for (const previousReview of [
+    {...recorded, toTag: "v2.2.1"},
+    {...recorded, toCommit: "9".repeat(40)},
+    {...recorded, patches: recorded.patches.map((patch, index) => index === 1
+      ? {...patch, overlappingFiles: ["src/other.ts"]}
+      : patch)},
+  ]) {
+    const stale = createSyncReview({
+      fromTag: "v2.1.0",
+      toTag: "v2.2.0",
+      toCommit,
+      classifications,
+      previousReview,
+    });
+    assert.equal(stale.patches[1].resolution.action, null);
+    assert.equal(stale.resolved, false);
+  }
+});
+
 test("derives the exact committed ledger transition from the previous ledger and review", () => {
   const previousLedger = {
     schemaVersion: 2,

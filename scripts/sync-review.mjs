@@ -114,9 +114,12 @@ export function createSyncReview({
     throw new Error("classifications must be a non-empty array");
   }
   if (!Array.isArray(preservedCommits)) throw new Error("preservedCommits must be an array");
+  // Resolutions are keyed by the exact stable transition, then per patch classification and per
+  // preserved commit identity. The canonical head is deliberately not part of the key: a maintainer
+  // records resolutions in a commit on the canonical branch, and that commit cannot name its own SHA.
   const sameReview = previousReview?.schemaVersion === 2 &&
     previousReview.fromTag === fromTag && previousReview.toTag === toTag &&
-    previousReview.toCommit === toCommit && previousReview.canonicalHead === canonicalHead;
+    previousReview.toCommit === toCommit;
   const previousByName = new Map(sameReview
     ? (previousReview.patches ?? []).map((patch) => [patch.name, patch])
     : []);

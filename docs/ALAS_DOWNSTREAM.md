@@ -23,10 +23,13 @@ patches carried by Alas. Every entry records:
 - the complete changed-file list; and
 - the tests that cover the patch.
 
-The current functional patches are `goal-opt-in` (upstream PR #583) and
-`async-tasks-opt-in` (no upstream PR yet). Keep ledger entries and their file
+The current functional patches are `goal-opt-in` (upstream PR #583),
+`async-tasks-opt-in` (no upstream PR yet), and `goal-before-first-prompt`
+(upstream PR #584). Keep ledger entries and their file
 lists exact when a patch changes. `npm run test:maintenance` verifies the ledger
-against the recorded commits.
+against the recorded commits. A patch added to the ledger after the latest sync
+review has no transition yet; the next stable sync classifies it with the
+others.
 
 For every new stable tag, `scripts/downstream-patches.mjs` compares each ledger
 entry with the upstream stable delta:
@@ -135,9 +138,27 @@ Resolve only the conditions listed in the draft. The branch is already descended
 from `origin/alas`; do not replace it with the exact branch or restore upstream
 preview commits. Edit `docs/alas-sync-review.json` for the same `toTag` and
 `toCommit`. For every `absorbed` or `overlap` patch, choose `retain`, `adapt`, or
-`drop`, explain why, and list the tests that prove the decision. If code must be
-adapted, commit the adapted code and review artifact together on the canonical
-same-version branch. Stale sync branches are not replay sources.
+`drop`, explain why, and list the tests that prove the decision. Stale sync
+branches are not replay sources.
+
+An `adapt` resolution names a separate adaptation commit that changes only the
+patch's ledger files and tests. Its single parent is either the exact stable tag
+commit or, when an earlier ledger patch edits the same lines, the exact
+candidate commit at the point where the patch is replayed (stacked adaptation).
+The candidate is rebuilt deterministically, so a stacked adaptation binds only
+when every earlier replay reproduces that same parent; any drift fails closed.
+Push adaptation commits where the workflow can fetch them before rerunning it;
+once bound, they are ancestors of the integration commit.
+
+Commit the review edit on its own on the canonical same-version branch and
+rerun **Sync stable upstream**. Resolutions are matched by `fromTag`, `toTag`,
+`toCommit`, each patch classification, and each preserved commit identity, not
+by the canonical branch head, because the commit that records them cannot name
+its own SHA. Trailing review-only commits and the branch's own generated
+integration merge are not provenance: the rerun reads the review, regenerates
+the candidate, and records as `canonicalHead` only the last canonical commit
+that contributes preserved history (or `null`). An unchanged rerun therefore
+reproduces the same integration commit instead of rewriting the PR branch.
 
 Run:
 
