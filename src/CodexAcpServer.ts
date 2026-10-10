@@ -175,7 +175,7 @@ import {
 } from "./AirExtension";
 import {SessionIndexService} from "./SessionIndexService";
 import type {SessionIndexTitleState} from "./SessionIndexTitles";
-import {ASYNC_TASK_STOP_METHOD} from "./async-tasks/AsyncTaskExtension";
+import {ASYNC_TASK_STOP_METHOD, asyncTaskCapability} from "./async-tasks/AsyncTaskExtension";
 import {CodexBackgroundTerminalTasks} from "./async-tasks/CodexBackgroundTerminalTasks";
 import {clientSupportsCompaction, CodexSessionCompactions, createCompactionUpdate} from "./CodexSessionCompactions";
 import {
@@ -516,6 +516,9 @@ export class CodexAcpServer {
                 },
                 ...(this.capabilities.goal && !this.capabilities.airClient ? {
                     [AIR_GOAL_KEY]: goalCapability,
+                } : {}),
+                ...(this.capabilities.asyncTasks && !this.capabilities.airClient ? {
+                    "async-tasks": asyncTaskCapability(),
                 } : {}),
                 // Only AIR gets the AIR extension, see `docs/air-extensions.md`.
                 ...(this.capabilities.airClient ? {
@@ -1125,10 +1128,11 @@ export class CodexAcpServer {
 
     private createAsyncTasks(sessionId: string): CodexBackgroundTerminalTasks {
         return new CodexBackgroundTerminalTasks(
-            clientSupportsAirCapability(this.clientCapabilities, AIR_ASYNC_TASKS_KEY),
+            this.capabilities.asyncTasks,
             sessionId,
             this.codexAcpClient.appServerClient,
             new ACPSessionConnection(this.connection, sessionId),
+            this.capabilities.airClient,
         );
     }
 

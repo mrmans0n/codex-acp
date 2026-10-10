@@ -23,6 +23,7 @@ export type AirCapabilities = {
 type ClientCapabilityValues = {
     readonly airClient: boolean;
     readonly goal: boolean;
+    readonly asyncTasks: boolean;
     readonly terminalOutput: boolean;
     readonly terminalOutputDelta: boolean;
     readonly planUpdates: boolean;
@@ -40,6 +41,7 @@ export class ClientCapabilities {
     static readonly DEFAULT = new ClientCapabilities({
         airClient: false,
         goal: false,
+        asyncTasks: false,
         terminalOutput: false,
         terminalOutputDelta: false,
         planUpdates: false,
@@ -50,6 +52,8 @@ export class ClientCapabilities {
     readonly airClient: boolean;
     /** The client is AIR or declares `_meta.goal`. */
     readonly goal: boolean;
+    /** The client is AIR or declares `_meta["async-tasks"]`. */
+    readonly asyncTasks: boolean;
     /** The client declares `_meta.terminal_output`, the Zed convention for command output chunks. */
     readonly terminalOutput: boolean;
     /** The client declares `_meta.terminal_output_delta` and appends the output chunks. */
@@ -61,6 +65,7 @@ export class ClientCapabilities {
     private constructor(values: ClientCapabilityValues) {
         this.airClient = values.airClient;
         this.goal = values.goal;
+        this.asyncTasks = values.asyncTasks;
         this.terminalOutput = values.terminalOutput;
         this.terminalOutputDelta = values.terminalOutputDelta;
         this.planUpdates = values.planUpdates;
@@ -73,6 +78,7 @@ export class ClientCapabilities {
         return new ClientCapabilities({
             airClient,
             goal: airClient || (goal !== null && typeof goal === "object" && !Array.isArray(goal)),
+            asyncTasks: airClient || capabilities?._meta?.["async-tasks"] === true,
             terminalOutput: capabilities?._meta?.["terminal_output"] === true,
             terminalOutputDelta: capabilities?._meta?.["terminal_output_delta"] === true,
             planUpdates: capabilities?.plan != null,
