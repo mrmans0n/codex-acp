@@ -1,5 +1,5 @@
 import assert from "node:assert/strict";
-import {execFileSync} from "node:child_process";
+import {execFileSync, spawnSync} from "node:child_process";
 import {mkdtempSync, mkdirSync, readFileSync, rmSync, writeFileSync} from "node:fs";
 import {tmpdir} from "node:os";
 import {join} from "node:path";
@@ -302,9 +302,20 @@ test("the committed sync review matches recomputed classifications and has expli
     assert.equal(patch.appliedCommit, undefined, patch.name);
     assert.equal(patch.disposition, "active", patch.name);
   }
+  // The review classifies the ledger in force before its transition. Once a sync is integrated,
+  // the committed ledger has advanced (an `adapt` moves appliedCommit to the replacement), so
+  // recompute from the ledger at the first parent of the first-parent commit that introduced the
+  // review, as publication verification does with the previous alas head. The bootstrap review
+  // was committed together with the ledger, which was never advanced, so it has no prior ledger.
+  const reviewCommit = git(cwd, "log", "--first-parent", "-1", "--format=%H", "--", "docs/alas-sync-review.json");
+  const priorLedgerPath = `${reviewCommit}^1:docs/alas-downstream-patches.json`;
+  const hasPriorLedger = spawnSync("git", ["cat-file", "-e", priorLedgerPath], {cwd}).status === 0;
+  const previousLedger = hasPriorLedger
+    ? validatePatchLedger(JSON.parse(git(cwd, "show", priorLedgerPath)))
+    : ledger;
   const classifications = classifyDownstreamPatches({
     cwd,
-    ledger: {...ledger, patches: ledger.patches.filter(({name}) => reviewed.has(name))},
+    ledger: {...previousLedger, patches: previousLedger.patches.filter(({name}) => reviewed.has(name))},
     baseRef: review.fromTag,
     targetRef: review.toTag,
     expectedPatchIdentities: KNOWN_PATCH_IDENTITIES.filter(({name}) => reviewed.has(name)),
