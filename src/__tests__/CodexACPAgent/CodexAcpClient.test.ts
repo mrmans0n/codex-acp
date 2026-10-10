@@ -21,6 +21,11 @@ import {ModelId} from "../../ModelId";
 import {GOAL_CONTROL_METHOD} from "../../AcpExtensions";
 import {ClientCapabilities} from "../../tool-calls/ClientCapabilities";
 import type {McpStartupResult} from "../../mcp/McpStartupTracker";
+import {
+    createRecoveryFixture,
+    initialize as initializeRecoveryFixture,
+    requestsOf as requestsOfRecoveryServer,
+} from "../app-server-recovery/recovery-fixture";
 
 describe('ACP server test', { timeout: 40_000 }, () => {
 
@@ -3439,6 +3444,110 @@ describe('ACP server test', { timeout: 40_000 }, () => {
 
         expect(getGoal).not.toHaveBeenCalled();
         expect(turnStartSpy).not.toHaveBeenCalled();
+    });
+
+    it('forwards goal work set before the first prompt', async () => {
+        const {mockFixture, sessionState} = setupPromptFixture();
+        // @ts-expect-error - registering local session state for the extension request path
+        mockFixture.getCodexAcpAgent().sessions.set("session-id", sessionState);
+        const goal = createThreadGoal({objective: "Finish the migration", status: "active"});
+        vi.spyOn(mockFixture.getCodexAcpClient(), "setGoal")
+            .mockImplementation(async (_sessionId, _objective, _onTurnStarted, onGoalSet) => {
+                mockFixture.sendServerNotification({
+                    method: "thread/goal/updated",
+                    params: {threadId: "session-id", turnId: null, goal},
+                });
+                onGoalSet?.(goal);
+                mockFixture.sendServerNotification({
+                    method: "item/agentMessage/delta",
+                    params: {threadId: "session-id", turnId: "routed-goal-turn", itemId: "message", delta: "Working on it"},
+                });
+                return {
+                    threadId: "session-id",
+                    turn: createTurn("routed-goal-turn", "completed"),
+                };
+            });
+        mockFixture.clearAcpConnectionDump();
+
+        await expect(mockFixture.getCodexAcpAgent().extMethod(GOAL_CONTROL_METHOD, {
+            sessionId: "session-id",
+            action: "set",
+            objective: goal.objective,
+        })).resolves.toEqual({});
+        await mockFixture.getCodexAcpClient().waitForSessionNotifications("session-id");
+
+        const updates = mockFixture.getAcpConnectionEvents([])
+            .filter(event => event.method === "sessionUpdate" && "args" in event)
+            .map(event => event.args[0]?.update);
+        expect(updates).toEqual(expect.arrayContaining([
+            expect.objectContaining({
+                sessionUpdate: "session_info_update",
+                _meta: {jetbrains: {air: {version: 1, goal: expect.objectContaining({objective: goal.objective})}}},
+            }),
+            expect.objectContaining({
+                sessionUpdate: "agent_message_chunk",
+                content: expect.objectContaining({text: "Working on it"}),
+            }),
+        ]));
+    });
+
+    it('forwards goal work set before the first prompt again after the app-server restarted', async () => {
+        const fixture = createRecoveryFixture();
+        await initializeRecoveryFixture(fixture, true);
+        const {sessionId} = await fixture.agent.newSession({cwd: "/work", mcpServers: []});
+        const goal = {threadId: sessionId, objective: "ship it", status: "paused", tokenBudget: null, tokensUsed: 0, timeUsedSeconds: 0, createdAt: 1, updatedAt: 2};
+        fixture.answers.set("thread/goal/set", (_params, server) => {
+            setImmediate(() => server.rpc.notify({method: "thread/goal/updated", params: {threadId: sessionId, turnId: null, goal}}));
+            return {goal};
+        });
+        const agentMessages = () => fixture.updates()
+            .filter(({sessionId: id, update}) => id === sessionId && update["sessionUpdate"] === "agent_message_chunk")
+            .map(({update}) => (update["content"] as {text?: string}).text);
+        const goalWork = async (delta: string) => {
+            await fixture.agent.extMethod(GOAL_CONTROL_METHOD, {sessionId, action: "pause"});
+            fixture.current().rpc.notify({
+                method: "item/agentMessage/delta",
+                params: {threadId: sessionId, turnId: "goal-turn", itemId: `message-${delta}`, delta},
+            });
+            await vi.waitFor(() => expect(agentMessages()).toContain(delta));
+        };
+
+        await goalWork("before the restart");
+        await fixture.kill();
+        await goalWork("after the restart");
+
+        expect(fixture.servers).toHaveLength(2);
+        expect(requestsOfRecoveryServer(fixture.current(), "thread/resume")).toHaveLength(1);
+    });
+
+    it('cancels a permission request of goal work set before the first prompt when its app-server dies', async () => {
+        const fixture = createRecoveryFixture();
+        await initializeRecoveryFixture(fixture, true);
+        const {sessionId} = await fixture.agent.newSession({cwd: "/work", mcpServers: []});
+        const goal = {threadId: sessionId, objective: "ship it", status: "paused", tokenBudget: null, tokensUsed: 0, timeUsedSeconds: 0, createdAt: 1, updatedAt: 2};
+        fixture.answers.set("thread/goal/set", (_params, server) => {
+            setImmediate(() => server.rpc.notify({method: "thread/goal/updated", params: {threadId: sessionId, turnId: null, goal}}));
+            return {goal};
+        });
+        let permissionSignal: AbortSignal | undefined;
+        fixture.acp.request.mockImplementation(async (method: string, _params: unknown, options?: {cancellationSignal?: AbortSignal}) => {
+            if (method === "session/request_permission") {
+                permissionSignal = options?.cancellationSignal;
+                return await new Promise(() => {});
+            }
+            return {};
+        });
+        await fixture.agent.extMethod(GOAL_CONTROL_METHOD, {sessionId, action: "pause"});
+        const approval = fixture.current().rpc.requestHandlers.get("item/commandExecution/requestApproval")!({
+            threadId: sessionId, turnId: "goal-turn", itemId: "cmd-1", command: "rm -rf build", cwd: "/work", reason: null,
+            availableDecisions: ["accept", "decline", "cancel"],
+        });
+        await vi.waitFor(() => expect(permissionSignal).toBeDefined());
+
+        await fixture.kill();
+
+        expect(permissionSignal!.aborted).toBe(true);
+        await expect(approval).resolves.toEqual({decision: "cancel"});
     });
 
     it('ignores an older goal refresh that completes after a newer refresh', async () => {

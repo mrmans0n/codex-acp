@@ -221,6 +221,11 @@ export interface SessionState extends SessionIndexTitleState {
     clientCapabilities: ClientCapabilities;
     currentGoal?: ThreadGoalSnapshot | null;
     goalRevision: number;
+    /**
+     * The app-server client whose notifications for this thread reach an ACP event handler, and when that
+     * subscription settles. A restarted app-server has a new client without the subscription.
+     */
+    eventSubscription?: {client: CodexAcpClient, ready: Promise<void>};
     sessionTitle: string | null;
     sessionTitleSource: "unset" | "fallback" | "explicit" | "unknown";
     sessionFailure?: SessionFailure;
@@ -601,6 +606,7 @@ export class CodexAcpServer {
                 }
                 const sessionReady = this.ensureSessionReady(sessionState);
                 if (sessionReady) await sessionReady;
+                await this.ensureSessionEventSubscription(sessionState);
                 const sessionGeneration = this.getSessionGeneration(sessionState.sessionId);
                 const goalControlGeneration = this.bumpGoalControlGeneration(sessionState.sessionId);
                 if (methodRequest.params.action === "set") {
@@ -2154,6 +2160,84 @@ export class CodexAcpServer {
         return {outcome: "startedNewTurn"};
     }
 
+    /**
+     * Subscribes a session that has not run a prompt yet to its app-server notifications.
+     *
+     * A prompt subscribes the thread and its handler keeps forwarding session-scoped
+     * notifications after the prompt ends. Before the first prompt nothing is subscribed, so
+     * goal control would drop the goal update and the goal turn app-server starts for it.
+     * The next prompt replaces this handler.
+     *
+     * The subscription belongs to the client of one app-server. After a crash restart or a
+     * provider restart, the session is resumed in a new app-server whose client has no
+     * subscription, so it is made again on the installed client. Like a prompt, its
+     * permission requests and elicitations end when that app-server is gone.
+     */
+    private ensureSessionEventSubscription(sessionState: SessionState): Promise<void> {
+        const client = this.codexAcpClient;
+        if (sessionState.eventSubscription?.client !== client) {
+            const generation = this.recovery?.generation ?? 0;
+            const ready = this.subscribeSessionEvents(sessionState, client, generation);
+            const subscription = {client, ready};
+            sessionState.eventSubscription = subscription;
+            // A failed subscription is made again by the next goal control request.
+            ready.catch(() => {
+                if (sessionState.eventSubscription === subscription) {
+                    delete sessionState.eventSubscription;
+                }
+            });
+        }
+        return sessionState.eventSubscription.ready;
+    }
+
+    private async subscribeSessionEvents(
+        sessionState: SessionState,
+        client: CodexAcpClient,
+        generation: number,
+    ): Promise<void> {
+        const eventHandler = new CodexEventHandler(
+            this.connection,
+            sessionState,
+            clientSupportsTypedSessionFailures(this.clientCapabilities),
+            this.sessionFailureEpoch,
+            sessionState.subagents,
+            (accountUpdated) => this.handleAccountUpdated(accountUpdated),
+            false,
+            clientSupportsCompaction(this.clientCapabilities),
+            clientSupportsNotices(this.clientCapabilities),
+        );
+        const permissionContext = this.permissionLifecycleContext(sessionState).beginPrompt();
+        const toolCallRenderer = new AcpToolCallRenderer(this.capabilities);
+        const appServerLost = new AbortController();
+        const interactionConnection = this.recovery === null
+            ? this.connection
+            : lossAwareConnection(this.connection, appServerLost.signal);
+        this.recovery?.onGenerationLost(generation, () => appServerLost.abort());
+        const signal = appServerLost.signal;
+        const approvalHandler = new CodexApprovalHandler(interactionConnection, permissionContext, signal, toolCallRenderer);
+        const elicitationHandler = new CodexElicitationHandler(
+            interactionConnection,
+            permissionContext,
+            this.clientCapabilities,
+            signal,
+            toolCallRenderer,
+        );
+        const observeInteraction = async (event: ServerNotification): Promise<void> => {
+            permissionContext.handleNotification(event);
+            await elicitationHandler.handleNotification(event);
+        };
+        await client.subscribeToSessionEvents(sessionState.sessionId,
+            async (event) => {
+                await observeInteraction(event);
+                await eventHandler.handleSessionScopedNotification(event);
+            },
+            approvalHandler,
+            elicitationHandler,
+            clientSupportsSubagents(this.clientCapabilities),
+            observeInteraction,
+            childThreadId => eventHandler.waitForNativeSubagentSession(childThreadId));
+    }
+
     private async startGoalContinuationIfCurrent(
         sessionState: SessionState,
         sessionGeneration: number,
@@ -3403,6 +3487,7 @@ export class CodexAcpServer {
                 clientSupportsSubagents(this.clientCapabilities),
                 observeInteraction,
                 childThreadId => promptEventHandler.waitForNativeSubagentSession(childThreadId));
+            sessionState.eventSubscription = {client: promptClient, ready: Promise.resolve()};
 
             if (activePrompt.signal.aborted) {
                 return cancelledPromptResponse();
