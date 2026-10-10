@@ -1,8 +1,8 @@
 {
   "schemaVersion": 2,
-  "fromTag": "v2.1.0",
-  "toTag": "v2.1.1",
-  "toCommit": "68d7d2d5ddfc0ed5746f9f6130892dda685e65dd",
+  "fromTag": "v2.1.1",
+  "toTag": "v2.2.2",
+  "toCommit": "202e66e63343ec4f5a5e35ab590251d813d129ca",
   "canonicalHead": null,
   "patches": [
     {
@@ -16,12 +16,13 @@
       "overlappingFiles": [
         "docs/air-extensions.md",
         "src/CodexAcpServer.ts",
-        "src/CodexEventHandler.ts"
+        "src/CodexEventHandler.ts",
+        "src/__tests__/CodexACPAgent/initialize.test.ts"
       ],
       "resolution": {
         "action": "retain",
         "automatic": false,
-        "rationale": "The v2.1.1 changes on these paths handle legacy AIR answers, imported attachments, and readable service errors; they do not replace the downstream goal capability opt-in contract.",
+        "rationale": "v2.2.2 changes these files for live MCP status, pre-session hook trust, the AIR sessionIndex extension, and app-server recovery. None of them implements goal opt-in for non-AIR clients; upstream PR #583 is still open. The original commit replays cleanly on v2.2.2 and its added and removed lines are unchanged.",
         "tests": [
           "src/__tests__/CodexACPAgent/initialize.test.ts",
           "src/__tests__/CodexACPAgent/thread-goal-events.test.ts"
@@ -37,16 +38,41 @@
       "patchId": "fc7312b1b446af367c92a5bd9dbe52a9e7653132",
       "classification": "overlap",
       "overlappingFiles": [
-        "src/CodexAcpServer.ts"
+        "src/CodexAcpServer.ts",
+        "src/__tests__/CodexACPAgent/initialize.test.ts",
+        "src/__tests__/tool-calls/tool-call-contract.test.ts"
       ],
       "resolution": {
-        "action": "retain",
+        "action": "adapt",
+        "commit": "9602512a647a7ed4097e8847499443bfec5bc1db",
         "automatic": false,
-        "rationale": "The v2.1.1 CodexAcpServer change preserves imported attachments and does not implement provider-neutral async task capability negotiation or task lifecycle handling.",
+        "rationale": "v2.2.2 adds the SessionIndexService imports directly before the async task import in src/CodexAcpServer.ts, and the patch edits the same capability lines as goal-opt-in. The adaptation is stacked on the goal-opt-in binding; every added and removed line is identical to 1681701. v2.2.2 has no provider-neutral async task negotiation.",
         "tests": [
           "src/__tests__/CodexACPAgent/async-tasks.test.ts",
           "src/__tests__/CodexACPAgent/initialize.test.ts",
           "src/__tests__/tool-calls/tool-call-contract.test.ts"
+        ]
+      }
+    },
+    {
+      "name": "goal-before-first-prompt",
+      "originalCommit": "9d2c300ec82da759d3a1606962c04304d2e60fa7",
+      "commit": "9d2c300ec82da759d3a1606962c04304d2e60fa7",
+      "appliedCommit": null,
+      "disposition": "active",
+      "patchId": "1a14179c22ecb73e697620e4a9de0f47a092d32a",
+      "classification": "overlap",
+      "overlappingFiles": [
+        "src/CodexAcpServer.ts",
+        "src/__tests__/CodexACPAgent/CodexAcpClient.test.ts"
+      ],
+      "resolution": {
+        "action": "adapt",
+        "commit": "a52405dcabb22bc41b013da4c682ce2cdba31652",
+        "automatic": false,
+        "rationale": "v2.2.2 adds app-server crash and provider restart recovery: goal control now awaits ensureSessionReady, and a restarted app-server has a new client. 9d2c300 kept one subscription per session, so after a restart goal work from the new app-server was dropped. The adaptation binds the pre-prompt subscription to its client, subscribes again on the installed client, and cancels its permission requests and elicitations when that app-server dies. Upstream PR #584 is still open.",
+        "tests": [
+          "src/__tests__/CodexACPAgent/CodexAcpClient.test.ts"
         ]
       }
     }
