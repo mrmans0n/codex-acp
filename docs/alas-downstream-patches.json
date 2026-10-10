@@ -1,6 +1,6 @@
 {
   "schemaVersion": 2,
-  "baseTag": "v2.1.1",
+  "baseTag": "v2.2.2",
   "patches": [
     {
       "name": "goal-opt-in",
@@ -22,8 +22,8 @@
       "disposition": "active",
       "retiredCommits": [],
       "lastResolution": {
-        "fromTag": "v2.1.0",
-        "toTag": "v2.1.1",
+        "fromTag": "v2.1.1",
+        "toTag": "v2.2.2",
         "originalCommit": "97aa595ba69c62e896375ea2442358d45d66af74",
         "action": "retain"
       }
@@ -47,13 +47,17 @@
         "src/__tests__/tool-calls/tool-call-contract.test.ts"
       ],
       "disposition": "active",
-      "retiredCommits": [],
+      "retiredCommits": [
+        "16817016d25a9eed9f3dc7cd1cbdf446569e179d"
+      ],
       "lastResolution": {
-        "fromTag": "v2.1.0",
-        "toTag": "v2.1.1",
+        "fromTag": "v2.1.1",
+        "toTag": "v2.2.2",
         "originalCommit": "16817016d25a9eed9f3dc7cd1cbdf446569e179d",
-        "action": "retain"
-      }
+        "action": "adapt",
+        "replacementCommit": "9602512a647a7ed4097e8847499443bfec5bc1db"
+      },
+      "appliedCommit": "9602512a647a7ed4097e8847499443bfec5bc1db"
     },
     {
       "name": "goal-before-first-prompt",
@@ -67,7 +71,17 @@
         "src/__tests__/CodexACPAgent/CodexAcpClient.test.ts"
       ],
       "disposition": "active",
-      "retiredCommits": []
+      "retiredCommits": [
+        "9d2c300ec82da759d3a1606962c04304d2e60fa7"
+      ],
+      "lastResolution": {
+        "fromTag": "v2.1.1",
+        "toTag": "v2.2.2",
+        "originalCommit": "9d2c300ec82da759d3a1606962c04304d2e60fa7",
+        "action": "adapt",
+        "replacementCommit": "a52405dcabb22bc41b013da4c682ce2cdba31652"
+      },
+      "appliedCommit": "a52405dcabb22bc41b013da4c682ce2cdba31652"
     }
   ],
   "retiredCommits": [],
