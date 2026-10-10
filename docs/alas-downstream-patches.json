@@ -54,6 +54,20 @@
         "originalCommit": "16817016d25a9eed9f3dc7cd1cbdf446569e179d",
         "action": "retain"
       }
+    },
+    {
+      "name": "goal-before-first-prompt",
+      "commit": "9d2c300ec82da759d3a1606962c04304d2e60fa7",
+      "upstreamPr": 584,
+      "files": [
+        "src/CodexAcpServer.ts",
+        "src/__tests__/CodexACPAgent/CodexAcpClient.test.ts"
+      ],
+      "tests": [
+        "src/__tests__/CodexACPAgent/CodexAcpClient.test.ts"
+      ],
+      "disposition": "active",
+      "retiredCommits": []
     }
   ],
   "retiredCommits": [],

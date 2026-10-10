@@ -231,7 +231,7 @@ test("rejects a stale applied commit that is already retired", () => {
   }, {expectedPatchIdentities: [{name: "patch", commit: original}]}), /appliedCommit.*retired|retired.*appliedCommit/i);
 });
 
-test("anchors the production ledger to the two known functional patch identities", () => {
+test("anchors the production ledger to the three known functional patch identities", () => {
   const ledger = JSON.parse(readFileSync(
     new URL("../docs/alas-downstream-patches.json", import.meta.url),
     "utf8",
@@ -275,7 +275,7 @@ test("the committed ledger matches the exact downstream patch commits", () => {
     new URL("../docs/alas-downstream-patches.json", import.meta.url),
     "utf8",
   )));
-  assert.equal(ledger.patches.length, 2);
+  assert.equal(ledger.patches.length, 3);
   for (const patch of ledger.patches) {
     const changed = git(new URL("..", import.meta.url).pathname, "diff-tree", "--no-commit-id", "--name-only", "-r", patch.commit)
       .split("\n").filter(Boolean).sort();
@@ -294,11 +294,20 @@ test("the committed sync review matches recomputed classifications and has expli
     new URL("../docs/alas-sync-review.json", import.meta.url),
     "utf8",
   ));
+  // A patch recorded after the latest sync review has no transition yet; the next stable sync
+  // classifies it together with the patches the latest review covered.
+  const reviewed = new Set(review.patches.map(({name}) => name));
+  for (const patch of ledger.patches.filter(({name}) => !reviewed.has(name))) {
+    assert.equal(patch.lastResolution, undefined, patch.name);
+    assert.equal(patch.appliedCommit, undefined, patch.name);
+    assert.equal(patch.disposition, "active", patch.name);
+  }
   const classifications = classifyDownstreamPatches({
     cwd,
-    ledger,
+    ledger: {...ledger, patches: ledger.patches.filter(({name}) => reviewed.has(name))},
     baseRef: review.fromTag,
     targetRef: review.toTag,
+    expectedPatchIdentities: KNOWN_PATCH_IDENTITIES.filter(({name}) => reviewed.has(name)),
   });
   assert.deepEqual(verifySyncReviewArtifact({
     review,
