@@ -171,13 +171,14 @@ test("accepts a tree-identical normal protected-branch merge wrapper around the 
   }
 });
 
-test("binds the review canonical head to the exact source-history head while excluding review-only commits", () => {
+test("binds the review canonical head to the last canonical commit that contributes preserved history", () => {
   const f = fixture({reviewOnlyCanonicalCommit: true});
   try {
-    assert.equal(f.review.canonicalHead, f.reviewOnlyCommit);
+    // A trailing review-only commit is read as the previous review; it is not a provenance parent.
+    assert.equal(f.review.canonicalHead, f.preserved.at(-1));
     assert.deepEqual(f.review.preservedCommits.map(({commit}) => commit), f.preserved);
     const result = verify(f);
-    assert.equal(result.canonicalHead, f.reviewOnlyCommit);
+    assert.equal(result.canonicalHead, f.preserved.at(-1));
     assert.deepEqual(result.preservedCommits, f.preserved);
   } finally {
     rmSync(f.root, {recursive: true, force: true});

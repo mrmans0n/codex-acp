@@ -97,9 +97,13 @@ function bindExactAdaptation(cwd, {
     throw new Error(`Adaptation commit ${commit} for ${patch.name} must have exactly one parent`);
   }
   if (requireExactStableParent) {
+    // An adaptation either descends directly from the exact stable tag or is stacked on the exact
+    // candidate commit it is applied to. The candidate is rebuilt deterministically, so a stacked
+    // adaptation only binds when every earlier replay reproduces the same parent commit.
     const mergeBase = git(cwd, ["merge-base", commit, upstreamRef]);
-    if (mergeBase !== tagCommit || parents[0] !== tagCommit) {
-      throw new Error(`Adaptation commit ${commit} for ${patch.name} must directly descend from exact stable ${tagCommit}`);
+    const candidateHead = git(cwd, ["rev-parse", "HEAD"]);
+    if (mergeBase !== tagCommit || (parents[0] !== tagCommit && parents[0] !== candidateHead)) {
+      throw new Error(`Adaptation commit ${commit} for ${patch.name} must directly descend from exact stable ${tagCommit} or from exact candidate commit ${candidateHead}`);
     }
   } else if (isAncestor(cwd, commit, upstreamRef)) {
     throw new Error(`Authenticated patch commit ${commit} for ${patch.name} is already contained in upstream`);
@@ -281,6 +285,44 @@ export function discoverCanonicalPreservedCommits(options) {
   return discoverCanonicalCandidates(options).map((commit) => commitSummary(options.cwd, commit));
 }
 
+/**
+ * Returns the canonical sync head that can contribute preserved commits, or null.
+ *
+ * A rerun finds the canonical branch at its own generated integration merge, possibly followed by
+ * maintainer commits that only edit the review or ledger artifacts. Neither contributes preserved
+ * commits: the integration merge is regenerated, and review-only edits are read as the previous
+ * review. Recording such a head as the integration provenance parent would make every rerun write a
+ * new review and therefore a new candidate. Skipping them makes an unchanged rerun reproduce the
+ * same integration commit.
+ */
+export function effectiveCanonicalHead({
+  cwd,
+  canonicalRef,
+  alasRef,
+  upstreamRef,
+  targetCommit,
+  reviewPath,
+  ledgerPath,
+}) {
+  let commit = git(cwd, ["rev-parse", `${canonicalRef}^{commit}`]);
+  const seen = new Set();
+  while (commit && !seen.has(commit)) {
+    seen.add(commit);
+    if (isAncestor(cwd, commit, alasRef) || isAncestor(cwd, commit, upstreamRef)) return null;
+    const parents = git(cwd, ["show", "-s", "--format=%P", commit]).split(/\s+/).filter(Boolean);
+    if (isGeneratedIntegrationMerge(cwd, commit, alasRef, upstreamRef, targetCommit)) {
+      commit = parents[2] ?? null;
+      continue;
+    }
+    if (parents.length === 1 && isReviewOnlyCommit(cwd, commit, reviewPath, ledgerPath)) {
+      commit = parents[0];
+      continue;
+    }
+    return commit;
+  }
+  return null;
+}
+
 function restoreWorkflowTree(cwd, alasRef, targetCommit) {
   const remove = spawnSync("git", ["rm", "-r", "--ignore-unmatch", ".github/workflows"], {
     cwd, encoding: "utf8", stdio: "pipe",
@@ -397,16 +439,7 @@ export function buildSyncCandidate({
       staleSyncHeads.push({ref, head, commits});
       continue;
     }
-    canonicalSourceHead = head;
-    canonicalHead = head;
-    for (const merge of lines(git(cwd, ["rev-list", "--reverse", "--merges", `${alasRef}..${ref}`]))) {
-      if (!isGeneratedIntegrationMerge(cwd, merge, alasRef, upstreamRef, tagCommit) &&
-          !isGeneratedPatchBinding(cwd, merge)) {
-        unsupportedMergeCommits.push(merge);
-      }
-    }
-    previousReview ??= readReviewAtRef(cwd, ref, reviewPath);
-    preserved = discoverCanonicalPreservedCommits({
+    const effectiveHead = effectiveCanonicalHead({
       cwd,
       canonicalRef: ref,
       alasRef,
@@ -415,6 +448,24 @@ export function buildSyncCandidate({
       reviewPath,
       ledgerPath,
     });
+    canonicalSourceHead = effectiveHead;
+    canonicalHead = effectiveHead;
+    for (const merge of lines(git(cwd, ["rev-list", "--reverse", "--merges", `${alasRef}..${ref}`]))) {
+      if (!isGeneratedIntegrationMerge(cwd, merge, alasRef, upstreamRef, tagCommit) &&
+          !isGeneratedPatchBinding(cwd, merge)) {
+        unsupportedMergeCommits.push(merge);
+      }
+    }
+    previousReview ??= readReviewAtRef(cwd, ref, reviewPath);
+    preserved = effectiveHead ? discoverCanonicalPreservedCommits({
+      cwd,
+      canonicalRef: effectiveHead,
+      alasRef,
+      upstreamRef,
+      targetCommit: tagCommit,
+      reviewPath,
+      ledgerPath,
+    }) : [];
     preserved = preserved.filter((entry) => {
       const id = patchId(cwd, entry.commit);
       if (id && (downstreamPatchIds.has(id) || preservedPatchIds.has(id))) return false;
