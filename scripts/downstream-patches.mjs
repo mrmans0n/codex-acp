@@ -14,6 +14,10 @@ export const KNOWN_PATCH_IDENTITIES = Object.freeze([
     name: "async-tasks-opt-in",
     commit: "16817016d25a9eed9f3dc7cd1cbdf446569e179d",
   }),
+  Object.freeze({
+    name: "goal-before-first-prompt",
+    commit: "9d2c300ec82da759d3a1606962c04304d2e60fa7",
+  }),
 ]);
 
 function git(cwd, args, options = {}) {
