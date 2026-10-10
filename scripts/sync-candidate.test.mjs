@@ -354,6 +354,8 @@ test("recognizes a prior three-parent generated integration and preserves only i
     });
     assert.deepEqual(second.unsupportedMergeCommits, []);
     assert.deepEqual(second.preservedSyncCommits, [f.maintainer]);
+    assert.equal(second.canonicalHead, f.maintainer);
+    assert.equal(second.integrationCommit, first.integrationCommit);
   } finally {
     rmSync(f.root, {recursive: true, force: true});
   }
@@ -998,3 +1000,167 @@ test("restores the downstream workflow tree while reporting upstream workflow ch
     rmSync(f.root, {recursive: true, force: true});
   }
 });
+
+function stackedFixture() {
+  const root = mkdtempSync(join(tmpdir(), "alas-sync-stacked-"));
+  const cwd = join(root, "repo");
+  const remote = join(root, "origin.git");
+  mkdirSync(cwd);
+  git(cwd, "init", "--bare", remote);
+  git(cwd, "init", "-b", "upstream", cwd);
+  git(cwd, "config", "user.name", "Fixture");
+  git(cwd, "config", "user.email", "fixture@example.test");
+  writeFileSync(join(cwd, "shared.txt"), "upstream header\nshared\n");
+  git(cwd, "add", ".");
+  git(cwd, "commit", "-m", "old stable");
+  const base = git(cwd, "rev-parse", "HEAD");
+  git(cwd, "tag", "v2.0.0");
+  git(cwd, "checkout", "-b", "alas", base);
+  const first = commitFile(cwd, "shared.txt", "upstream header\nshared\nfirst\n", "first downstream patch");
+  const second = commitFile(cwd, "shared.txt", "upstream header\nshared\nfirst\nsecond\n", "second downstream patch");
+  commitFile(cwd, "maintenance.txt", "fork maintenance\n", "downstream maintenance");
+  git(cwd, "checkout", "upstream");
+  const stable = commitFile(cwd, "shared.txt", "new upstream header\nshared\n", "new stable");
+  git(cwd, "tag", "v2.1.0");
+  git(cwd, "remote", "add", "origin", remote);
+  git(cwd, "push", "origin", "alas");
+  const ledger = {
+    schemaVersion: 2,
+    baseTag: "v2.0.0",
+    patches: [
+      {name: "first", commit: first, upstreamPr: null, files: ["shared.txt"], tests: ["shared.test.ts"]},
+      {name: "second", commit: second, upstreamPr: null, files: ["shared.txt"], tests: ["shared.test.ts"]},
+    ],
+  };
+  return {root, cwd, remote, stable, first, second, ledger};
+}
+
+function buildStacked(f, options = {}) {
+  return buildSyncCandidate({
+    cwd: f.cwd,
+    tagRef: "v2.1.0",
+    baseRef: "v2.0.0",
+    upstreamRef: "upstream",
+    alasRef: "alas",
+    branch: "sync/upstream-2.1.0",
+    syncRefs: [],
+    ledger: f.ledger,
+    expectedPatchIdentities: f.ledger.patches,
+    ...options,
+  });
+}
+
+function manualResolution(action, extra = {}) {
+  return {
+    action,
+    ...extra,
+    automatic: false,
+    rationale: `Reviewed ${action} for the new stable header.`,
+    tests: ["shared.test.ts"],
+  };
+}
+
+// Retains the first patch, then stacks the reviewed adaptation of the second patch on the exact
+// candidate commit that binds the first one.
+function stackedResolution(f) {
+  const unresolved = buildStacked(f);
+  const partial = structuredClone(unresolved.syncReview);
+  partial.patches[0].resolution = manualResolution("retain");
+  const firstBound = buildStacked(f, {reviewOverride: partial});
+  const binding = git(f.cwd, "rev-list", "--reverse", "--first-parent",
+    `${f.stable}..${firstBound.exactCandidateCommit}`).split("\n")[0];
+  assert.equal(git(f.cwd, "rev-parse", `${binding}^2`), f.first);
+  git(f.cwd, "checkout", "--detach", binding);
+  const adapted = commitFile(f.cwd, "shared.txt", "new upstream header\nshared\nfirst\nsecond adapted\n",
+    "adapt second downstream patch");
+  const review = structuredClone(unresolved.syncReview);
+  review.patches[0].resolution = manualResolution("retain");
+  review.patches[1].resolution = manualResolution("adapt", {commit: adapted});
+  review.resolved = true;
+  return {unresolved, binding, adapted, review};
+}
+
+test("binds an adaptation stacked on the exact candidate commit it is applied to", () => {
+  const f = stackedFixture();
+  try {
+    const {adapted, review} = stackedResolution(f);
+    const report = buildStacked(f, {reviewOverride: review});
+    assert.equal(report.manualReview, false);
+    assert.deepEqual(report.conflicts, []);
+    assert.deepEqual(report.appliedPatches, ["first", "second"]);
+    assert.deepEqual(report.appliedAdaptations, [{patch: "second", commit: adapted}]);
+    assert.equal(git(f.cwd, "merge-base", "--is-ancestor", adapted, report.exactCandidateCommit), "");
+    assert.equal(git(f.cwd, "show", `${report.exactCandidateCommit}:shared.txt`),
+      "new upstream header\nshared\nfirst\nsecond adapted");
+    assert.equal(report.advancedLedger.patches[1].appliedCommit, adapted);
+
+    const repeated = buildStacked(f, {reviewOverride: review});
+    assert.equal(repeated.exactCandidateCommit, report.exactCandidateCommit);
+    assert.equal(repeated.integrationCommit, report.integrationCommit);
+  } finally {
+    rmSync(f.root, {recursive: true, force: true});
+  }
+}, 60_000);
+
+test("rejects a stacked adaptation whose parent is not the exact candidate commit it is applied to", () => {
+  const f = stackedFixture();
+  try {
+    const {binding, review} = stackedResolution(f);
+    // A sibling of the binding has the same tree but is not the deterministic candidate commit.
+    const sibling = git(f.cwd, "commit-tree", `${binding}^{tree}`, "-p", f.stable, "-m", "lookalike binding");
+    git(f.cwd, "checkout", "--detach", sibling);
+    const misplaced = commitFile(f.cwd, "shared.txt", "new upstream header\nshared\nfirst\nsecond adapted\n",
+      "adapt second downstream patch on a lookalike");
+    review.patches[1].resolution = manualResolution("adapt", {commit: misplaced});
+    assert.throws(() => buildStacked(f, {reviewOverride: review}), /directly descend/i);
+  } finally {
+    rmSync(f.root, {recursive: true, force: true});
+  }
+}, 60_000);
+
+test("reruns on its own canonical integration without rewriting it", () => {
+  const f = stackedFixture();
+  try {
+    const branch = "sync/upstream-2.1.0";
+    const {review} = stackedResolution(f);
+    const resolved = buildStacked(f, {reviewOverride: review});
+    pushSyncCandidate({cwd: f.cwd, branch, expectedRemoteSha: "", ref: resolved.integrationCommit});
+    git(f.cwd, "fetch", "origin", `+refs/heads/${branch}:refs/remotes/origin/${branch}`);
+
+    const rerun = buildStacked(f, {syncRefs: [`origin/${branch}`]});
+    assert.equal(rerun.canonicalHead, null);
+    assert.deepEqual(rerun.unsupportedMergeCommits, []);
+    assert.equal(rerun.manualReview, false);
+    assert.equal(rerun.exactCandidateCommit, resolved.exactCandidateCommit);
+    assert.equal(rerun.integrationCommit, resolved.integrationCommit);
+  } finally {
+    rmSync(f.root, {recursive: true, force: true});
+  }
+}, 60_000);
+
+test("applies resolutions recorded in a review-only commit on the canonical branch", () => {
+  const f = stackedFixture();
+  try {
+    const branch = "sync/upstream-2.1.0";
+    const {unresolved, review} = stackedResolution(f);
+    const resolved = buildStacked(f, {reviewOverride: review});
+    pushSyncCandidate({cwd: f.cwd, branch, expectedRemoteSha: "", ref: unresolved.integrationCommit});
+
+    git(f.cwd, "fetch", "origin", `+refs/heads/${branch}:refs/remotes/origin/${branch}`);
+    git(f.cwd, "checkout", "--detach", `origin/${branch}`);
+    const recorded = commitFile(f.cwd, "docs/alas-sync-review.json", `${JSON.stringify(review, null, 2)}\n`,
+      "docs: resolve v2.1.0 sync review");
+    git(f.cwd, "push", "origin", `${recorded}:refs/heads/${branch}`);
+    git(f.cwd, "fetch", "origin", `+refs/heads/${branch}:refs/remotes/origin/${branch}`);
+
+    const rerun = buildStacked(f, {syncRefs: [`origin/${branch}`]});
+    assert.equal(rerun.syncReviewError, null);
+    assert.equal(rerun.canonicalHead, null);
+    assert.deepEqual(rerun.preservedSyncCommits, []);
+    assert.equal(rerun.manualReview, false);
+    assert.deepEqual(rerun.syncReview, resolved.syncReview);
+    assert.equal(rerun.integrationCommit, resolved.integrationCommit);
+  } finally {
+    rmSync(f.root, {recursive: true, force: true});
+  }
+}, 60_000);
