@@ -201,13 +201,25 @@ export function verifyInstalledPublication({
   const verified = Array.isArray(audit?.verified)
     ? audit.verified.filter((entry) => entry?.name === packageName && entry?.version === version)
     : [];
-  if (verified.length !== 1 ||
-      verified[0]?.attestations?.url !== attestationUrl ||
-      verified[0]?.attestations?.provenance?.predicateType !== SLSA_PROVENANCE_V1 ||
-      !isDeepStrictEqual(verified[0]?.attestationBundles, attestation?.attestations)) {
-    throw new Error(`npm verified attestation does not exactly match ${packageName}@${version}`);
+  const mismatch = verified.length !== 1
+    ? `npm audit verified ${verified.length} matching entries`
+    : verified[0]?.attestations?.url !== attestationUrl
+      ? 'attestation URL differs'
+      : verified[0]?.attestations?.provenance?.predicateType !== SLSA_PROVENANCE_V1
+        ? 'provenance predicate type differs'
+        : !isDeepStrictEqual(verified[0]?.attestationBundles, attestation?.attestations)
+          ? `audit has ${bundleSummary(verified[0]?.attestationBundles)}, attestation endpoint has ${bundleSummary(attestation?.attestations)}`
+          : null;
+  if (mismatch) {
+    throw new Error(`npm verified attestation does not exactly match ${packageName}@${version}: ${mismatch}`);
   }
   return {version, integrity: expectedIntegrity};
+}
+
+function bundleSummary(bundles) {
+  if (!Array.isArray(bundles)) return 'no bundle list';
+  const types = bundles.map((bundle) => bundle?.predicateType ?? 'unknown').join(', ');
+  return `${bundles.length} bundle(s) [${types}]`;
 }
 
 export function verifyAlasPublication({

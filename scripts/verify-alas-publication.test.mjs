@@ -259,4 +259,23 @@ test("verifies the exact installed package and cryptographic signature audit acr
       }],
     },
   }), /installed.*version.*integrity|version.*integrity.*installed/i);
+
+  assert.throws(() => verifyInstalledPublication({
+    packageName,
+    version,
+    expectedIntegrity: integrity,
+    attestationUrl,
+    attestation,
+    lock,
+    audit: {
+      invalid: [],
+      missing: [],
+      verified: [{
+        name: packageName,
+        version,
+        attestations: {url: attestationUrl, provenance: {predicateType: "https://slsa.dev/provenance/v1"}},
+        attestationBundles: [],
+      }],
+    },
+  }), /does not exactly match .*: audit has 0 bundle\(s\) \[\], attestation endpoint has \d+ bundle/);
 });
