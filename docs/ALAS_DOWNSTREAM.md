@@ -271,6 +271,14 @@ publications build on it, and they carry the same preview content.
 
 ## Recovery and rollback
 
+After `npm publish`, npm's attestation endpoint and `npm audit signatures
+--include-attestations` can briefly disagree while the registry propagates.
+The release job's post-publication read-back therefore repeats the whole check
+for up to 750 seconds, 10 seconds apart: a fresh manifest and attestation, a
+fresh install, the signature audit, and both verifiers. Every attempt applies
+the same exact comparisons; a mismatch that persists still fails the job, and
+the error names which part differed.
+
 If npm publication succeeds but release creation fails, rerun the failed
 release job in the original Actions run. If the source is still the protected
 branch head, redispatching the same source and tag reuses its published manifest
