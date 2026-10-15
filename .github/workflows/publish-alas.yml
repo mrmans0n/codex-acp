@@ -323,9 +323,12 @@ jobs:
           gh api "repos/$GITHUB_REPOSITORY/git/ref/tags/$tag" > /tmp/alas-tag-ref.json
           gh release view "$tag" --repo "$GITHUB_REPOSITORY" \
             --json tagName,name,targetCommitish,isDraft,isPrerelease > /tmp/alas-release.json
-          deadline=$((SECONDS + 750))
-          while (( SECONDS < deadline )); do
-            if node --input-type=module 2> /tmp/alas-readback-error.txt <<'NODE' > /tmp/alas-metadata.json
+          # npm can serve the attestation bundles before `npm audit signatures` sees the same set.
+          # Every attempt re-reads npm from scratch, reinstalls into a fresh directory and repeats the
+          # exact comparisons, including the installed-package audit; only the timing is tolerated.
+          readback_attempt() {
+            rm -f /tmp/alas-metadata.json /tmp/alas-attestation.json /tmp/alas-publication.json
+            node --input-type=module 2> /tmp/alas-readback-error.txt <<'NODE' > /tmp/alas-metadata.json || return 1
           import {readFileSync, writeFileSync} from 'node:fs';
           import {verifyAlasPublication} from './scripts/verify-alas-publication.mjs';
 
@@ -364,25 +367,9 @@ jobs:
           });
           process.stdout.write(`${JSON.stringify({...result, alreadyPublished: process.env.ALREADY_PUBLISHED === 'true'})}\n`);
           NODE
-            then
-              cat /tmp/alas-metadata.json
-              break
-            fi
-            remaining=$((deadline - SECONDS))
-            if (( remaining > 0 )); then
-              echo "Waiting for exact npm metadata and provenance (${remaining}s remaining)..."
-              sleep 10
-            fi
-          done
-          if [ ! -s /tmp/alas-metadata.json ]; then
-            cat /tmp/alas-readback-error.txt >&2
-            echo "::error::Post-publication read-back did not verify exact npm, tag, and release metadata."
-            exit 1
-          fi
-
-          provenance_dir="$(mktemp -d)"
-          trap 'rm -rf "$provenance_dir"' EXIT
-          PROVENANCE_DIR="$provenance_dir" node --input-type=module <<'NODE'
+            local provenance_dir
+            provenance_dir="$(mktemp -d)" || return 1
+            PROVENANCE_DIR="$provenance_dir" node --input-type=module <<'NODE' || return 1
           import {writeFileSync} from 'node:fs';
           writeFileSync(`${process.env.PROVENANCE_DIR}/package.json`, `${JSON.stringify({
             name: 'alas-publication-provenance-check',
@@ -391,12 +378,13 @@ jobs:
             dependencies: {'@alas-ide/codex-acp': process.env.VERSION},
           }, null, 2)}\n`);
           NODE
-          npm install --prefix "$provenance_dir" --ignore-scripts --no-audit --no-fund \
-            --registry=https://registry.npmjs.org --prefer-online --fetch-retries=0
-          npm audit signatures --prefix "$provenance_dir" \
-            --registry=https://registry.npmjs.org --json --include-attestations \
-            > /tmp/alas-signature-audit.json
-          PROVENANCE_DIR="$provenance_dir" node --input-type=module <<'NODE' > /tmp/alas-publication.json
+            npm install --prefix "$provenance_dir" --ignore-scripts --no-audit --no-fund \
+              --registry=https://registry.npmjs.org --prefer-online --fetch-retries=0 \
+              2>> /tmp/alas-readback-error.txt >&2 || return 1
+            npm audit signatures --prefix "$provenance_dir" \
+              --registry=https://registry.npmjs.org --json --include-attestations \
+              > /tmp/alas-signature-audit.json 2>> /tmp/alas-readback-error.txt || return 1
+            PROVENANCE_DIR="$provenance_dir" node --input-type=module 2>> /tmp/alas-readback-error.txt <<'NODE' > /tmp/alas-publication.json || return 1
           import {readFileSync} from 'node:fs';
           import {verifyInstalledPublication} from './scripts/verify-alas-publication.mjs';
           const lock = JSON.parse(readFileSync(`${process.env.PROVENANCE_DIR}/package-lock.json`, 'utf8'));
@@ -414,6 +402,31 @@ jobs:
           const metadata = JSON.parse(readFileSync('/tmp/alas-metadata.json', 'utf8'));
           process.stdout.write(`${JSON.stringify({...metadata, cryptographicProvenance: true})}\n`);
           NODE
+          }
+          deadline=$((SECONDS + 750))
+          readback_verified=false
+          readback_attempts=0
+          while (( SECONDS < deadline )); do
+            readback_attempts=$((readback_attempts + 1))
+            if readback_attempt; then
+              readback_verified=true
+              break
+            fi
+            grep -E 'Error' /tmp/alas-readback-error.txt | tail -n 1 >&2 || tail -n 3 /tmp/alas-readback-error.txt >&2 || true
+            remaining=$((deadline - SECONDS))
+            if (( remaining > 0 )); then
+              echo "Waiting for exact npm metadata and provenance (${remaining}s remaining)..."
+              sleep 10
+            fi
+          done
+          if [ "$readback_verified" != true ]; then
+            rm -f /tmp/alas-publication.json
+            cat /tmp/alas-readback-error.txt >&2
+            echo "::error::Post-publication read-back did not verify exact npm, tag, release, and installed provenance metadata after $readback_attempts attempts."
+            exit 1
+          fi
+          echo "Post-publication read-back verified on attempt $readback_attempts."
+          cat /tmp/alas-publication.json
       - name: Always write durable release-artifact summary
         if: ${{ always() }}
         env:
