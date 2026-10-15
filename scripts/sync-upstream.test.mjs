@@ -128,6 +128,39 @@ test("protected Alas publication reads back npm provenance, immutable tag, and e
   assert.match(publish, /Post-publication read-back|Publication verification/i);
 });
 
+test("protected Alas publication retries the whole read-back, including the installed audit", () => {
+  const start = publish.indexOf("readback_attempt() {");
+  const loop = publish.indexOf("if readback_attempt; then");
+  assert.ok(start > -1 && loop > start);
+  assert.match(publish, /deadline=\$\(\(SECONDS \+ 750\)\)/);
+  assert.match(publish, /readback_verified" != true[\s\S]*exit 1/);
+  const body = publish.slice(start, loop);
+  // Inside an `if` condition errexit is off, so every node/npm command must propagate failure.
+  const commands = [];
+  let inHeredoc = false;
+  let pending = "";
+  for (const line of body.split("\n")) {
+    if (inHeredoc) {
+      if (line.trim() === "NODE") inHeredoc = false;
+      continue;
+    }
+    pending += line.trim();
+    if (pending.endsWith("\\")) {
+      pending = pending.slice(0, -1) + " ";
+      continue;
+    }
+    if (pending.includes("<<'NODE'")) inHeredoc = true;
+    commands.push(pending);
+    pending = "";
+  }
+  const checked = commands.filter((command) => /^(PROVENANCE_DIR="[^"]*" )?(node|npm) /.test(command));
+  assert.equal(checked.length, 5, checked.join("\n"));
+  for (const command of checked) assert.match(command, /\|\| return 1$/, command);
+  for (const marker of ["verifyAlasPublication", "npm audit signatures", "verifyInstalledPublication"]) {
+    assert.ok(body.includes(marker), marker);
+  }
+});
+
 test("publish verifies the declared stable tag against the exact upstream-main merge-base", () => {
   assert.match(publish, /upstream_tag:/);
   assert.match(publish, /refs\/alas-upstream-main/);
