@@ -18,6 +18,10 @@ export const KNOWN_PATCH_IDENTITIES = Object.freeze([
     name: "goal-before-first-prompt",
     commit: "9d2c300ec82da759d3a1606962c04304d2e60fa7",
   }),
+  Object.freeze({
+    name: "session-system-prompt-append",
+    commit: "fc0eb68e9be4d407397cd6bf22620f304afaab96",
+  }),
 ]);
 
 function git(cwd, args, options = {}) {
