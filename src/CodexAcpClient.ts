@@ -1,3 +1,4 @@
+import {readSessionInstructionAppend} from "./SessionInstructions";
 import {
     type ApiKeyAuthRequest,
     CODEX_API_KEY_ENV_VAR,
@@ -148,6 +149,13 @@ export class CodexAcpClient {
     private pendingLoginCompleted: Promise<AccountLoginCompletedNotification> | null = null;
     private pendingAccountUpdated: Promise<AccountUpdatedNotification> | null = null;
     private readonly sessionNotificationQueues = new Map<string, Promise<void>>();
+    /**
+     * The `systemPrompt.append` each thread was opened with in this process. A
+     * client that reconnects to a live adapter sends `session/load` or
+     * `session/resume` again with the same text; Codex already holds those
+     * instructions, so a matching repeat is accepted without an override.
+     */
+    private readonly appliedInstructionAppends = new Map<string, string>();
     private readonly subagents: CodexSubagentSubscriptions;
     private skillExtraRoots: string[] = [];
     private configPath: string | null = null;
@@ -672,17 +680,21 @@ export class CodexAcpClient {
     }
 
     async resumeSession(request: acp.ResumeSessionRequest, onSubscribed?: () => void): Promise<SessionMetadata> {
+        const append = readSessionInstructionAppend(request._meta);
+        const instructionOverride = await this.sessionInstructionOverride(append, request.cwd, request.sessionId);
         const additionalDirectories = readAdditionalDirectories(request.cwd, request.additionalDirectories, request._meta);
         await this.refreshSkills(request.cwd, additionalDirectories);
 
         const sessionConfig = await this.createSessionConfig(request.cwd, additionalDirectories, request.mcpServers ?? []);
         const response = await this.resumeThread({
             excludeTurns: true,
+            ...instructionOverride,
             config: sessionConfig.config,
             cwd: request.cwd,
             modelProvider: await this.getResumeModelProvider(),
             threadId: request.sessionId,
         });
+        this.recordInstructionAppend(request.sessionId, append);
         onSubscribed?.();
         const codexModels = await this.fetchAvailableModels();
         const currentModelId = this.createModelId(codexModels, response.model, response.reasoningEffort).toString();
@@ -704,8 +716,9 @@ export class CodexAcpClient {
         releaseFailedFork: (threadId: string) => Promise<void> = threadId => this.closeSession(threadId),
     ): Promise<SessionMetadata> {
         const additionalDirectories = readAdditionalDirectories(request.cwd, request.additionalDirectories, request._meta);
-        return await runForkSession(request, additionalDirectories, {
+        const metadata = await runForkSession(request, additionalDirectories, {
             codexClient: this.codexClient,
+            sessionInstructionOverride: (append, cwd) => this.sessionInstructionOverride(append, cwd),
             refreshSkills: (cwd, directories) => this.refreshSkills(cwd, directories),
             createSessionConfig: (cwd, directories, mcpServers) =>
                 this.createSessionConfig(cwd, directories, mcpServers),
@@ -716,20 +729,26 @@ export class CodexAcpClient {
             getCollaborationMode: sessionId => this.getCollaborationMode(sessionId),
             releaseFailedFork,
         });
+        this.recordInstructionAppend(metadata.sessionId, readSessionInstructionAppend(request._meta));
+        return metadata;
     }
 
     async loadSession(request: acp.LoadSessionRequest, onSubscribed?: () => void): Promise<SessionMetadataWithThread> {
+        const append = readSessionInstructionAppend(request._meta);
+        const instructionOverride = await this.sessionInstructionOverride(append, request.cwd, request.sessionId);
         const additionalDirectories = readAdditionalDirectories(request.cwd, request.additionalDirectories, request._meta);
         await this.refreshSkills(request.cwd, additionalDirectories);
 
         const sessionConfig = await this.createSessionConfig(request.cwd, additionalDirectories, request.mcpServers ?? []);
         const response = await this.resumeThread({
             excludeTurns: true,
+            ...instructionOverride,
             config: sessionConfig.config,
             cwd: request.cwd,
             modelProvider: await this.getResumeModelProvider(),
             threadId: request.sessionId,
         });
+        this.recordInstructionAppend(request.sessionId, append);
         onSubscribed?.();
         // Resume cursors bound durable history; later turns arrive through live events.
         // A null paginated cursor means there was no durable history at resume time.
@@ -789,17 +808,27 @@ export class CodexAcpClient {
     }
 
     async newSession(request: acp.NewSessionRequest): Promise<SessionMetadata> {
+        const append = readSessionInstructionAppend(request._meta);
+        const custom = airCustomInstructions(request._meta);
+        // Both extensions target developerInstructions. Never silently replace an
+        // append with AIR's override; callers must choose one instruction contract.
+        if (append !== undefined && custom !== undefined) {
+            throw RequestError.invalidParams(undefined, "systemPrompt.append and AIR customInstructions cannot be combined");
+        }
+        const instructionOverride = await this.sessionInstructionOverride(append, request.cwd);
         const additionalDirectories = readAdditionalDirectories(request.cwd, request.additionalDirectories, request._meta);
         const developerInstructions = airCustomInstructions(request._meta);
         await this.refreshSkills(request.cwd, additionalDirectories);
 
         const sessionConfig = await this.createSessionConfig(request.cwd, additionalDirectories, request.mcpServers);
         const response = await this.codexClient.threadStart({
+            ...instructionOverride,
             config: sessionConfig.config,
             modelProvider: this.getModelProvider(),
             cwd: request.cwd,
             ...(developerInstructions !== undefined && {developerInstructions}),
         });
+        this.recordInstructionAppend(response.thread.id, append);
 
         const codexModels = await this.fetchAvailableModels();
         if (codexModels.length === 0) {
@@ -934,6 +963,37 @@ export class CodexAcpClient {
 
     getMcpServerStartupVersion(): number {
         return this.codexClient.mcpStartup.version();
+    }
+
+    private recordInstructionAppend(sessionId: string, append: string | undefined): void {
+        if (append === undefined) return;
+        this.appliedInstructionAppends.set(sessionId, append);
+    }
+
+    private async sessionInstructionOverride(append: string | undefined, cwd: string, sessionId?: string): Promise<{developerInstructions?: string}> {
+        if (append === undefined) return {};
+        if (sessionId !== undefined) {
+            // Codex ignores instruction overrides for already-loaded threads, even
+            // idle ones. Fail explicitly rather than claiming a role was applied.
+            let cursor: string | undefined;
+            do {
+                const page = await this.codexClient.threadLoadedList({...(cursor !== undefined && {cursor})});
+                if (page.data.includes(sessionId)) {
+                    if (this.appliedInstructionAppends.get(sessionId) === append) return {};
+                    throw RequestError.invalidParams(undefined, "Cannot append instructions to a loaded thread; close it before loading or resuming with instructions");
+                }
+                cursor = page.nextCursor ?? undefined;
+            } while (cursor !== undefined);
+        }
+        const effective = await this.codexClient.configRead({cwd, includeLayers: false});
+        // Read the effective project/user configuration, not restored thread text:
+        // the latter may already include this append and would duplicate it on load.
+        const configured = this.config["developer_instructions"] !== undefined
+            ? this.config["developer_instructions"] : effective.config.developer_instructions;
+        if (configured != null && typeof configured !== "string") {
+            throw RequestError.invalidParams(undefined, "Configured developer_instructions must be a string");
+        }
+        return {developerInstructions: configured ? (append ? `${configured}\n\n${append}` : configured) : append};
     }
 
     private async createSessionConfig(
