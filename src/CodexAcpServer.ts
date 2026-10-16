@@ -1,3 +1,4 @@
+import {readSessionInstructionAppend, SYSTEM_PROMPT_CAPABILITY} from "./SessionInstructions";
 import * as acp from "@agentclientprotocol/sdk";
 import {RequestError, type SessionId, type SessionModeState} from "@agentclientprotocol/sdk";
 import {CodexEventHandler, type CompletedPlan} from "./CodexEventHandler";
@@ -516,6 +517,7 @@ export class CodexAcpServer {
             },
             authMethods: getCodexAuthMethods(_params.clientCapabilities),
             _meta: {
+                systemPrompt: SYSTEM_PROMPT_CAPABILITY,
                 steering: {
                     supported: true,
                 },
@@ -1155,6 +1157,7 @@ export class CodexAcpServer {
     }
 
     async loadSession(params: acp.LoadSessionRequest): Promise<LegacyLoadSessionResponse> {
+        readSessionInstructionAppend(params._meta);
         return this.recovery === null
             ? await this.loadSessionOnce(params)
             : await this.recovery.trackOpen(params.sessionId, () => this.loadSessionOnce(params));
@@ -1211,6 +1214,7 @@ export class CodexAcpServer {
     }
 
     async resumeSession(params: acp.ResumeSessionRequest): Promise<LegacyResumeSessionResponse> {
+        readSessionInstructionAppend(params._meta);
         return this.recovery === null
             ? await this.resumeSessionOnce(params)
             : await this.recovery.trackOpen(params.sessionId, () => this.resumeSessionOnce(params));
@@ -1238,6 +1242,7 @@ export class CodexAcpServer {
     }
 
     async forkSession(params: acp.ForkSessionRequest): Promise<acp.ForkSessionResponse> {
+        readSessionInstructionAppend(params._meta);
         if (this.providerUpdate !== null) {
             await this.waitForProviderUpdate();
         }
@@ -1370,6 +1375,7 @@ export class CodexAcpServer {
     async newSession(
         params: acp.NewSessionRequest,
     ): Promise<LegacyNewSessionResponse> {
+        readSessionInstructionAppend(params._meta);
         if (this.providerUpdate !== null) {
             await this.waitForProviderUpdate();
         }
