@@ -1,9 +1,10 @@
 /**
- * The AIR `sessionIndex` extension: the session list that AIR uses as its
+ * The `sessionIndex` extension: the session list that a client uses as its
  * index of Codex threads, and the requests that change an entry of it.
  *
  * Everything here applies only to a client that declares `sessionIndex` in
- * `clientCapabilities._meta.jetbrains.air.capabilities`. Other clients keep
+ * `clientCapabilities._meta.jetbrains.air.capabilities` (AIR) or, without AIR,
+ * `clientCapabilities._meta.sessionIndex: {version}`. Other clients keep
  * the `session/list` path of {@link CodexAcpClient.listSessions}.
  * See `docs/air-extensions.md`.
  */
@@ -13,7 +14,7 @@ import {RequestError} from "@agentclientprotocol/sdk";
 import {z} from "zod";
 import type {ServerNotification} from "./app-server";
 import type {Thread, ThreadListParams, ThreadListResponse, ThreadStatus, Turn} from "./app-server/v2";
-import {AIR_META_KEY, JETBRAINS_META_KEY, withAirMeta} from "./AirExtension";
+import {AIR_META_KEY, clientSupportsAirCapability, isAirClient, JETBRAINS_META_KEY, withAirMeta} from "./AirExtension";
 import {listedSessionTitle} from "./SessionTitle";
 import {logger} from "./Logger";
 
@@ -45,6 +46,58 @@ export const MAX_SESSION_INDEX_LIMIT = 100;
 
 /** The `_meta.jetbrains.air` key of the archive state of a session list row or `session_info_update`. */
 export const AIR_ARCHIVED_KEY = "archived";
+
+/** The top-level `_meta` key of the session index for a client that is not AIR. */
+export const NEUTRAL_SESSION_INDEX_META_KEY = "sessionIndex";
+export const NEUTRAL_SESSION_INDEX_VERSION = 1;
+
+/**
+ * Where the session index reads and writes metadata for a client: `_meta.jetbrains.air` for AIR, and the
+ * top-level `_meta.sessionIndex` for a client that opted in without AIR. The payloads are the same.
+ */
+export interface SessionIndexMeta {
+    /** The payload object of the namespace in `meta`, or `{}`. */
+    read(meta: unknown): Record<string, unknown>;
+    /** `meta` with `key` set in the namespace, other keys kept. */
+    write(meta: Record<string, unknown> | null | undefined, key: string, value: unknown): Record<string, unknown>;
+}
+
+export const AIR_SESSION_INDEX_META: SessionIndexMeta = {
+    read: (meta) => asRecord(asRecord(asRecord(meta)[JETBRAINS_META_KEY])[AIR_META_KEY]),
+    write: withAirMeta,
+};
+
+export const NEUTRAL_SESSION_INDEX_META: SessionIndexMeta = {
+    read: (meta) => asRecord(asRecord(meta)[NEUTRAL_SESSION_INDEX_META_KEY]),
+    write: (meta, key, value) => {
+        const root = asRecord(meta);
+        return {...root, [NEUTRAL_SESSION_INDEX_META_KEY]: {...asRecord(root[NEUTRAL_SESSION_INDEX_META_KEY]), [key]: value}};
+    },
+};
+
+/**
+ * The session index namespace of a client, or `null` when it has no session index. AIR is governed only by its
+ * `sessionIndex` capability and its top-level `_meta.sessionIndex` is ignored. Another client opts in with
+ * `_meta.sessionIndex: {version}`, an integer of at least 1.
+ */
+export function sessionIndexMetaOf(capabilities: acp.ClientCapabilities | null | undefined): SessionIndexMeta | null {
+    if (isAirClient(capabilities)) {
+        return clientSupportsAirCapability(capabilities, AIR_SESSION_INDEX_KEY) ? AIR_SESSION_INDEX_META : null;
+    }
+    const declared = capabilities?._meta?.[NEUTRAL_SESSION_INDEX_META_KEY];
+    if (declared === null || typeof declared !== "object" || Array.isArray(declared)) return null;
+    const version = (declared as Record<string, unknown>)["version"];
+    return typeof version === "number" && Number.isInteger(version) && version >= 1 ? NEUTRAL_SESSION_INDEX_META : null;
+}
+
+/**
+ * The fields of a row that the adapter wrote, whichever namespace holds them: a row carries exactly one.
+ * For the readers that do not know the client, as the list subscriptions.
+ */
+export function sessionIndexRowFields(row: acp.SessionInfo): Record<string, unknown> {
+    const air = AIR_SESSION_INDEX_META.read(row._meta);
+    return Object.keys(air).length > 0 ? air : NEUTRAL_SESSION_INDEX_META.read(row._meta);
+}
 
 /** The `archived` list option: which Codex lists the session index reads. */
 export type SessionIndexArchivedFilter = "unarchived" | "archived" | "all";
@@ -107,15 +160,18 @@ export const sessionListSubscriptionParamsParser = z.preprocess(
 );
 
 /**
- * Reads `_meta.jetbrains.air.list` of a `session/list` request.
+ * Reads `list` of the client's namespace, `_meta.jetbrains.air.list` or `_meta.sessionIndex.list`, of a
+ * `session/list` request.
  *
  * @throws RequestError `invalidParams` for a `limit` that is not an integer of at least 1, an `archived` that is
  *   not `"unarchived"`, `"archived"` or `"all"`, or an `includeWorktrees` that is not a boolean. Omitted and
  *   `null` mean the default for each.
  */
-export function readSessionIndexListOptions(meta: Record<string, unknown> | null | undefined): SessionIndexListOptions {
-    const jetbrains = asRecord(asRecord(meta)[JETBRAINS_META_KEY]);
-    const list = asRecord(asRecord(jetbrains[AIR_META_KEY])[AIR_SESSION_LIST_KEY]);
+export function readSessionIndexListOptions(
+    meta: Record<string, unknown> | null | undefined,
+    namespace: SessionIndexMeta = AIR_SESSION_INDEX_META,
+): SessionIndexListOptions {
+    const list = asRecord(namespace.read(meta)[AIR_SESSION_LIST_KEY]);
     return {
         limit: readLimit(list["limit"]),
         archived: readArchivedFilter(list["archived"]),
@@ -429,6 +485,7 @@ export function sessionIndexSessionInfo(
     thread: Thread,
     archived: boolean,
     activity: SessionActivity | null,
+    namespace: SessionIndexMeta = AIR_SESSION_INDEX_META,
 ): acp.SessionInfo {
     const airFields: Record<string, unknown> = {[AIR_ARCHIVED_KEY]: archived};
     // Codex moves `recencyAt` when a turn starts and orders threads by it: the time of the last prompt.
@@ -440,7 +497,7 @@ export function sessionIndexSessionInfo(
     if (activity?.lastTurnEndedAt !== undefined) airFields[AIR_LAST_TURN_ENDED_AT_KEY] = activity.lastTurnEndedAt;
     let meta: Record<string, unknown> | undefined;
     for (const [key, value] of Object.entries(airFields)) {
-        meta = withAirMeta(meta, key, value);
+        meta = namespace.write(meta, key, value);
     }
     return {
         sessionId: thread.id,
@@ -555,10 +612,10 @@ export class SessionIndexActivity {
 
 /**
  * What the client shows of a row, without `updatedAt`: a row whose signature did not change is not sent again.
- * `title` and the AIR fields `lastPromptAt`, `state`, `lastTurnEndedAt`, `model`, `forkedFrom` and `archived`.
+ * `title` and the row fields `lastPromptAt`, `state`, `lastTurnEndedAt`, `model`, `forkedFrom` and `archived`.
  */
 export function sessionIndexRowSignature(row: acp.SessionInfo): string {
-    const air = asRecord(asRecord(asRecord(row._meta)[JETBRAINS_META_KEY])[AIR_META_KEY]);
+    const air = sessionIndexRowFields(row);
     return JSON.stringify([
         row.title ?? null,
         air[AIR_LAST_PROMPT_AT_KEY] ?? null,
