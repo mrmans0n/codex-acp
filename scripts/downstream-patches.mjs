@@ -22,6 +22,10 @@ export const KNOWN_PATCH_IDENTITIES = Object.freeze([
     name: "session-system-prompt-append",
     commit: "fc0eb68e9be4d407397cd6bf22620f304afaab96",
   }),
+  Object.freeze({
+    name: "neutral-session-index",
+    commit: "bf6dd64df0bf990d6528ceaa62c5ba94c8ba9cb0",
+  }),
 ]);
 
 function git(cwd, args, options = {}) {

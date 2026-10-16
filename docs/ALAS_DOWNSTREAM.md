@@ -25,9 +25,11 @@ patches carried by Alas. Every entry records:
 
 The current functional patches are `goal-opt-in` (upstream PR #583),
 `async-tasks-opt-in` (no upstream PR yet), `goal-before-first-prompt`
-(upstream PR #584), and `session-system-prompt-append` (upstream PR #585,
+(upstream PR #584), `session-system-prompt-append` (upstream PR #585,
 plus acceptance of a repeated identical append on a thread the adapter process
-already loaded). Keep ledger entries and their file
+already loaded), and `neutral-session-index` (no upstream PR yet: the session
+index under `_meta.sessionIndex` for a client that does not declare AIR).
+Keep ledger entries and their file
 lists exact when a patch changes. `npm run test:maintenance` verifies the ledger
 against the recorded commits. A patch added to the ledger after the latest sync
 review has no transition yet; the next stable sync classifies it with the
