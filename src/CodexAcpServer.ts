@@ -174,6 +174,7 @@ import {
     clientSupportsAirCapability,
     JETBRAINS_META_KEY,
 } from "./AirExtension";
+import {NEUTRAL_SESSION_INDEX_META_KEY} from "./SessionIndex";
 import {SessionIndexService} from "./SessionIndexService";
 import type {SessionIndexTitleState} from "./SessionIndexTitles";
 import {ASYNC_TASK_STOP_METHOD, asyncTaskCapability} from "./async-tasks/AsyncTaskExtension";
@@ -381,7 +382,7 @@ export class CodexAcpServer {
     private readonly recovery: AppServerRecovery<SessionState> | null;
     private initializeRequest: acp.InitializeRequest | null = null;
     private providerUpdate: Promise<void> | null = null;
-    /** The AIR `sessionIndex` extension, see `SessionIndexService.ts`. */
+    /** The `sessionIndex` extension, for AIR or a client-neutral opt-in, see `SessionIndexService.ts`. */
     readonly sessionIndex = new SessionIndexService({
         connection: () => this.connection,
         client: () => this.codexAcpClient,
@@ -477,6 +478,8 @@ export class CodexAcpServer {
             controlMethod: GOAL_CONTROL_METHOD,
             actions: [...GOAL_CONTROL_ACTIONS],
         };
+        // The session index for a client that opted in without AIR, see `docs/air-extensions.md`.
+        const neutralSessionIndex = this.sessionIndex.neutralCapability();
         const sessionCapabilities: SubagentAwareSessionCapabilities = {
             resume: { },
             list: { },
@@ -526,6 +529,9 @@ export class CodexAcpServer {
                 } : {}),
                 ...(this.capabilities.asyncTasks && !this.capabilities.airClient ? {
                     "async-tasks": asyncTaskCapability(),
+                } : {}),
+                ...(neutralSessionIndex ? {
+                    [NEUTRAL_SESSION_INDEX_META_KEY]: neutralSessionIndex,
                 } : {}),
                 // Only AIR gets the AIR extension, see `docs/air-extensions.md`.
                 ...(this.capabilities.airClient ? {

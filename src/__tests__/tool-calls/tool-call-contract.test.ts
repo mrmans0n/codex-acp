@@ -176,6 +176,12 @@ describe("ACP tool call contract", () => {
         expect(render(ClientCapabilities.from({_meta: {goal: {}, "async-tasks": true}})))
             .toBe(render(ClientCapabilities.from({})));
     });
+
+    it("keeps a client-neutral session index opt-in on the ordinary non-AIR tool contract", () => {
+        const neutral = ClientCapabilities.from({_meta: {sessionIndex: {version: 1}}});
+        expect(neutral).toEqual(ClientCapabilities.from({}));
+        expect(render(neutral)).toBe(render(ClientCapabilities.from({})));
+    });
 });
 
 describe("ClientCapabilities", () => {

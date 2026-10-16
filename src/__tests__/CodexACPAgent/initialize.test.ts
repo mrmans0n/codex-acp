@@ -141,6 +141,33 @@ describe('CodexACPAgent - initialize', () => {
         expect(result._meta).not.toHaveProperty("jetbrains");
     });
 
+    it('advertises the client-neutral session index to an opted-in client that is not AIR', async () => {
+        const result = await agent.initialize({
+            protocolVersion: acp.PROTOCOL_VERSION,
+            clientCapabilities: {_meta: {sessionIndex: {version: 1}}},
+        });
+
+        expect(result._meta).toEqual({
+            systemPrompt: {version: 1, append: true, clear: true, maxBytes: 262144},
+            steering: {supported: true},
+            sessionIndex: {
+                version: 1,
+                capabilities: ["sessionArchive", "sessionRename", "sessionListSubscribe"],
+            },
+        });
+    });
+
+    it('answers an AIR client that also sends the client-neutral session index by the AIR rules alone', async () => {
+        const result = await agent.initialize({
+            protocolVersion: acp.PROTOCOL_VERSION,
+            clientCapabilities: {_meta: {jetbrains: {air: {version: 1, capabilities: ["sessionIndex"]}}, sessionIndex: {version: 1}}},
+        });
+
+        expect(result._meta).not.toHaveProperty("sessionIndex");
+        expect((result._meta as any).jetbrains.air.capabilities)
+            .toEqual(expect.arrayContaining(["sessionIndex", "sessionArchive", "sessionRename", "sessionListSubscribe"]));
+    });
+
     it('should advertise gateway auth when the client opts into gateway auth metadata', async () => {
         const params: acp.InitializeRequest = {
             protocolVersion: acp.PROTOCOL_VERSION,
