@@ -275,7 +275,7 @@ test("the committed ledger matches the exact downstream patch commits", () => {
     new URL("../docs/alas-downstream-patches.json", import.meta.url),
     "utf8",
   )));
-  assert.equal(ledger.patches.length, 3);
+  assert.equal(ledger.patches.length, KNOWN_PATCH_IDENTITIES.length);
   for (const patch of ledger.patches) {
     const changed = git(new URL("..", import.meta.url).pathname, "diff-tree", "--no-commit-id", "--name-only", "-r", patch.commit)
       .split("\n").filter(Boolean).sort();
@@ -310,9 +310,12 @@ test("the committed sync review matches recomputed classifications and has expli
   const reviewCommit = git(cwd, "log", "--first-parent", "-1", "--format=%H", "--", "docs/alas-sync-review.json");
   const priorLedgerPath = `${reviewCommit}^1:docs/alas-downstream-patches.json`;
   const hasPriorLedger = spawnSync("git", ["cat-file", "-e", priorLedgerPath], {cwd}).status === 0;
-  const previousLedger = hasPriorLedger
-    ? validatePatchLedger(JSON.parse(git(cwd, "show", priorLedgerPath)))
-    : ledger;
+  // The prior ledger predates any patch recorded after the review, so it is checked only against
+  // the identities it already carried.
+  const priorLedger = hasPriorLedger ? JSON.parse(git(cwd, "show", priorLedgerPath)) : ledger;
+  const previousLedger = validatePatchLedger(priorLedger, {
+    expectedPatchIdentities: KNOWN_PATCH_IDENTITIES.filter(({name}) => priorLedger.patches.some((patch) => patch.name === name)),
+  });
   const classifications = classifyDownstreamPatches({
     cwd,
     ledger: {...previousLedger, patches: previousLedger.patches.filter(({name}) => reviewed.has(name))},
