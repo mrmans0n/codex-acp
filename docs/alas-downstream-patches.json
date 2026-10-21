@@ -192,6 +192,26 @@
       ],
       "disposition": "active",
       "retiredCommits": []
+    },
+    {
+      "name": "neutral-codex-hook-review-execution",
+      "commit": "960f77945bf94d7cb5fa6ea7fcedb01d210f2ce6",
+      "upstreamPr": null,
+      "files": [
+        "docs/codex-hook-review.md",
+        "src/AcpExtensions.ts",
+        "src/CodexAcpClient.ts",
+        "src/CodexAcpServer.ts",
+        "src/CodexAppServerClient.ts",
+        "src/CodexHookReview.ts",
+        "src/GoalExtension.ts",
+        "src/__tests__/app-server-recovery/recovery.test.ts"
+      ],
+      "tests": [
+        "src/__tests__/app-server-recovery/recovery.test.ts"
+      ],
+      "disposition": "active",
+      "retiredCommits": []
     }
   ],
   "retiredCommits": [],
