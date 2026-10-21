@@ -30,6 +30,10 @@ export const KNOWN_PATCH_IDENTITIES = Object.freeze([
     name: "neutral-codex-hook-review",
     commit: "4d4340534856c343cb68a295a9d48177cf079ee7",
   }),
+  Object.freeze({
+    name: "neutral-codex-hook-review-execution",
+    commit: "960f77945bf94d7cb5fa6ea7fcedb01d210f2ce6",
+  }),
 ]);
 
 function git(cwd, args, options = {}) {
