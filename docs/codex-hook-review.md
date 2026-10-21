@@ -93,11 +93,15 @@ The adapter uses JSON-RPC error code `-32044` with `data.kind`:
   identity. Refresh the displayed list and selection before trusting again.
 
 The adapter reserves `-32044` for an ACP operation that has sent no hook-capable
-work. Once an operation dispatches a potentially turn-starting request, a later
-review failure returns an ordinary `-32603` failure instead. Clients must not
-automatically replay earlier work. Generated goal and steering continuations
-retain the current request's reviewed context and dispatch history; they do not
-silently begin a new retry boundary.
+work. A same-process guard failure after dispatch returns ordinary `-32603`.
+Existing recovery may wrap that failure as `1001` with process restartability
+metadata. Neither `-32603` nor `1001`, including `restartable: true`, permits
+replaying the entire ACP operation. Only exact code `-32044` with a supported
+`data.kind` (`codex_hook_review_required` or `codex_hook_changed`) permits an
+automatic whole-operation retry after fresh review.
+
+Generated goal and steering continuations retain the current request's reviewed
+context and dispatch history; they do not silently begin a new retry boundary.
 
 A failed pre-dispatch review does not write trust or send the blocked operation.
 Trust writes are not transactional: a transport failure or failed readback after a write
