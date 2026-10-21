@@ -186,7 +186,6 @@
         "src/__tests__/scenarios/client-profiles.test.ts"
       ],
       "tests": [
-        "src/__tests__/CodexHooks.test.ts",
         "src/__tests__/CodexACPAgent/initialize.test.ts",
         "src/__tests__/app-server-recovery/recovery.test.ts",
         "src/__tests__/scenarios/client-profiles.test.ts"
