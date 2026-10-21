@@ -143,8 +143,8 @@ import {
 } from "./subagents/AcpSubagents";
 import {CodexSubagentEventRouter} from "./subagents/CodexSubagentEventRouter";
 import {nameFromAgentPath} from "./subagents/CodexAgentPath";
-import {listCodexHooks, trustCodexHooks, type CodexHookIdentity} from "./CodexHookTrust";
-import type {HooksListEntry} from "./app-server/v2/HooksListEntry";
+import {type CodexHookIdentity} from "./CodexHookTrust";
+import {CodexHookReview, type ReviewedCodexHooks} from "./CodexHookReview";
 import {
     accountFromUpdated,
     fromAccount,
@@ -382,6 +382,7 @@ export class CodexAcpServer {
     private readonly recovery: AppServerRecovery<SessionState> | null;
     private initializeRequest: acp.InitializeRequest | null = null;
     private providerUpdate: Promise<void> | null = null;
+    private readonly hookReview = new CodexHookReview(() => this.codexAcpClient);
     /** The `sessionIndex` extension, for AIR or a client-neutral opt-in, see `SessionIndexService.ts`. */
     readonly sessionIndex = new SessionIndexService({
         connection: () => this.connection,
@@ -470,6 +471,7 @@ export class CodexAcpServer {
         this.reportingConnection.reports.compareMeta = this.capabilities.airClient;
         this.booleanConfigOptionsSupported = clientSupportsBooleanConfigOptions(_params.clientCapabilities);
         this.sessionIndex.configure(_params.clientCapabilities);
+        this.hookReview.configure(_params.clientCapabilities?._meta?.["codexHooks"], this.capabilities.airClient);
         await this.runWithProcessCheck(() => this.codexAcpClient.initialize(_params));
         this.sessionIndex.observe(this.codexAcpClient);
         this.publishFirstAuthStatusAfterResponse();
@@ -530,6 +532,7 @@ export class CodexAcpServer {
                 ...(this.capabilities.asyncTasks && !this.capabilities.airClient ? {
                     "async-tasks": asyncTaskCapability(),
                 } : {}),
+                ...(this.hookReview.enabled ? {codexHooks: {version: 1, reviewToken: true}} : {}),
                 ...(neutralSessionIndex ? {
                     [NEUTRAL_SESSION_INDEX_META_KEY]: neutralSessionIndex,
                 } : {}),
@@ -559,21 +562,30 @@ export class CodexAcpServer {
         };
     }
 
-    async listHooks(cwd: string): Promise<HooksListEntry> {
+    async listHooks(cwd: string): Promise<ReviewedCodexHooks> {
         if (this.providerUpdate !== null) await this.waitForProviderUpdate();
         const appServer = this.ensureAppServer();
         if (appServer) await appServer;
-        return await this.runWithProcessCheck(() => listCodexHooks(this.codexAcpClient.appServerClient, cwd));
+        return await this.runWithProcessCheck(() => this.hookReview.list(cwd));
     }
 
-    async trustHooks(cwd: string, hooks: CodexHookIdentity[]): Promise<{trusted: boolean}> {
+    async trustHooks(cwd: string, hooks: CodexHookIdentity[], reviewToken?: string): Promise<{trusted: boolean}> {
         if (this.providerUpdate !== null) await this.waitForProviderUpdate();
         const appServer = this.ensureAppServer();
         if (appServer) await appServer;
-        return {trusted: await this.runWithProcessCheck(() => trustCodexHooks(this.codexAcpClient.appServerClient, cwd, hooks))};
+        return {trusted: await this.runWithProcessCheck(() => this.hookReview.trust(cwd, hooks, reviewToken))};
     }
 
     async extMethod(method: string, params: Record<string, unknown>): Promise<Record<string, unknown>> {
+        if ((method === GOAL_CONTROL_METHOD || method === LEGACY_GOAL_CONTROL_METHOD)
+            && (params["action"] === "set" || params["action"] === "resume")) {
+            const session = this.sessions.get(params["sessionId"] as string);
+            if (session !== undefined) return this.hookReview.run(session.cwd, params["_meta"], () => this.extMethodReviewed(method, params));
+        }
+        return this.extMethodReviewed(method, params);
+    }
+
+    private async extMethodReviewed(method: string, params: Record<string, unknown>): Promise<Record<string, unknown>> {
         const methodRequest = { method: method, params: params };
         if (!isExtMethodRequest(methodRequest)) {
             return {};
@@ -1163,6 +1175,10 @@ export class CodexAcpServer {
     }
 
     async loadSession(params: acp.LoadSessionRequest): Promise<LegacyLoadSessionResponse> {
+        return this.hookReview.run(params.cwd, params._meta, () => this.loadSessionReviewed(params));
+    }
+
+    private async loadSessionReviewed(params: acp.LoadSessionRequest): Promise<LegacyLoadSessionResponse> {
         readSessionInstructionAppend(params._meta);
         return this.recovery === null
             ? await this.loadSessionOnce(params)
@@ -1220,6 +1236,10 @@ export class CodexAcpServer {
     }
 
     async resumeSession(params: acp.ResumeSessionRequest): Promise<LegacyResumeSessionResponse> {
+        return this.hookReview.run(params.cwd, params._meta, () => this.resumeSessionReviewed(params));
+    }
+
+    private async resumeSessionReviewed(params: acp.ResumeSessionRequest): Promise<LegacyResumeSessionResponse> {
         readSessionInstructionAppend(params._meta);
         return this.recovery === null
             ? await this.resumeSessionOnce(params)
@@ -1248,6 +1268,10 @@ export class CodexAcpServer {
     }
 
     async forkSession(params: acp.ForkSessionRequest): Promise<acp.ForkSessionResponse> {
+        return this.hookReview.run(params.cwd, params._meta, () => this.forkSessionReviewed(params));
+    }
+
+    private async forkSessionReviewed(params: acp.ForkSessionRequest): Promise<acp.ForkSessionResponse> {
         readSessionInstructionAppend(params._meta);
         if (this.providerUpdate !== null) {
             await this.waitForProviderUpdate();
@@ -1378,9 +1402,11 @@ export class CodexAcpServer {
         return this.sessionOpenGenerations.get(sessionId) === this.getSessionGeneration(sessionId);
     }
 
-    async newSession(
-        params: acp.NewSessionRequest,
-    ): Promise<LegacyNewSessionResponse> {
+    async newSession(params: acp.NewSessionRequest): Promise<LegacyNewSessionResponse> {
+        return this.hookReview.run(params.cwd, params._meta, () => this.newSessionReviewed(params));
+    }
+
+    private async newSessionReviewed(params: acp.NewSessionRequest): Promise<LegacyNewSessionResponse> {
         readSessionInstructionAppend(params._meta);
         if (this.providerUpdate !== null) {
             await this.waitForProviderUpdate();
@@ -1412,14 +1438,20 @@ export class CodexAcpServer {
         const appServer = this.ensureAppServer();
         if (appServer) await appServer;
         const elicitationRequester = this.createUrlElicitationRequester(requestId);
-        const isAuthenticated = await this.runWithProcessCheck(() => this.codexAcpClient.authenticate(_params, elicitationRequester));
-        if (!isAuthenticated) {
-            logger.log("Authenticate request failed");
-            throw RequestError.authRequired({methodId: _params.methodId}, "Sign-in did not complete");
+        this.hookReview.invalidate();
+        try {
+            const isAuthenticated = await this.runWithProcessCheck(() => this.codexAcpClient.authenticate(_params, elicitationRequester));
+            if (!isAuthenticated) {
+                logger.log("Authenticate request failed");
+                throw RequestError.authRequired({methodId: _params.methodId}, "Sign-in did not complete");
+            }
+            await this.refreshAuthState(this.getAuthProviderForAuthenticateRequest(_params));
+            logger.log("Authenticate request completed");
+            return { };
+        } finally {
+            // A list may have completed while login waited for its completion/cancellation notification.
+            this.hookReview.invalidate();
         }
-        await this.refreshAuthState(this.getAuthProviderForAuthenticateRequest(_params));
-        logger.log("Authenticate request completed");
-        return { };
     }
 
     private createUrlElicitationRequester(requestId?: acp.JsonRpcId): UrlElicitationRequester | undefined {
@@ -1462,12 +1494,14 @@ export class CodexAcpServer {
 
     async setProvider(params: acp.SetProviderRequest): Promise<acp.SetProviderResponse> {
         this.codexAcpClient.setProvider(params);
+        this.hookReview.invalidate();
         await this.enqueueProviderUpdate((client) => client.setProvider(params));
         return { };
     }
 
     async disableProvider(params: acp.DisableProviderRequest): Promise<acp.DisableProviderResponse> {
         this.codexAcpClient.disableProvider(params);
+        if (params.providerId === OPENAI_PROVIDER_ID) this.hookReview.invalidate();
         if (params.providerId !== OPENAI_PROVIDER_ID) {
             return { };
         }
@@ -1499,6 +1533,7 @@ export class CodexAcpServer {
                 throw new Error("Cannot restart Codex app-server before ACP initialization");
             }
             await replacement.initialize(this.initializeRequest);
+            this.hookReview.bind(replacement);
             this.codexAcpClient = replacement;
             this.sessionIndex.observe(replacement);
             this.availableCommands = this.createAvailableCommands(replacement);
@@ -1513,6 +1548,7 @@ export class CodexAcpServer {
                     // The new app-server died: the next use of each session resumes it in the restarted one.
                     break;
                 }
+                if (this.hookReview.enabled) continue;
                 try {
                     const request = {
                         sessionId: session.sessionId,
@@ -1631,7 +1667,9 @@ export class CodexAcpServer {
             currentClient: () => this.codexAcpClient,
             createClient: (connection) => {
                 this.captureStderr();
-                return this.codexAcpClient.withAppServer(new CodexAppServerClient(connection.connection));
+                const client = this.codexAcpClient.withAppServer(new CodexAppServerClient(connection.connection));
+                this.hookReview.bind(client);
+                return client;
             },
             handshake: (client) => this.initializeRequest !== null && this.codexAcpClient.initialized
                 ? client.initialize(this.initializeRequest)
@@ -1672,6 +1710,7 @@ export class CodexAcpServer {
         // A `providers/set` can have changed the routing of the old client while the restart ran.
         client.adoptRoutingFrom(this.codexAcpClient);
         this.codexAcpClient = client;
+        this.hookReview.bind(client);
         // The session index watches the thread notifications of the app-server that runs now.
         this.sessionIndex.observe(client);
         this.availableCommands = this.createAvailableCommands(client);
@@ -2291,14 +2330,13 @@ export class CodexAcpServer {
 
         return await new Promise<boolean>((resolve, reject) => {
             let turnStarted = false;
-            const promptDone = this.prompt(params, undefined, () => {
-                turnStarted = true;
-                logger.log(`${source} started a new turn`, {sessionId: params.sessionId});
-                // The new turn is now running. This is the success path: answer the
-                // steer immediately ("a turn was started") and let prompt() finish the
-                // turn in the background.
-                resolve(true);
-            });
+            const promptDone = this.hookReview.continueOperation(this.getSessionState(params.sessionId).cwd, params._meta,
+                () => this.promptReviewed(params, undefined, () => {
+                    turnStarted = true;
+                    logger.log(`${source} started a new turn`, {sessionId: params.sessionId});
+                    // Answer the control request once the turn starts; its prompt completes in the background.
+                    resolve(true);
+                }));
             promptDone.then(
                 (response) => {
                     if (!turnStarted && response.stopReason === "cancelled") {
@@ -2369,6 +2407,7 @@ export class CodexAcpServer {
         return {
             sessionId: sessionId,
             prompt: prompt as acp.ContentBlock[],
+            ...(params["_meta"] === undefined ? {} : {_meta: params["_meta"] as Record<string, unknown> | null}),
         };
     }
 
@@ -3356,6 +3395,11 @@ export class CodexAcpServer {
         signal?: AbortSignal,
         onTurnStarted?: () => void,
     ): Promise<acp.PromptResponse> {
+        return this.hookReview.run(this.getSessionState(params.sessionId).cwd, params._meta,
+            () => this.promptReviewed(params, signal, onTurnStarted));
+    }
+
+    private async promptReviewed(params: acp.PromptRequest, signal?: AbortSignal, onTurnStarted?: () => void): Promise<acp.PromptResponse> {
         if (this.providerUpdate !== null) {
             await this.waitForProviderUpdate();
         }

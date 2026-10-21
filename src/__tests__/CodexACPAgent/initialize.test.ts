@@ -78,7 +78,7 @@ describe('CodexACPAgent - initialize', () => {
     it('should advertise the AIR extension only to AIR', async () => {
         const result = await agent.initialize({
             protocolVersion: acp.PROTOCOL_VERSION,
-            clientCapabilities: {_meta: {jetbrains: {air: {version: 1, capabilities: []}}}},
+            clientCapabilities: {_meta: {jetbrains: {air: {version: 1, capabilities: []}}, codexHooks: {version: 1}}},
         });
         expect(result._meta).toEqual({
             systemPrompt: {version: 1, append: true, clear: true, maxBytes: 262144},
@@ -97,6 +97,19 @@ describe('CodexACPAgent - initialize', () => {
                 },
             },
         });
+    });
+
+    it.each([undefined, null, true, {}, {version: 2}, {version: "1"}])('ignores an unsupported neutral hook capability %j', async capability => {
+        const result = await agent.initialize({protocolVersion: acp.PROTOCOL_VERSION,
+            clientCapabilities: {_meta: {codexHooks: capability}} as never});
+        expect(result._meta).not.toHaveProperty("codexHooks");
+    });
+
+    it('advertises process-bound hook review without enabling AIR', async () => {
+        const result = await agent.initialize({protocolVersion: acp.PROTOCOL_VERSION,
+            clientCapabilities: {_meta: {codexHooks: {version: 1}}}});
+        expect(result._meta?.["codexHooks"]).toEqual({version: 1, reviewToken: true});
+        expect(result._meta).not.toHaveProperty("jetbrains");
     });
 
     it('advertises the goal extension to a non-AIR client that opts in', async () => {
