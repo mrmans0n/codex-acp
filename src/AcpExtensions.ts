@@ -120,6 +120,7 @@ export async function legacySetSessionModel(
 }
 
 export type SessionSteerRequest = {
+    _meta?: Record<string, unknown> | null;
     sessionId: SessionId;
     prompt: ContentBlock[];
 }

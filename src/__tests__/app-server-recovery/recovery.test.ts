@@ -385,6 +385,143 @@ describe("app-server recovery", () => {
         expect(requestsOf(fixture.current(), "thread/start")).toEqual([]);
     });
 
+    it.each(["native", "fallback"].flatMap(mode =>
+        ["set", "resume"].flatMap(action => ["missing", "stale", "current"].map(tokenState => ({mode, action, tokenState}))),
+    ))("requires $tokenState review for $mode goal $action and preserves continuation", async ({mode, action, tokenState}) => {
+        const fixture = createRecoveryFixture();
+        await initializeHookReview(fixture);
+        const token = await reviewHooks(fixture);
+        const {sessionId} = await fixture.agent.newSession({cwd: "/work", mcpServers: [], _meta: reviewedMeta(token)});
+        const goal = {threadId: sessionId, objective: "ship it", status: "active", tokenBudget: null, tokensUsed: 0, timeUsedSeconds: 0, createdAt: 1, updatedAt: 2};
+        fixture.answers.set("thread/goal/get", () => ({goal}));
+        fixture.answers.set("thread/goal/set", (_params, server) => {
+            setImmediate(() => {
+                server.rpc.notify({method: "thread/goal/updated", params: {threadId: sessionId, turnId: null, goal}});
+                if (mode === "native") {
+                    server.rpc.notify({method: "turn/started", params: {threadId: sessionId, turn: {id: "goal-turn", items: [], status: "inProgress", error: null}}});
+                    completeTurn(fixture, sessionId, "goal-turn");
+                } else server.rpc.notify({method: "thread/status/changed", params: {threadId: sessionId, status: {type: "idle"}}});
+            });
+            return {goal};
+        });
+        fixture.answers.set("turn/start", () => {
+            setImmediate(() => completeTurn(fixture, sessionId, "fallback-turn"));
+            return {turn: {id: "fallback-turn", items: [], status: "inProgress", error: null}};
+        });
+        if (tokenState === "stale") {
+            fixture.answers.set("hooks/list", () => ({data: [{cwd: "/work", hooks: [], warnings: ["changed"], errors: []}]}));
+            await reviewHooks(fixture);
+        }
+        const request = {sessionId, action, objective: goal.objective,
+            ...(tokenState === "missing" ? {} : {_meta: reviewedMeta(token)})};
+        const control = fixture.agent.extMethod("_session/goal", request);
+        if (tokenState === "current") {
+            await expect(control).resolves.toEqual({});
+            expect(requestsOf(fixture.current(), "thread/goal/set")).toHaveLength(1);
+            expect(requestsOf(fixture.current(), "turn/start")).toHaveLength(mode === "fallback" ? 1 : 0);
+        } else {
+            await expect(control).rejects.toMatchObject({code: -32044});
+            expect(requestsOf(fixture.current(), "thread/goal/set")).toEqual([]);
+            expect(requestsOf(fixture.current(), "turn/start")).toEqual([]);
+        }
+    });
+
+    it("keeps pause usable without review on a live thread", async () => {
+        const fixture = createRecoveryFixture();
+        await initializeHookReview(fixture);
+        const token = await reviewHooks(fixture);
+        const {sessionId} = await fixture.agent.newSession({cwd: "/work", mcpServers: [], _meta: reviewedMeta(token)});
+        const goal = {threadId: sessionId, objective: "ship it", status: "paused", tokenBudget: null, tokensUsed: 0, timeUsedSeconds: 0, createdAt: 1, updatedAt: 2};
+        fixture.answers.set("thread/goal/set", (_params, server) => {
+            setImmediate(() => server.rpc.notify({method: "thread/goal/updated", params: {threadId: sessionId, turnId: null, goal}}));
+            return {goal};
+        });
+        await expect(fixture.agent.extMethod("_session/goal", {sessionId, action: "pause"})).resolves.toEqual({});
+    });
+
+    it("preserves reviewed metadata when steering starts a new turn", async () => {
+        const fixture = createRecoveryFixture();
+        await initializeHookReview(fixture);
+        const token = await reviewHooks(fixture);
+        const {sessionId} = await fixture.agent.newSession({cwd: "/work", mcpServers: [], _meta: reviewedMeta(token)});
+        fixture.answers.set("turn/start", () => {
+            setImmediate(() => completeTurn(fixture, sessionId, "steered-turn"));
+            return {turn: {id: "steered-turn", items: [], status: "inProgress", error: null}};
+        });
+        await expect(fixture.agent.extMethod("_session/steering", {sessionId, prompt: [{type: "text", text: "continue"}], _meta: reviewedMeta(token)}))
+            .resolves.toEqual({outcome: "startedNewTurn"});
+        expect(requestsOf(fixture.current(), "turn/start")).toHaveLength(1);
+    });
+
+    it.each([true, false, "error"] as const)("invalidates a review issued during asynchronous authentication on settlement %s", async outcome => {
+        const fixture = createRecoveryFixture();
+        await initializeHookReview(fixture);
+        fixture.answers.set("account/login/start", () => undefined);
+        const auth = fixture.agent.authenticate({methodId: "api-key", _meta: {"api-key": {apiKey: "fixture-key"}}});
+        auth.catch(() => {});
+        await vi.waitFor(() => expect(fixture.current().rpc.hasPending("account/login/start")).toBe(true));
+        const token = await reviewHooks(fixture);
+        fixture.current().rpc.resolve("account/login/start", {type: "apiKey"});
+        fixture.current().rpc.notify({method: "account/login/completed", params: {loginId: null, success: outcome === true, error: outcome === "error" ? "login rejected" : null, onboardingEntrypoint: null}});
+        if (outcome === true) await auth;
+        else await expect(auth).rejects.toMatchObject({code: -32000});
+        await expect(fixture.agent.newSession({cwd: "/work", mcpServers: [], _meta: reviewedMeta(token)})).rejects.toMatchObject({code: -32044});
+        expect(requestsOf(fixture.current(), "thread/start")).toEqual([]);
+    });
+
+    it.each(["resume", "load", "fork"] as const)("binds persisted provider routing for %s while hook definitions stay unchanged", async operation => {
+        const fixture = createRecoveryFixture();
+        await initializeHookReview(fixture);
+        let provider = "provider-a";
+        fixture.answers.set("config/read", () => ({config: {model_provider: provider, model_providers: {[provider]: {base_url: `https://${provider}.example/v1`, wire_api: "responses"}}}, origins: {}, layers: null}));
+        const token = await reviewHooks(fixture);
+        provider = "provider-b";
+        const request = {sessionId: "thread-a", cwd: "/work", mcpServers: [], _meta: reviewedMeta(token)};
+        const opening = operation === "resume" ? fixture.agent.resumeSession(request) : operation === "load" ? fixture.agent.loadSession(request) : fixture.agent.forkSession(request);
+        await expect(opening).rejects.toMatchObject({code: -32044});
+        expect(requestsOf(fixture.current(), "thread/resume")).toEqual([]);
+        expect(requestsOf(fixture.current(), "thread/fork")).toEqual([]);
+        const current = await reviewHooks(fixture);
+        const reviewed = {...request, _meta: reviewedMeta(current)};
+        await (operation === "resume" ? fixture.agent.resumeSession(reviewed) : operation === "load" ? fixture.agent.loadSession(reviewed) : fixture.agent.forkSession(reviewed));
+        expect(requestsOf(fixture.current(), operation === "fork" ? "thread/fork" : "thread/resume")[0]).toMatchObject({modelProvider: "provider-b"});
+    });
+
+    it("binds selected provider endpoints while ignoring unrelated persisted config", async () => {
+        const fixture = createRecoveryFixture();
+        await initializeHookReview(fixture);
+        let endpoint = "https://before.example/v1", unrelated = "old-model";
+        fixture.answers.set("config/read", () => ({config: {model_provider: "fixture", model: unrelated, model_providers: {fixture: {name: "Fixture", base_url: endpoint, wire_api: "responses"}}}, origins: {}, layers: null}));
+        const token = await reviewHooks(fixture);
+        unrelated = "new-model";
+        expect(await reviewHooks(fixture)).toBe(token);
+        const {sessionId} = await fixture.agent.newSession({cwd: "/work", mcpServers: [], _meta: reviewedMeta(token)});
+        endpoint = "https://after.example/v1";
+        await expect(fixture.agent.prompt({sessionId, prompt: [], _meta: reviewedMeta(token)})).rejects.toMatchObject({code: -32044});
+        expect(requestsOf(fixture.current(), "turn/start")).toEqual([]);
+    });
+
+    it("does not return retry-safe review errors after a prior goal dispatch", async () => {
+        const fixture = createRecoveryFixture();
+        await initializeHookReview(fixture);
+        const token = await reviewHooks(fixture);
+        const {sessionId} = await fixture.agent.newSession({cwd: "/work", mcpServers: [], _meta: reviewedMeta(token)});
+        const goal = {threadId: sessionId, objective: "ship it", status: "active", tokenBudget: null, tokensUsed: 0, timeUsedSeconds: 0, createdAt: 1, updatedAt: 2};
+        fixture.answers.set("thread/goal/get", () => ({goal}));
+        fixture.answers.set("thread/goal/set", (_params, server) => {
+            fixture.answers.set("hooks/list", () => ({data: [{cwd: "/work", hooks: [], warnings: ["changed after native dispatch"], errors: []}]}));
+            setImmediate(() => {
+                server.rpc.notify({method: "thread/goal/updated", params: {threadId: sessionId, turnId: null, goal}});
+                server.rpc.notify({method: "thread/status/changed", params: {threadId: sessionId, status: {type: "idle"}}});
+            });
+            return {goal};
+        });
+        await expect(fixture.agent.extMethod("_session/goal", {sessionId, action: "set", objective: goal.objective, _meta: reviewedMeta(token)}))
+            .rejects.toMatchObject({code: -32603});
+        expect(requestsOf(fixture.current(), "thread/goal/set")).toHaveLength(1);
+        expect(requestsOf(fixture.current(), "turn/start")).toEqual([]);
+    });
+
     it("starts one app-server for concurrent requests", async () => {
         const fixture = createRecoveryFixture();
         await openSession(fixture);

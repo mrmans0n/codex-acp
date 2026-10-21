@@ -577,6 +577,15 @@ export class CodexAcpServer {
     }
 
     async extMethod(method: string, params: Record<string, unknown>): Promise<Record<string, unknown>> {
+        if ((method === GOAL_CONTROL_METHOD || method === LEGACY_GOAL_CONTROL_METHOD)
+            && (params["action"] === "set" || params["action"] === "resume")) {
+            const session = this.sessions.get(params["sessionId"] as string);
+            if (session !== undefined) return this.hookReview.run(session.cwd, params["_meta"], () => this.extMethodReviewed(method, params));
+        }
+        return this.extMethodReviewed(method, params);
+    }
+
+    private async extMethodReviewed(method: string, params: Record<string, unknown>): Promise<Record<string, unknown>> {
         const methodRequest = { method: method, params: params };
         if (!isExtMethodRequest(methodRequest)) {
             return {};
@@ -1430,14 +1439,19 @@ export class CodexAcpServer {
         if (appServer) await appServer;
         const elicitationRequester = this.createUrlElicitationRequester(requestId);
         this.hookReview.invalidate();
-        const isAuthenticated = await this.runWithProcessCheck(() => this.codexAcpClient.authenticate(_params, elicitationRequester));
-        if (!isAuthenticated) {
-            logger.log("Authenticate request failed");
-            throw RequestError.authRequired({methodId: _params.methodId}, "Sign-in did not complete");
+        try {
+            const isAuthenticated = await this.runWithProcessCheck(() => this.codexAcpClient.authenticate(_params, elicitationRequester));
+            if (!isAuthenticated) {
+                logger.log("Authenticate request failed");
+                throw RequestError.authRequired({methodId: _params.methodId}, "Sign-in did not complete");
+            }
+            await this.refreshAuthState(this.getAuthProviderForAuthenticateRequest(_params));
+            logger.log("Authenticate request completed");
+            return { };
+        } finally {
+            // A list may have completed while login waited for its completion/cancellation notification.
+            this.hookReview.invalidate();
         }
-        await this.refreshAuthState(this.getAuthProviderForAuthenticateRequest(_params));
-        logger.log("Authenticate request completed");
-        return { };
     }
 
     private createUrlElicitationRequester(requestId?: acp.JsonRpcId): UrlElicitationRequester | undefined {
@@ -2316,14 +2330,13 @@ export class CodexAcpServer {
 
         return await new Promise<boolean>((resolve, reject) => {
             let turnStarted = false;
-            const promptDone = this.prompt(params, undefined, () => {
-                turnStarted = true;
-                logger.log(`${source} started a new turn`, {sessionId: params.sessionId});
-                // The new turn is now running. This is the success path: answer the
-                // steer immediately ("a turn was started") and let prompt() finish the
-                // turn in the background.
-                resolve(true);
-            });
+            const promptDone = this.hookReview.continueOperation(this.getSessionState(params.sessionId).cwd, params._meta,
+                () => this.promptReviewed(params, undefined, () => {
+                    turnStarted = true;
+                    logger.log(`${source} started a new turn`, {sessionId: params.sessionId});
+                    // Answer the control request once the turn starts; its prompt completes in the background.
+                    resolve(true);
+                }));
             promptDone.then(
                 (response) => {
                     if (!turnStarted && response.stopReason === "cancelled") {
@@ -2394,6 +2407,7 @@ export class CodexAcpServer {
         return {
             sessionId: sessionId,
             prompt: prompt as acp.ContentBlock[],
+            ...(params["_meta"] === undefined ? {} : {_meta: params["_meta"] as Record<string, unknown> | null}),
         };
     }
 
