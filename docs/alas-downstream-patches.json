@@ -167,6 +167,32 @@
       ],
       "disposition": "active",
       "retiredCommits": []
+    },
+    {
+      "name": "neutral-codex-hook-review",
+      "commit": "4d4340534856c343cb68a295a9d48177cf079ee7",
+      "upstreamPr": null,
+      "files": [
+        "docs/air-extensions.md",
+        "docs/codex-hook-review.md",
+        "src/CodexAcpServer.ts",
+        "src/CodexAppServerClient.ts",
+        "src/CodexHookReview.ts",
+        "src/CodexHookTrust.ts",
+        "src/app-server-recovery/AppServerRecovery.ts",
+        "src/index.ts",
+        "src/__tests__/CodexACPAgent/initialize.test.ts",
+        "src/__tests__/app-server-recovery/recovery.test.ts",
+        "src/__tests__/scenarios/client-profiles.test.ts"
+      ],
+      "tests": [
+        "src/__tests__/CodexHooks.test.ts",
+        "src/__tests__/CodexACPAgent/initialize.test.ts",
+        "src/__tests__/app-server-recovery/recovery.test.ts",
+        "src/__tests__/scenarios/client-profiles.test.ts"
+      ],
+      "disposition": "active",
+      "retiredCommits": []
     }
   ],
   "retiredCommits": [],
