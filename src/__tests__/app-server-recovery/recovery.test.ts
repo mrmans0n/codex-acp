@@ -5,6 +5,9 @@ import {createRecoveryFixture, defaultAnswer, initialize, MODEL, type RecoveryFi
 import {AppServerRecovery} from "../../app-server-recovery/AppServerRecovery";
 import type {CodexAcpClient} from "../../CodexAcpClient";
 import {stubGatewayModelListing} from "../acp-test-utils";
+import {createAcpAgentRouter} from "../../AcpAgentRouter";
+import type {CodexAcpServer} from "../../CodexAcpServer";
+import {CODEX_HOOKS_TRUST_METHOD} from "../../CodexHookTrust";
 
 const resumed = (id: string) => ({
     thread: {id, turns: [], historyMode: "paginated", status: {type: "idle"}, preview: "", ephemeral: false, modelProvider: "openai",
@@ -185,6 +188,207 @@ describe("app-server recovery", () => {
         await fixture.agent.trustHooks("/work", []);
         expect(fixture.servers).toHaveLength(3);
         expect(requestsOf(fixture.current(), "hooks/list")).toHaveLength(2);
+    });
+
+    async function reviewHooks(fixture: RecoveryFixture) {
+        return (await fixture.agent.listHooks("/work") as {reviewToken: string}).reviewToken;
+    }
+    const reviewedMeta = (reviewToken: string) => ({codexHooks: {reviewToken}});
+    async function initializeHookReview(fixture: RecoveryFixture) {
+        await initialize(fixture, false, {_meta: {codexHooks: {version: 1}}});
+        fixture.answers.set("hooks/list", () => ({data: [{cwd: "/work", hooks: [], warnings: [], errors: []}]}));
+        fixture.answers.set("thread/fork", () => defaultAnswer("thread/start", {}));
+    }
+
+    it("lists a read-only process-bound review and the actual Codex home", async () => {
+        const fixture = createRecoveryFixture();
+        await initializeHookReview(fixture);
+        const list = await fixture.agent.listHooks("/work");
+        expect(list).toMatchObject({reviewToken: expect.any(String), codexHome: "/codex-home"});
+        expect(requestsOf(fixture.current(), "config/batchWrite")).toEqual([]);
+        await fixture.agent.newSession({cwd: "/work", mcpServers: [], _meta: reviewedMeta((list as any).reviewToken)});
+        expect(requestsOf(fixture.current(), "thread/start")).toHaveLength(1);
+    });
+
+    it.each(["new", "load", "resume", "fork"] as const)("refuses %s before opening a thread without review", async operation => {
+        const fixture = createRecoveryFixture();
+        await initializeHookReview(fixture);
+        const request = {cwd: "/work", mcpServers: [], sessionId: "thread-a"};
+        const opening = operation === "new" ? fixture.agent.newSession(request)
+            : operation === "load" ? fixture.agent.loadSession(request)
+            : operation === "resume" ? fixture.agent.resumeSession(request) : fixture.agent.forkSession(request);
+        await expect(opening).rejects.toMatchObject({code: -32044, data: {kind: "codex_hook_review_required"}});
+        for (const method of ["thread/start", "thread/resume", "thread/fork"]) expect(requestsOf(fixture.current(), method)).toEqual([]);
+    });
+
+    it("rejects stale review before recovered resume and first prompt", async () => {
+        const fixture = createRecoveryFixture();
+        await initializeHookReview(fixture);
+        const token = await reviewHooks(fixture);
+        const {sessionId} = await fixture.agent.newSession({cwd: "/work", mcpServers: [], _meta: reviewedMeta(token)});
+        await fixture.kill();
+        await expect(fixture.agent.prompt({sessionId, prompt: [{type: "text", text: "hi"}], _meta: reviewedMeta(token)}))
+            .rejects.toMatchObject({code: -32044, data: {kind: "codex_hook_review_required"}});
+        expect(requestsOf(fixture.current(), "thread/resume")).toEqual([]);
+        expect(requestsOf(fixture.current(), "turn/start")).toEqual([]);
+        const replacementToken = await reviewHooks(fixture);
+        expect(replacementToken).not.toBe(token);
+        fixture.answers.set("turn/start", () => ({turn: {id: "turn-reviewed", items: [], status: "inProgress", error: null}}));
+        const prompt = fixture.agent.prompt({sessionId, prompt: [{type: "text", text: "hi"}], _meta: reviewedMeta(replacementToken)});
+        await vi.waitFor(() => expect(requestsOf(fixture.current(), "turn/start")).toHaveLength(1));
+        completeTurn(fixture, sessionId, "turn-reviewed");
+        await prompt;
+        expect(requestsOf(fixture.current(), "thread/resume")).toHaveLength(1);
+    });
+
+    it("invalidates a review for a provider update even before any session exists", async () => {
+        const fixture = createRecoveryFixture();
+        await initializeHookReview(fixture);
+        const token = await reviewHooks(fixture);
+        await fixture.agent.setProvider({providerId: "openai", apiType: "openai", baseUrl: "https://example.com/v1", headers: {}});
+        await expect(fixture.agent.newSession({cwd: "/work", mcpServers: [], _meta: reviewedMeta(token)}))
+            .rejects.toMatchObject({code: -32044});
+        expect(requestsOf(fixture.current(), "thread/start")).toEqual([]);
+    });
+
+    it("does not automatically resume threads during a provider replacement before review", async () => {
+        const fixture = createRecoveryFixture();
+        await initializeHookReview(fixture);
+        const token = await reviewHooks(fixture);
+        const {sessionId} = await fixture.agent.newSession({cwd: "/work", mcpServers: [], _meta: reviewedMeta(token)});
+        await fixture.agent.setProvider({providerId: "openai", apiType: "openai", baseUrl: "https://example.com/v1", headers: {}});
+        expect(fixture.servers).toHaveLength(2);
+        expect(requestsOf(fixture.current(), "thread/resume")).toEqual([]);
+        await expect(fixture.agent.prompt({sessionId, prompt: [], _meta: reviewedMeta(token)})).rejects.toMatchObject({code: -32044});
+    });
+
+    it("rechecks the review after async session configuration before dispatch", async () => {
+        const fixture = createRecoveryFixture();
+        await initializeHookReview(fixture);
+        const token = await reviewHooks(fixture);
+        fixture.answers.set("skills/extraRoots/set", () => undefined);
+        const opening = fixture.agent.newSession({cwd: "/work", additionalDirectories: ["/work/extra"], mcpServers: [], _meta: reviewedMeta(token)});
+        opening.catch(() => {});
+        await vi.waitFor(() => expect(fixture.current().rpc.hasPending("skills/extraRoots/set")).toBe(true));
+        await fixture.agent.setProvider({providerId: "openai", apiType: "openai", baseUrl: "https://example.com/v1", headers: {}});
+        fixture.current().rpc.resolve("skills/extraRoots/set", {});
+        await expect(opening).rejects.toMatchObject({code: -32044});
+        expect(requestsOf(fixture.current(), "thread/start")).toEqual([]);
+    });
+
+    it.each(["stale token", "changed hash", "duplicate identity", "selected hash mismatch", "missing selection", "ambiguous key", "write failure", "unverified readback"])("never approves selected hooks after %s", async failure => {
+        const fixture = createRecoveryFixture();
+        await initializeHookReview(fixture);
+        const hook = {key: "startup", currentHash: "hash", source: "sessionFlags", trustStatus: "untrusted", command: "echo ready"};
+        let hooks = failure === "ambiguous key" ? [hook, hook] : [hook];
+        fixture.answers.set("hooks/list", () => ({data: [{cwd: "/work", hooks, warnings: ["notice"], errors: []}]}));
+        const token = await reviewHooks(fixture);
+        if (failure === "changed hash") hooks = [{...hook, currentHash: "new-hash"}];
+        const selected = [{key: hook.key, currentHash: hook.currentHash}];
+        if (failure === "duplicate identity") selected.push(selected[0]!);
+        if (failure === "selected hash mismatch") selected[0]!.currentHash = "unreviewed-hash";
+        if (failure === "missing selection") selected[0]!.key = "missing";
+        fixture.answers.set("config/batchWrite", () => failure === "write failure" ? new Error("write denied") : {status: "ok"});
+        const result = fixture.agent.trustHooks("/work", selected, failure === "stale token" ? "old-token" : token);
+        if (failure === "unverified readback") await expect(result).resolves.toEqual({trusted: false});
+        else if (failure === "write failure") await expect(result).rejects.toThrow("write denied");
+        else await expect(result).rejects.toMatchObject({code: -32044});
+        expect(requestsOf(fixture.current(), "config/batchWrite")).toHaveLength(
+            failure === "write failure" || failure === "unverified readback" ? 1 : 0);
+    });
+
+    it("trusts only selected exact pairs and keeps the reviewed token after trust-state updates", async () => {
+        const fixture = createRecoveryFixture();
+        await initializeHookReview(fixture);
+        const first = {key: "startup", currentHash: "hash", source: "sessionFlags", trustStatus: "untrusted", command: "echo ready"};
+        let hooks = [first, {...first, key: "unselected", currentHash: "other"}];
+        fixture.answers.set("hooks/list", () => ({data: [{cwd: "/work", hooks, warnings: [], errors: []}]}));
+        fixture.answers.set("config/batchWrite", () => {hooks = [{...first, trustStatus: "trusted"}, hooks[1]!]; return {status: "ok"};});
+        const token = await reviewHooks(fixture);
+        await expect(fixture.agent.trustHooks("/work", [{key: "startup", currentHash: "hash"}], token)).resolves.toEqual({trusted: true});
+        expect(requestsOf(fixture.current(), "config/batchWrite")).toEqual([{edits: [{
+            keyPath: 'hooks.state."startup".trusted_hash', value: "hash", mergeStrategy: "replace",
+        }], reloadUserConfig: true}]);
+        await fixture.agent.newSession({cwd: "/work", mcpServers: [], _meta: reviewedMeta(token)});
+        expect(requestsOf(fixture.current(), "thread/start")).toHaveLength(1);
+    });
+
+    it.each(["list", "trust"])("rejects a provider change while %s reads hooks", async operation => {
+        const fixture = createRecoveryFixture();
+        await initializeHookReview(fixture);
+        const token = await reviewHooks(fixture);
+        fixture.answers.set("hooks/list", () => undefined);
+        const request = operation === "list" ? fixture.agent.listHooks("/work")
+            : fixture.agent.trustHooks("/work", [{key: "startup", currentHash: "hash"}], token);
+        request.catch(() => {});
+        await vi.waitFor(() => expect(fixture.current().rpc.hasPending("hooks/list")).toBe(true));
+        await fixture.agent.setProvider({providerId: "openai", apiType: "openai", baseUrl: "https://example.com/v1", headers: {}});
+        fixture.current().rpc.resolve("hooks/list", {data: [{cwd: "/work", hooks: [], warnings: [], errors: []}]});
+        await expect(request).rejects.toMatchObject({code: -32044});
+        expect(requestsOf(fixture.current(), "config/batchWrite")).toEqual([]);
+    });
+
+    it("revalidates a queued thread load at dispatch", async () => {
+        const fixture = createRecoveryFixture();
+        await initializeHookReview(fixture);
+        const token = await reviewHooks(fixture);
+        const client = (fixture.agent as unknown as {codexAcpClient: CodexAcpClient}).codexAcpClient.appServerClient;
+        let release!: () => void;
+        const waiting = new Promise<void>(resolve => {release = resolve;});
+        let queued = false;
+        client.threadLoadGate = async (_threadId, request) => {queued = true; await waiting; return request();};
+        const opening = fixture.agent.resumeSession({cwd: "/work", mcpServers: [], sessionId: "thread-a", _meta: reviewedMeta(token)});
+        opening.catch(() => {});
+        await vi.waitFor(() => expect(queued).toBe(true));
+        await fixture.agent.setProvider({providerId: "openai", apiType: "openai", baseUrl: "https://example.com/v1", headers: {}});
+        release();
+        await expect(opening).rejects.toMatchObject({code: -32044});
+        expect(requestsOf(fixture.current(), "thread/resume")).toEqual([]);
+    });
+
+    it("refuses the first turn when a provider changes during its hook validation", async () => {
+        const fixture = createRecoveryFixture();
+        await initializeHookReview(fixture);
+        const token = await reviewHooks(fixture);
+        const {sessionId} = await fixture.agent.newSession({cwd: "/work", mcpServers: [], _meta: reviewedMeta(token)});
+        const previous = fixture.current();
+        fixture.answers.set("hooks/list", () => undefined);
+        const prompt = fixture.agent.prompt({sessionId, prompt: [{type: "text", text: "hi"}], _meta: reviewedMeta(token)});
+        prompt.catch(() => {});
+        await vi.waitFor(() => expect(previous.rpc.hasPending("hooks/list")).toBe(true));
+        const update = fixture.agent.setProvider({providerId: "openai", apiType: "openai", baseUrl: "https://example.com/v1", headers: {}});
+        previous.rpc.resolve("hooks/list", {data: [{cwd: "/work", hooks: [], warnings: [], errors: []}]});
+        await expect(prompt).rejects.toMatchObject({code: -32044});
+        await update;
+        expect(requestsOf(previous, "turn/start")).toEqual([]);
+        expect(requestsOf(fixture.current(), "thread/resume")).toEqual([]);
+    });
+
+    it("invalidates review when gateway authentication changes routing", async () => {
+        const fixture = createRecoveryFixture();
+        await initializeHookReview(fixture);
+        const token = await reviewHooks(fixture);
+        await fixture.agent.authenticate({methodId: "gateway", _meta: {gateway: {baseUrl: "https://example.com/v1", headers: {}}}});
+        await expect(fixture.agent.newSession({cwd: "/work", mcpServers: [], _meta: reviewedMeta(token)}))
+            .rejects.toMatchObject({code: -32044});
+        expect(requestsOf(fixture.current(), "thread/start")).toEqual([]);
+    });
+
+    it("rejects an old validation response after a newer list replaced the reviewed definitions", async () => {
+        const fixture = createRecoveryFixture();
+        await initializeHookReview(fixture);
+        const token = await reviewHooks(fixture);
+        fixture.answers.set("hooks/list", () => undefined);
+        const opening = fixture.agent.newSession({cwd: "/work", mcpServers: [], _meta: reviewedMeta(token)});
+        opening.catch(() => {});
+        await vi.waitFor(() => expect(fixture.current().rpc.hasPending("hooks/list")).toBe(true));
+        fixture.answers.set("hooks/list", () => ({data: [{cwd: "/work", hooks: [
+            {key: "new", currentHash: "new-hash", source: "sessionFlags", trustStatus: "untrusted"},
+        ], warnings: [], errors: []}]}));
+        expect(await reviewHooks(fixture)).not.toBe(token);
+        fixture.current().rpc.resolve("hooks/list", {data: [{cwd: "/work", hooks: [], warnings: [], errors: []}]});
+        await expect(opening).rejects.toMatchObject({code: -32044});
+        expect(requestsOf(fixture.current(), "thread/start")).toEqual([]);
     });
 
     it("starts one app-server for concurrent requests", async () => {
@@ -1038,5 +1242,33 @@ describe("app-server recovery", () => {
 
         await expect(fixture.agent.setProvider({providerId: "openai", apiType: "openai", baseUrl: "https://gateway.example/v1"}))
             .resolves.toEqual({});
+    });
+});
+
+describe("codex hook review over the ACP router", () => {
+    it("passes the review token of _codex/hooks/trust to the agent", async () => {
+        const trustHooks = vi.fn(async () => ({trusted: true}));
+        const agent = {
+            initialize: vi.fn(async () => ({protocolVersion: acp.PROTOCOL_VERSION, agentCapabilities: {}, authMethods: []})),
+            trustHooks,
+            sessionIndex: {dispose: () => {}},
+        } as unknown as CodexAcpServer;
+        const clientToAgent = new TransformStream<Uint8Array, Uint8Array>();
+        const agentToClient = new TransformStream<Uint8Array, Uint8Array>();
+        createAcpAgentRouter(() => agent).connect(acp.ndJsonStream(agentToClient.writable, clientToAgent.readable));
+        const connection = acp.client({name: "test-client"})
+            .connect(acp.ndJsonStream(clientToAgent.writable, agentToClient.readable));
+        try {
+            await connection.agent.request(acp.methods.agent.initialize, {protocolVersion: acp.PROTOCOL_VERSION});
+            const hooks = [{key: "startup", currentHash: "hash"}];
+
+            await expect(connection.agent.request(CODEX_HOOKS_TRUST_METHOD, {cwd: "/work", hooks, reviewToken: "token"} as never))
+                .resolves.toEqual({trusted: true});
+            await connection.agent.request(CODEX_HOOKS_TRUST_METHOD, {cwd: "/work", hooks} as never);
+
+            expect(trustHooks.mock.calls).toEqual([["/work", hooks, "token"], ["/work", hooks, undefined]]);
+        } finally {
+            connection.close();
+        }
     });
 });

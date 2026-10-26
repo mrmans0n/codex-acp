@@ -180,6 +180,9 @@ The agent advertises the `goal` object, and the client uses the control method w
 
 ### Hook trust
 
+Clients that are not AIR can opt into [process-bound hook review](codex-hook-review.md) without changing their identity or tool/subagent contract.
+
+
 The adapter passes `CODEX_CONFIG.hooks` to Codex App Server at startup as a TOML override and removes them from the later thread config.
 This lets AIR review the same process that will open the session. The adapter keeps other session config fields unchanged.
 Codex validates the hooks itself. If they are malformed, App Server exits at startup and `initialize` fails with the Codex error.
