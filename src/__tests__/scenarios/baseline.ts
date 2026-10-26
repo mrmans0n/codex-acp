@@ -136,7 +136,8 @@ const MCP_COMMAND = {
 /**
  * The feature changes of the compatibility rule that change the messages of the scenarios:
  * the `/mcp` command has a new description and an input hint.
- * Initialize also advertises text-only append system prompts.
+ * Initialize also advertises text-only append system prompts and, in `_meta`, the
+ * provider-neutral, opt-in system prompt append capability.
  * Only a command that equals the baseline `/mcp` command changes.
  */
 export function withFeatureChanges(messages: RecordedMessage[]): RecordedMessage[] {
@@ -146,11 +147,14 @@ export function withFeatureChanges(messages: RecordedMessage[]): RecordedMessage
             const params = message.params as Json;
             const capabilities = params["agentCapabilities"] as Json | undefined;
             const session = capabilities?.["sessionCapabilities"] as Json | undefined;
+            const meta = {...(params["_meta"] as Json),
+                systemPrompt: {version: 1, append: true, clear: true, maxBytes: 262144}};
             if (session) {
-                return {...message, params: {...params, agentCapabilities: {
+                return {...message, params: {...params, _meta: meta, agentCapabilities: {
                     ...capabilities, sessionCapabilities: {...session, systemPrompt: {}},
                 }}};
             }
+            return {...message, params: {...params, _meta: meta}};
         }
         const update = sessionUpdate(message);
         if (update === undefined || update["sessionUpdate"] !== "available_commands_update") return message;
