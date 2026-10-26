@@ -1281,19 +1281,20 @@ export class CodexAppServerClient {
     }
 
     /** Validates a reviewed process/configuration and returns the final synchronous dispatch fence. */
-    hookExecutionGate: ((cwd?: string) => Promise<() => void>) | undefined;
+    hookExecutionGate: ((cwd?: string, modelProvider?: string | null) => Promise<() => void>) | undefined;
 
     private dispatchRequest<R>(request: CodexRequest): Promise<R> {
-        if (this.hookExecutionGate !== undefined && ["thread/start", "thread/resume", "thread/fork", "turn/start", "review/start"].includes(request.method)) {
+        const activeGoal = request.method === "thread/goal/set" && request.params.status !== "paused";
+        if (this.hookExecutionGate !== undefined && (activeGoal || ["thread/start", "thread/resume", "thread/fork", "turn/start", "review/start"].includes(request.method))) {
             return this.dispatchReviewedRequest(request, this.hookExecutionGate);
         }
         return request.params ? this.connection.sendRequest<R>(request.method, request.params)
             : this.connection.sendRequest<R>(request.method);
     }
 
-    private async dispatchReviewedRequest<R>(request: CodexRequest, gate: (cwd?: string) => Promise<() => void>): Promise<R> {
-        const params = request.params as {cwd?: string | null};
-        const fence = await gate(params.cwd ?? undefined);
+    private async dispatchReviewedRequest<R>(request: CodexRequest, gate: (cwd?: string, modelProvider?: string | null) => Promise<() => void>): Promise<R> {
+        const params = request.params as {cwd?: string | null; modelProvider?: string | null};
+        const fence = await gate(params.cwd ?? undefined, params.modelProvider);
         fence();
         return await this.connection.sendRequest<R>(request.method, request.params);
     }
