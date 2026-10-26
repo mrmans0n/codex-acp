@@ -8,6 +8,7 @@ import {
   classifyDownstreamPatches,
   validatePatchLedger,
 } from "./downstream-patches.mjs";
+import {verifySyncReviewArtifact} from "./sync-review.mjs";
 
 const git = (cwd, ...args) => execFileSync("git", args, {
   cwd,
@@ -111,4 +112,31 @@ test("the committed ledger matches the exact downstream patch commits", () => {
     assert.deepEqual([...patch.files].sort(), changed, patch.name);
     assert.ok(patch.tests.every((path) => patch.files.includes(path)), patch.name);
   }
+});
+
+test("the committed sync review matches recomputed classifications and has explicit overlap resolutions", () => {
+  const cwd = new URL("..", import.meta.url).pathname;
+  const ledger = validatePatchLedger(JSON.parse(readFileSync(
+    new URL("../docs/alas-downstream-patches.json", import.meta.url),
+    "utf8",
+  )));
+  const review = JSON.parse(readFileSync(
+    new URL("../docs/alas-sync-review.json", import.meta.url),
+    "utf8",
+  ));
+  const classifications = classifyDownstreamPatches({
+    cwd,
+    ledger,
+    baseRef: review.fromTag,
+    targetRef: review.toTag,
+  });
+  assert.deepEqual(verifySyncReviewArtifact({
+    review,
+    fromTag: review.fromTag,
+    toTag: review.toTag,
+    toCommit: git(cwd, "rev-parse", `${review.toTag}^{commit}`),
+    classifications,
+  }), review);
+  assert.ok(review.patches.every((patch) => patch.classification === "overlap"));
+  assert.ok(review.patches.every((patch) => patch.resolution.automatic === false));
 });
