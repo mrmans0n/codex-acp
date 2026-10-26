@@ -1,155 +1,202 @@
-# Alas downstream publication
+# Alas downstream maintenance and publication
 
-`mrmans0n/codex-acp` maintains the `alas` branch and publishes
+`mrmans0n/codex-acp` maintains the protected `alas` branch and publishes
 `@alas-ide/codex-acp`. The committed manifest keeps the upstream package name
-and stable version. Publication changes only the runner's manifest to
+and stable version. Publication rewrites only the runner's manifest to
 `X.Y.Z-alas.N` and records `alasDownstream.upstreamVersion`, `upstreamCommit`,
-and `sourceCommit`. The upstream commit is the canonical `vX.Y.Z` tag's commit;
-it must be an ancestor of the selected source.
+and `sourceCommit`.
 
-## First publication
+Publication is always a human-dispatched, environment-approved action. The npm
+job retains only `contents: read` and `id-token: write`; npm authentication uses
+OIDC provenance, not a stored token.
 
-1. Protect `alas`: require reviewed pull requests and passing checks, block
-   force pushes and deletion, and restrict direct pushes. Configure the `npm`
-   GitHub environment to allow deployments only from `alas` and require a
-   maintainer approval. Put `ci.yml`, `sync-upstream.yml`, and `publish-alas.yml`
-   on the fork's default branch, or make `alas` the default branch. GitHub discovers
-   scheduled and manually dispatched workflows from the default branch. Enable
-   these three downstream workflows and allow Actions to create pull requests.
-   Keep `ci.yml` and the sync helper on `alas` too. Disable inherited upstream
-   release automation, including `publish.yml`, so upstream preview and stable
-   releases cannot publish from the fork. Publishing Alas is manual.
-2. An npm maintainer with access to the `@alas-ide` scope signs in with 2FA.
-   Check out the reviewed `alas` head, then prepare the first package:
+## Downstream patch ledger
 
-   ```sh
-   npm ci && npm run typecheck && npm test && npm run bundle:all
-   upstream_version="$(node -p "require('./package.json').version")"
-   git fetch https://github.com/agentclientprotocol/codex-acp.git \
-     "refs/tags/v$upstream_version:refs/alas-upstream"
-   upstream_commit="$(git rev-list -n 1 refs/alas-upstream)"
-   git merge-base --is-ancestor "$upstream_commit" HEAD
-   ALAS_UPSTREAM_VERSION="$upstream_version" \
-   ALAS_UPSTREAM_COMMIT="$upstream_commit" \
-   ALAS_SOURCE_COMMIT="$(git rev-parse HEAD)" \
-   ALAS_PUBLISHED_JSON='[]' node scripts/prepare-alas-package.mjs
-   npm run build
-   npm pack --dry-run --json
-   ```
+`docs/alas-downstream-patches.json` is the versioned ledger for the functional
+patches carried by Alas. Every entry records:
 
-   Stop on any failed command. Inspect the rewritten manifest and ensure the
-   tarball contains only `dist/index.js`, `README.md`, `LICENSE`, and
-   `package.json` before publishing. Use empty registry metadata only when the
-   package has never been published.
-3. Run `npm publish --access public --tag latest` and complete npm's 2FA prompt. This one-time
-   publication creates the package so its trusted publisher can be configured.
-   Run `git restore -- package.json` afterward; never commit the publication
-   rewrite.
-4. In the npm package's trusted publisher settings, choose GitHub Actions with
-   owner `mrmans0n`, repository `codex-acp`, workflow `publish-alas.yml`, and
-   environment `npm`, and grant direct publication permission. The later workflow
-   publishes with provenance through OIDC. In package publishing access settings,
-   require 2FA and disallow traditional publish tokens. Never store an npm publish
-   token in GitHub Actions. Both manual and automated publications set `--tag latest`
-   so normal installs receive the downstream version even though `-alas.N` is a
-   semver prerelease.
-5. Dispatch the workflow for the same source commit to create its tag and
-   release. It reads the published metadata and skips the npm upload.
+- a stable name;
+- the exact downstream commit;
+- the related upstream PR number, or `null` when no upstream PR exists;
+- the complete changed-file list; and
+- the tests that cover the patch.
+
+The current functional patches are `goal-opt-in` (upstream PR #583) and
+`async-tasks-opt-in` (no upstream PR yet). Keep ledger entries and their file
+lists exact when a patch changes. `npm run test:maintenance` verifies the ledger
+against the recorded commits.
+
+For every new stable tag, `scripts/downstream-patches.mjs` compares each ledger
+entry with the upstream stable delta:
+
+- `unaffected`: no equivalent patch and no changed-path overlap;
+- `absorbed`: an upstream commit has the same stable patch-id; or
+- `overlap`: upstream changed at least one ledger path without an equivalent
+  patch.
+
+Only `unaffected` functional patches are reapplied automatically. `absorbed`
+and `overlap` always leave the synchronization PR in draft and fail the sync
+job. A maintainer must review the stable implementation, update or retire the
+ledger entry, run the full validation suite, and explicitly approve the
+result. They never trigger publication.
+
+## Stable upstream synchronization
+
+The daily `Sync stable upstream` workflow considers only exact `vX.Y.Z` tags.
+It fetches upstream tags and `upstream/main`, identifies the newest stable tag
+not represented in `origin/alas`, and uses the newest stable tag already in
+`alas` as the comparison base.
+
+`scripts/sync-candidate.mjs` builds the candidate from the new stable tag's
+exact commit. It does not merge or seed from `alas`, so preview or other
+post-stable upstream commits present in `alas` cannot leak into the candidate.
+It then:
+
+1. classifies the functional ledger patches;
+2. reapplies non-merge commits reachable from `origin/alas` but not from
+   `upstream/main`, skipping ledger patches classified `absorbed` or `overlap`;
+3. carries forward unique non-upstream review commits from current and older
+   sync branches; and
+4. verifies the candidate's merge-base with upstream history remains the exact
+   stable tag.
+
+The second step preserves fork-only maintenance commits as well as functional
+patches while excluding upstream preview commits. Patch-id deduplication avoids
+reapplying functional patches copied onto an older sync branch.
+
+The canonical branch is `sync/upstream-X.Y.Z`. Rebuilding it uses an explicit
+`--force-with-lease` tied to the fetched remote SHA. Every source sync branch is
+checked before and after the push. When the stable delta changes workflow files,
+the candidate restores the current downstream `.github/workflows` tree before
+pushing and lists the upstream workflow paths for manual reconciliation; the
+workflow token never needs a separate workflow-write secret. A concurrent
+update, cherry-pick conflict, unique merge commit, workflow-file change, missing
+ledger patch, `absorbed` classification, or `overlap` classification makes the
+run fail closed. Source branches and their PRs remain intact until their
+recorded heads are accounted for.
+
+The workflow has no GitHub Issues permission or `gh issue` calls. Its durable
+operator record is:
+
+- the Actions job summary;
+- a failed job state for every manual-review condition; and
+- a persistent draft PR when a safe partial candidate can be pushed.
+
+The draft body contains patch classifications, overlapping paths, conflicts,
+workflow changes, merge commits, and concurrent branch changes. Clean
+candidates are marked ready and receive an explicit `ci.yml` dispatch. Older
+sync PRs and branches remain open so a late maintainer push stays visible; close
+them manually only after confirming their latest heads are represented. Draft
+candidates must not be merged until the reported conditions are resolved.
+
+### Manual resolution
+
+Use the exact tag and candidate branch named in the draft PR:
+
+```sh
+tag=vX.Y.Z
+branch="sync/upstream-${tag#v}"
+git fetch origin
+
+git fetch --no-tags https://github.com/agentclientprotocol/codex-acp.git \
+  "+refs/tags/$tag:refs/tags/$tag" \
+  '+refs/heads/main:refs/alas-upstream-main'
+
+git switch -C "$branch" "origin/$branch"
+```
+
+Resolve only the conditions listed in the draft. Do not merge `origin/alas`
+into the candidate and do not restore upstream preview commits. Preserve every
+concurrent review commit or leave its source PR open and document why it is not
+yet incorporated. For an absorbed patch, remove or update its ledger entry only
+after the upstream behavior and listed tests have been reviewed. For overlap,
+rework the patch against the stable tag and update its exact commit and paths.
+
+Run:
+
+```sh
+npm ci
+npm run test:maintenance
+npm run typecheck
+npm test
+npm run bundle:all
+npm run build
+```
+
+Do not run `npm run test:e2e` without `OPENAI_API_KEY`. Push with an explicit
+lease, update the existing draft, and mark it ready only after all manual
+conditions are resolved and CI passes. Never add a PAT, npm token, or other
+stored publication credential.
 
 ## Manual publication
 
-Dispatch **Publish Alas downstream** on branch `alas`, with `source_commit` set
-to the full 40-character SHA of the current protected branch head:
+Dispatch **Publish Alas downstream** on branch `alas` with both:
+
+- `source_commit`: the full 40-character SHA of the current protected `alas`
+  head; and
+- `upstream_tag`: the exact stable `vX.Y.Z` tag declared by that source.
 
 ```sh
 gh workflow run publish-alas.yml --repo mrmans0n/codex-acp --ref alas \
-  -f source_commit="$(git rev-parse HEAD)"
+  -f source_commit="$(git rev-parse HEAD)" \
+  -f upstream_tag=vX.Y.Z
 ```
 
-Use this only from a checkout at the intended `alas` head. The workflow rejects
-other branches and a source SHA that differs from freshly fetched `origin/alas`.
-It runs Node 24, checks the committed lockfile before rewriting the manifest,
-and checks that `dist/index.js` exists and every packed path belongs to the
-manifest's `files` list. Workflow runs serialize so version allocation and npm
-publication do not race. GitHub may replace an older pending run with a newer
-one; dispatch the intended commit again if needed.
+The workflow freshly fetches `origin/alas`, the declared tag, and
+`upstream/main`. `scripts/verify-alas-source.mjs` requires all of the following:
 
-The npm job has only `contents: read` and `id-token: write`. The dependent tag
-and release job has only `contents: write`. A successful upload or an already
-published source always hands the resolved version to that job. Tags use
-`alas-v<version>` and point to the exact source commit. Release notes record the
-upstream tag, upstream commit, and source commit.
+- the source is exactly the fetched protected branch head;
+- the declared tag is stable and matches `package.json`'s upstream version;
+- the tag resolves to the recorded upstream commit; and
+- `git merge-base SOURCE_COMMIT upstream/main` is exactly that tag commit.
 
-## Upstream synchronization and manual fallback
+The final equality is intentionally stricter than an ancestry check. Any
+post-tag upstream or preview commit in the source causes publication to stop,
+even when the declared stable tag is also an ancestor.
 
-The daily sync merges into an existing canonical sync branch's remote head. When
-replacing an older-tag PR, it starts from that PR's remote head and merges the
-current `alas` branch and newest stable upstream tag. Maintainer compatibility
-edits carry forward. Pushes are fast-forward only, so a concurrent update stops
-the push. Older PRs close after their replacement exists and CI is dispatched;
-their branches are retained to preserve edits pushed during synchronization.
+After the source gate, the workflow runs `npm ci`, typecheck, unit and
+maintenance tests through `npm test`, all platform bundles, and the package
+build. It checks the dry-run tarball before `npm publish --provenance --tag
+latest`. The `npm` environment approval remains the human publication gate.
 
-`GITHUB_TOKEN` cannot push changes to `.github/workflows`. If a clean merge
-changes those files, automation stops before pushing or replacing a PR and opens
-or updates `Upstream synchronization required: vX.Y.Z`. Merge conflicts use the
-same tracked issue. The issue names the tag, affected files, and refs to merge.
-No stored PAT, App credential, or other workflow write credential is needed.
+The dependent release job creates an immutable `alas-v<version>` tag and a
+GitHub release at the exact source commit. Existing matching artifacts are
+accepted; tags are never moved.
 
-For a manual sync, use your maintainer login with permission to update workflows:
+## First publication and trusted publisher
 
-```sh
-tag=vX.Y.Z                         # Use the tag named in the issue.
-branch="sync/upstream-${tag#v}"
-git fetch origin
-git fetch --no-tags https://github.com/agentclientprotocol/codex-acp.git \
-  "+refs/tags/$tag:refs/alas-upstream-tags/$tag"
-```
+For a package that has never been published, a maintainer may perform the
+one-time interactive npm publication after running the same source verification
+and validation locally. Configure the npm trusted publisher for owner
+`mrmans0n`, repository `codex-acp`, workflow `publish-alas.yml`, environment
+`npm`, with direct publication permission. Require 2FA and disallow traditional
+publish tokens.
 
-Start from `origin/$branch` if it exists. Otherwise start from the remote head of
-the older sync PR named in the issue, or `origin/alas` if no sync PR exists:
-
-```sh
-seed=origin/alas                  # Set this to the existing sync PR's remote ref.
-git switch -C "$branch" "$seed"
-git merge --no-edit origin/alas
-# Merge any other older sync PR refs listed in the issue before the upstream tag.
-git merge --no-edit "refs/alas-upstream-tags/$tag"
-```
-
-Resolve any conflicts and run `npm ci`, `npm run typecheck`, `npm test`, and
-`npm run bundle:all`. Inspect workflow changes and keep inherited upstream
-release automation disabled. Push with `git push origin "HEAD:refs/heads/$branch"`,
-open or update its PR into `alas`, and dispatch `ci.yml` on the branch. Close older
-sync PRs after the replacement succeeds; retain their branches until their latest
-commits are accounted for. Never force-push over maintainer edits.
-
-The next sync run closes tracked manual or conflict issues for tags that are
-ancestors of freshly fetched `origin/alas`, including when no new sync is needed.
-It also closes the older generic conflict issue when its recorded tag is merged.
+Never republish or repair an existing npm version. In particular, historical
+`2.1.1-alas.1` remains immutable even though its source contains upstream
+`v2.1.2-preview.1`; publish a new reviewed revision only after a clean exact-tag
+source reaches `alas`.
 
 ## Recovery and rollback
 
-If npm publication succeeds but tagging or release creation fails, rerun the
-workflow for the same source while it remains the `alas` head. Its npm metadata
-reuses the existing version and skips publishing. An existing matching tag and
-release are accepted; a tag pointing elsewhere stops the job and is never moved.
-If the branch has advanced, rerun only the failed release job in the original
-Actions run, which retains the successful publish job's source and version.
-Do not dispatch an old commit against a newer branch head.
+If npm publication succeeds but release creation fails, rerun the failed
+release job in the original Actions run. If the source is still the protected
+branch head, redispatching the same source and tag reuses its published manifest
+and skips the upload. Do not dispatch an old source against a newer `alas` head.
 
-A registry lookup error other than package-not-found stops publication. Do not
-substitute empty metadata after a network or authentication failure. If an
-upload's outcome is uncertain, wait until npm exposes the manifest before
-rerunning. Never publish an existing version again or move a release tag.
+A registry error other than package-not-found stops publication. Do not replace
+failed registry metadata with an empty response. If an upload outcome is
+uncertain, wait for npm to expose the manifest before retrying.
 
-Rollback by reverting the faulty change in a reviewed `alas` commit and
-publishing a new revision. Update consumers to the resulting exact version.
-Keep the old version and tag for reproducibility; npm versions are immutable.
+Rollback by reverting the faulty downstream change in a reviewed commit and
+publishing a new revision. Keep old npm versions, tags, and releases immutable
+for reproducibility.
 
 ## Retirement
 
-Retire the downstream when upstream includes the required behavior and Alas
-can use a tested upstream release, or when Alas no longer uses this adapter.
-Switch consumers first, disable `publish-alas.yml`, and remove the npm trusted
-publisher. Preserve published versions, tags, and their source history so
-existing pinned installations remain reproducible.
+Retire a functional patch when a reviewed stable upstream release contains the
+required behavior, or when Alas no longer needs it. Update consumers first,
+then update the ledger and downstream code in the same reviewed change. Retire
+the whole downstream package only after disabling `publish-alas.yml` and
+removing the npm trusted publisher; preserve published versions and source
+history.
