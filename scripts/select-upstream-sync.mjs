@@ -15,11 +15,13 @@ export function selectUpstreamSync({ tags, openHeads }) {
   const newest = stable[0];
   if (!newest || newest.merged) return null;
   const branch = `sync/upstream-${newest.name.slice(1)}`;
+  const baseTag = stable.find((tag) => tag.merged)?.name;
   return {
     tag: newest.name,
     branch,
     staleHeads: [...new Set(openHeads)].filter((head) =>
       head !== branch && STABLE_TAG.test(head.replace(/^sync\/upstream-/, "v")) &&
       head.startsWith("sync/upstream-")),
+    ...(baseTag ? {baseTag} : {}),
   };
 }
