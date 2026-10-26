@@ -58,6 +58,7 @@ export class CodexBackgroundTerminalTasks {
         private readonly rootSessionId: string,
         private appServer: CodexAppServerClient,
         private readonly session: ACPSessionConnection,
+        private readonly airClient: boolean = enabled,
     ) {}
 
     async handleNotification(
@@ -306,19 +307,21 @@ export class CodexBackgroundTerminalTasks {
     }
 
     private async publishSpawn(task: Task): Promise<void> {
-        await this.session.update({
-            sessionUpdate: "tool_call_update",
-            toolCallId: task.itemId,
-            _meta: {
-                [JETBRAINS_META_KEY]: {
-                    [AIR_META_KEY]: {
-                        [AIR_ASYNC_TASKS_KEY]: {
-                            [AIR_ASYNC_TASKS_BACKGROUNDED_KEY]: true,
+        if (this.airClient) {
+            await this.session.update({
+                sessionUpdate: "tool_call_update",
+                toolCallId: task.itemId,
+                _meta: {
+                    [JETBRAINS_META_KEY]: {
+                        [AIR_META_KEY]: {
+                            [AIR_ASYNC_TASKS_KEY]: {
+                                [AIR_ASYNC_TASKS_BACKGROUNDED_KEY]: true,
+                            },
                         },
                     },
                 },
-            },
-        }, task.sessionId);
+            }, task.sessionId);
+        }
         await this.session.update({
             sessionUpdate: "async_task_spawned",
             asyncTaskId: task.asyncTaskId,
