@@ -174,9 +174,28 @@ describe("ACP tool call contract", () => {
         const air = new AcpToolCallRenderer(AIR).render(McpToolReporter.progress("mcp", "  line 1\n"));
         expect(air).toEqual({sessionUpdate: "tool_call_update", toolCallId: "mcp"});
     });
+
+    it("keeps a neutral async-task opt-in on the ordinary non-AIR tool contract", () => {
+        expect(render(ClientCapabilities.from({_meta: {goal: {}, "async-tasks": true}})))
+            .toBe(render(ClientCapabilities.from({})));
+    });
 });
 
 describe("ClientCapabilities", () => {
+    it.each([true, false, null, {}, [], "true"])("enables async tasks only for literal true: %s", value => {
+        expect(ClientCapabilities.from({_meta: {"async-tasks": value}} as never).asyncTasks)
+            .toBe(value === true);
+    });
+
+    it("keeps the neutral async-task opt-in an ACP v1 extension and the upstream AIR rule on ACP v2", () => {
+        const airWith = (capabilities: string[]) => ({
+            _meta: {jetbrains: {air: {version: 1, capabilities}}},
+        });
+        expect(ClientCapabilities.fromV2({_meta: {"async-tasks": true}}).asyncTasks).toBe(false);
+        expect(ClientCapabilities.fromV2(airWith(["asyncTasks"])).asyncTasks).toBe(true);
+        expect(ClientCapabilities.fromV2(airWith([])).asyncTasks).toBe(false);
+    });
+
     it("reads the AIR client and the AIR capabilities only from _meta.jetbrains.air", () => {
         expect(AIR.airClient).toBe(true);
         expect(ZED.airClient).toBe(false);

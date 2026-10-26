@@ -26,16 +26,13 @@ describe("Codex background terminal tasks", () => {
         await fixture.getCodexAcpAgent().initialize({
             protocolVersion: 1,
             clientCapabilities: {
-                _meta: {jetbrains: {air: {version: 1, capabilities: ["asyncTasks"]}}},
+                _meta: {goal: {}, "async-tasks": true},
             },
         });
         const sessionState = createTestSessionState({sessionId: "thread-1"});
-        sessionState.asyncTasks = new CodexBackgroundTerminalTasks(
-            true,
-            sessionState.sessionId,
-            fixture.getCodexAppServerClient(),
-            new ACPSessionConnection(fixture.getAcpConnection(), sessionState.sessionId),
-        );
+        sessionState.asyncTasks = (fixture.getCodexAcpAgent() as unknown as {
+            createAsyncTasks(sessionId: string): CodexBackgroundTerminalTasks;
+        }).createAsyncTasks(sessionState.sessionId);
         // @ts-expect-error - register the local session for session-generation checks
         fixture.getCodexAcpAgent().sessions.set(sessionState.sessionId, sessionState);
         const rawCommand = "/bin/zsh -lc 'npm run build'";
@@ -57,6 +54,13 @@ describe("Codex background terminal tasks", () => {
                 name: "npm run build",
                 toolCallId: "command-1",
             })]);
+            expect(fixture.getAcpConnectionEvents([])
+                .filter(event => event.method === "sessionUpdate")
+                .map(event => event.args[0].update)
+                .filter(update => update.sessionUpdate === "tool_call_update"))
+                .not.toEqual(expect.arrayContaining([expect.objectContaining({
+                    _meta: {jetbrains: {air: {asyncTasks: {backgrounded: true}}}},
+                })]));
         });
     });
 
@@ -363,8 +367,12 @@ describe("Codex background terminal tasks", () => {
             .toEqual([expect.objectContaining({state: "completed"})]);
     });
 
-    it("routes the AIR stop request to the session task runtime", async () => {
+    it("routes the provider-neutral async-task stop request to the session task runtime", async () => {
         const fixture = createCodexMockTestFixture();
+        await fixture.getCodexAcpAgent().initialize({
+            protocolVersion: 1,
+            clientCapabilities: {_meta: {"async-tasks": true}},
+        });
         const sessionState = createTestSessionState({sessionId: "thread-1"});
         const stop = vi.spyOn(sessionState.asyncTasks, "stop").mockResolvedValue(true);
         // @ts-expect-error - register the local session for the extension request path
