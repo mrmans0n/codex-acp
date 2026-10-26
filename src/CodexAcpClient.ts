@@ -610,6 +610,22 @@ export class CodexAcpClient {
         return providerId === CUSTOM_GATEWAY_PROVIDER_ID && this.gatewayConfigSource === "acpProviders";
     }
 
+    /** Provider inputs that can change the routing of a subsequent open or turn. Never returned over ACP. */
+    async hookReviewProviderInputs(): Promise<{modelProvider: string; config: JsonObject}> {
+        const persisted = (await this.codexClient.configRead({includeLayers: false})).config;
+        const modelProvider = this.getModelProvider() ?? persisted.model_provider ?? "openai";
+        const selected = (providers: unknown): JsonObject => {
+            if (providers === null || typeof providers !== "object" || Array.isArray(providers)) return {};
+            const value = (providers as Record<string, unknown>)[modelProvider];
+            return value !== null && typeof value === "object" && !Array.isArray(value) ? value as JsonObject : {};
+        };
+        const merged: JsonObject = this.gatewayConfig?.modelProvider === modelProvider ? this.gatewayConfig.config
+            : {...selected(persisted["model_providers"]), ...selected(this.config["model_providers"])};
+        // A provider's display name/instructions do not affect execution. Other persisted app settings are excluded.
+        const {name: _name, env_key_instructions: _instructions, ...config} = merged;
+        return {modelProvider, config};
+    }
+
     /**
      * The model provider the agent itself is configured with (launch option or
      * Codex config), ignoring any ACP-configured gateway routing. The
