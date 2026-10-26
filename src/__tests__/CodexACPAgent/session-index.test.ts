@@ -5,7 +5,8 @@ import os from "node:os";
 import path from "node:path";
 import {createCodexMockTestFixture, createTestModel, deferred, type CodexMockTestFixture} from "../acp-test-utils";
 import type {Thread, ThreadListParams, ThreadListResponse} from "../../app-server/v2";
-import {SESSION_LIST_CHANGES_METHOD} from "../../SessionIndex";
+import {SESSION_LIST_CHANGES_METHOD, sessionIndexRowForkedFrom} from "../../SessionIndex";
+import {connectSession} from "./v2-prompt-harness";
 import {MAX_SESSION_TITLE_LENGTH} from "../../SessionTitle";
 
 const threadId = "01a0637c-5b99-7242-9064-04545d605fdb";
@@ -13,12 +14,14 @@ const otherThreadId = "01a0637c-5b99-7242-9064-04545d605fdc";
 
 const ACTIVE_WRITER = Object.assign(new Error(`thread ${threadId} already has an active writer`), {code: -32600});
 
-type ClientKind = "sessionIndex" | "airWithoutSessionIndex" | "plain";
+type ClientKind = "sessionIndex" | "neutral" | "airWithoutSessionIndex" | "plain";
 
 function clientCapabilities(kind: ClientKind): acp.ClientCapabilities | undefined {
     switch (kind) {
         case "sessionIndex":
             return {_meta: {jetbrains: {air: {version: 1, capabilities: ["sessionIndex"]}}}};
+        case "neutral":
+            return {_meta: {sessionIndex: {version: 1}}};
         case "airWithoutSessionIndex":
             return {_meta: {jetbrains: {air: {version: 1, capabilities: ["diffPatch"]}}}};
         case "plain":
@@ -60,14 +63,31 @@ function createThread(overrides: Partial<Thread> = {}): Thread {
     };
 }
 
-async function createAgent(kind: ClientKind, threads: Thread[] = [createThread()]) {
+/** The `session/list` `_meta` of the list options, in the namespace of the client. */
+function listMeta(kind: ClientKind, list: Record<string, unknown>): Record<string, unknown> {
+    return kind === "neutral" ? {sessionIndex: {list}} : {jetbrains: {air: {list}}};
+}
+
+/** The AIR metadata of a value moved to `_meta.sessionIndex`, as a client-neutral opt-in gets it. */
+function asNeutral(value: unknown): unknown {
+    if (Array.isArray(value)) return value.map(asNeutral);
+    if (value === null || typeof value !== "object") return value;
+    const entries = Object.entries(value).map(([key, field]) => {
+        if (key !== "_meta") return [key, asNeutral(field)];
+        const {jetbrains: {air: {version: _version, ...fields}}, ...rest} = field as any;
+        return [key, {...rest, sessionIndex: fields}];
+    });
+    return Object.fromEntries(entries);
+}
+
+async function createAgent(kind: ClientKind | acp.ClientCapabilities, threads: Thread[] = [createThread()]) {
     const fixture = createCodexMockTestFixture();
     const agent = fixture.getCodexAcpAgent();
     const client = fixture.getCodexAcpClient();
     const appServer = fixture.getCodexAppServerClient();
     const readAuthRequirement = vi.spyOn(client, "readAuthRequirement").mockResolvedValue({required: false, account: null});
     const threadList = vi.spyOn(appServer, "threadList").mockResolvedValue({data: threads, nextCursor: null, backwardsCursor: null});
-    const capabilities = clientCapabilities(kind);
+    const capabilities = typeof kind === "string" ? clientCapabilities(kind) : kind;
     await agent.initialize({protocolVersion: acp.PROTOCOL_VERSION, ...(capabilities ? {clientCapabilities: capabilities} : {})});
     readAuthRequirement.mockClear();
     return {fixture, agent, client, appServer, threadList, readAuthRequirement};
@@ -150,6 +170,33 @@ describe("sessionIndex capability negotiation", () => {
         await expect(agent.sessionIndex.subscribeList({cwd: "/repo/project"})).rejects.toMatchObject({code: -32601});
         expect(() => agent.sessionIndex.unsubscribeList({subscriptionId: "x"})).toThrow(expect.objectContaining({code: -32601}));
     });
+
+    it.each<[string, unknown]>([
+        ["true", true],
+        ["a string", "1"],
+        ["an array", [{version: 1}]],
+        ["null", null],
+        ["no version", {}],
+        ["version 0", {version: 0}],
+        ["a fractional version", {version: 1.5}],
+        ["an infinite version", {version: Infinity}],
+        ["a string version", {version: "1"}],
+    ])("enables nothing for a client-neutral sessionIndex of %s", async (_name, sessionIndex) => {
+        const {agent, threadList} = await createAgent({_meta: {sessionIndex}} as acp.ClientCapabilities);
+
+        const response = await agent.listSessions({cwd: "/repo/project", _meta: {sessionIndex: {list: {limit: 1}}}});
+
+        expect(response.sessions[0]).not.toHaveProperty("_meta");
+        expect(threadList.mock.calls[0]?.[0]).not.toHaveProperty("sortKey");
+        await expect(agent.sessionIndex.rename({sessionId: threadId, title: "A"})).rejects.toMatchObject({code: -32601});
+    });
+
+    it("ignores the client-neutral sessionIndex of an AIR client", async () => {
+        const {agent} = await createAgent({_meta: {jetbrains: {air: {version: 1, capabilities: []}}, sessionIndex: {version: 1}}});
+
+        await expect(agent.sessionIndex.rename({sessionId: threadId, title: "A"})).rejects.toMatchObject({code: -32601});
+        await expect(agent.sessionIndex.subscribeList({cwd: "/repo/project"})).rejects.toMatchObject({code: -32601});
+    });
 });
 
 describe("session/list", () => {
@@ -184,7 +231,26 @@ describe("session/list", () => {
             .toMatchFileSnapshot("data/session-index-list-params.json");
     });
 
-    it("lists the sessions of the linked worktrees of the cwd only when the client asks for them", async () => {
+    it("reads the list options of a client only from its own namespace", async () => {
+        const requests = async (kind: ClientKind) => {
+            const {agent, threadList} = await createAgent(kind);
+            for (const list of [{limit: 500, archived: "all"}, {limit: 1, archived: null}, {limit: 5, archived: "archived"}]) {
+                await agent.listSessions({cwd: "/repo/project", _meta: listMeta(kind, list)});
+            }
+            // The list options of the other namespace are ignored.
+            const other: ClientKind = kind === "neutral" ? "sessionIndex" : "neutral";
+            await agent.listSessions({cwd: "/repo/project", _meta: listMeta(other, {limit: 5, archived: "archived"})});
+            await expect(agent.listSessions({cwd: "/repo/project", _meta: listMeta(kind, {limit: 0})}))
+                .rejects.toMatchObject({code: -32602});
+            return threadList.mock.calls.map(call => call[0]);
+        };
+
+        const air = await requests("sessionIndex");
+        expect(await requests("neutral")).toEqual(air);
+        expect(air.at(-1)).toMatchObject({limit: 50, archived: false});
+    });
+
+    it.each<ClientKind>(["sessionIndex", "neutral"])("lists the sessions of the linked worktrees of the cwd only when the client asks for them: %s", async (kind) => {
         const root = fs.realpathSync.native(fs.mkdtempSync(path.join(os.tmpdir(), "codex-acp-session-index-")));
         try {
             const repo = path.join(root, "repo");
@@ -196,13 +262,13 @@ describe("session/list", () => {
             fs.writeFileSync(path.join(worktree, ".git"), `gitdir: ${adminDir}\n`);
             fs.writeFileSync(path.join(adminDir, "commondir"), "../..\n");
             fs.writeFileSync(path.join(adminDir, "gitdir"), `${path.join(worktree, ".git")}\n`);
-            const {agent, threadList} = await createAgent("sessionIndex", [
+            const {agent, threadList} = await createAgent(kind, [
                 createThread({cwd: worktree}),
             ]);
 
-            const response = await agent.listSessions({cwd: repo, _meta: {jetbrains: {air: {list: {includeWorktrees: true}}}}});
+            const response = await agent.listSessions({cwd: repo, _meta: listMeta(kind, {includeWorktrees: true})});
             await agent.listSessions({cwd: repo});
-            await agent.listSessions({cwd: repo, _meta: {jetbrains: {air: {list: {includeWorktrees: false}}}}});
+            await agent.listSessions({cwd: repo, _meta: listMeta(kind, {includeWorktrees: false})});
 
             expect(threadList.mock.calls.map(call => call[0].cwd)).toEqual([[repo, worktree], repo, repo]);
             expect(response.sessions[0]?.cwd).toBe(worktree);
@@ -244,7 +310,56 @@ describe("session/list", () => {
         }
     });
 
-    it("maps the rows of a sessionIndex client, with the state of own threads", async () => {
+    it("sends a client-neutral opt-in the agentWorktree row field under _meta.sessionIndex", async () => {
+        const root = fs.realpathSync.native(fs.mkdtempSync(path.join(os.tmpdir(), "codex-acp-session-index-")));
+        try {
+            const {repo, worktrees} = createGitLayout(root, ["codex", "user"]);
+            fs.writeFileSync(
+                path.join(repo, ".git", "worktrees", "codex", "codex-thread.json"),
+                `${JSON.stringify({version: 1, ownerThreadId: "codex-root"})}\n`,
+            );
+            const [codexWorktree, userWorktree] = worktrees as [string, string];
+            const threads = [
+                createThread({id: "codex-root", cwd: codexWorktree}),
+                createThread({id: "user-worktree", cwd: userWorktree}),
+            ];
+            const list = async (kind: ClientKind) => (await createAgent(kind, threads)).agent
+                .listSessions({cwd: repo, _meta: listMeta(kind, {includeWorktrees: true})});
+
+            const air = await list("sessionIndex");
+            const neutral = await list("neutral");
+
+            expect(neutral).toEqual(asNeutral(air));
+            expect(neutral.sessions.find(row => row.sessionId === "codex-root")?._meta)
+                .toMatchObject({sessionIndex: {agentWorktree: true}});
+        } finally {
+            fs.rmSync(root, {recursive: true, force: true});
+        }
+    });
+
+    it("reads the forkedFrom row field of either namespace for the fork hold-back", () => {
+        const row = (meta: Record<string, unknown>) => ({sessionId: "fork", cwd: "/repo", _meta: meta});
+        expect(sessionIndexRowForkedFrom(row({jetbrains: {air: {version: 1, forkedFrom: "source"}}}))).toBe("source");
+        expect(sessionIndexRowForkedFrom(row({sessionIndex: {forkedFrom: "source"}}))).toBe("source");
+        expect(sessionIndexRowForkedFrom(row({}))).toBeNull();
+    });
+
+    it("keeps the client-neutral opt-in an ACP v1 extension", async () => {
+        const v2 = await connectSession(2, {clientCapabilities: {_meta: {sessionIndex: {version: 1}}}});
+        try {
+            expect(v2.agent.sessionIndex.enabled).toBe(false);
+        } finally {
+            v2.connection.close();
+        }
+        const air = await connectSession(2, {clientCapabilities: {_meta: {jetbrains: {air: {version: 1, capabilities: ["sessionIndex"]}}}}});
+        try {
+            expect(air.agent.sessionIndex.enabled).toBe(true);
+        } finally {
+            air.connection.close();
+        }
+    });
+
+    async function listRowsWithState(kind: ClientKind): Promise<acp.ListSessionsResponse> {
         const threads = [
             createThread({
                 id: "running",
@@ -259,7 +374,7 @@ describe("session/list", () => {
             createThread({id: "foreign", status: {type: "notLoaded"}}),
             createThread({id: "broken", status: {type: "systemError"}}),
         ];
-        const {fixture, agent} = await createAgent("sessionIndex", threads);
+        const {fixture, agent} = await createAgent(kind, threads);
         await openLocalSession(fixture, "idle");
         fixture.sendServerNotification({
             method: "turn/completed",
@@ -269,9 +384,19 @@ describe("session/list", () => {
             },
         });
 
-        const response = await agent.listSessions({cwd: "/repo/project"});
+        return await agent.listSessions({cwd: "/repo/project"});
+    }
+
+    it("maps the rows of a sessionIndex client, with the state of own threads", async () => {
+        const response = await listRowsWithState("sessionIndex");
 
         await expect(`${JSON.stringify(response, null, 2)}\n`).toMatchFileSnapshot("data/session-index-list-rows.json");
+    });
+
+    it("sends a client-neutral opt-in the same row fields under _meta.sessionIndex", async () => {
+        const air = await listRowsWithState("sessionIndex");
+
+        expect(await listRowsWithState("neutral")).toEqual(asNeutral(air));
     });
 
     it("answers state error for a loaded thread whose last turn failed, until a new turn starts", async () => {
@@ -771,9 +896,9 @@ describe("_session/list/subscribe", () => {
         expect(agent.sessionIndex.subscriptionResources()).toMatchObject({subscriptions: 0, watching: false});
     });
 
-    it("sends the full row of an own thread that changed, and nothing after unsubscribe", async () => {
+    it.each<ClientKind>(["sessionIndex", "neutral"])("sends the full row of an own thread that changed, and nothing after unsubscribe: %s", async (kind) => {
         vi.useFakeTimers();
-        const {fixture, agent, appServer} = await createAgent("sessionIndex");
+        const {fixture, agent, appServer} = await createAgent(kind);
         const {subscriptionId} = await agent.sessionIndex.subscribeList({cwd: "/repo/project"});
         fixture.clearAcpConnectionDump();
         const running = createThread({
@@ -791,6 +916,10 @@ describe("_session/list/subscribe", () => {
         vi.mocked(appServer.threadList).mockResolvedValue({data: [running], nextCursor: null, backwardsCursor: null});
         const listed = await agent.listSessions({cwd: "/repo/project"});
         expect(listChanges(fixture)).toEqual([{subscriptionId, sessions: listed.sessions, removed: []}]);
+        expect(Object.keys(listed.sessions[0]?._meta ?? {})).toEqual([kind === "neutral" ? "sessionIndex" : "jetbrains"]);
+        expect(listed.sessions[0]?._meta).toMatchObject(kind === "neutral"
+            ? {sessionIndex: {archived: false, state: "running"}}
+            : {jetbrains: {air: {archived: false, state: "running"}}});
 
         expect(agent.sessionIndex.unsubscribeList({subscriptionId})).toEqual({});
         expect(agent.sessionIndex.unsubscribeList({subscriptionId})).toEqual({});
@@ -928,8 +1057,8 @@ describe("_session/list/subscribe", () => {
 });
 
 describe("_session/rename", () => {
-    it("renames a thread that is not loaded", async () => {
-        const {agent, appServer} = await createAgent("sessionIndex");
+    it.each<ClientKind>(["sessionIndex", "neutral"])("renames a thread that is not loaded: %s", async (kind) => {
+        const {agent, appServer} = await createAgent(kind);
         const threadSetName = vi.spyOn(appServer, "threadSetName").mockResolvedValue({});
 
         await expect(agent.sessionIndex.rename({sessionId: threadId, title: `  New\n title ${"x".repeat(300)}`})).resolves.toEqual({});
@@ -1116,8 +1245,8 @@ describe("_session/archive and _session/unarchive", () => {
     const missingRollout = (id: string) => Object.assign(new Error(`no rollout found for thread id ${id}`), {code: -32600});
     const missingArchivedRollout = (id: string) => Object.assign(new Error(`no archived rollout found for thread id ${id}`), {code: -32600});
 
-    async function createArchiveAgent() {
-        const created = await createAgent("sessionIndex");
+    async function createArchiveAgent(kind: ClientKind = "sessionIndex") {
+        const created = await createAgent(kind);
         vi.spyOn(created.client, "getHomePath").mockReturnValue(codexHome);
         const threadArchive = vi.spyOn(created.appServer, "threadArchive").mockResolvedValue({});
         const threadUnarchive = vi.spyOn(created.appServer, "threadUnarchive").mockResolvedValue({thread: createThread()});
@@ -1125,8 +1254,8 @@ describe("_session/archive and _session/unarchive", () => {
         return {...created, threadArchive, threadUnarchive, threadRead};
     }
 
-    it("archives and unarchives a thread that is not loaded", async () => {
-        const {agent, threadArchive, threadUnarchive, threadRead} = await createArchiveAgent();
+    it.each<ClientKind>(["sessionIndex", "neutral"])("archives and unarchives a thread that is not loaded: %s", async (kind) => {
+        const {agent, threadArchive, threadUnarchive, threadRead} = await createArchiveAgent(kind);
 
         await expect(agent.sessionIndex.setArchived({sessionId: threadId}, true)).resolves.toEqual({});
         await expect(agent.sessionIndex.setArchived({sessionId: threadId}, false)).resolves.toEqual({});
@@ -1218,8 +1347,11 @@ describe("_session/archive and _session/unarchive", () => {
         expect(infoUpdates()).toEqual([]);
     });
 
-    it("unarchives a session that is open here and reports its archive state to it", async () => {
-        const {fixture, agent, threadUnarchive} = await createArchiveAgent();
+    it.each<[ClientKind, Record<string, unknown>]>([
+        ["sessionIndex", {jetbrains: {air: {version: 1, archived: false}}}],
+        ["neutral", {sessionIndex: {archived: false}}],
+    ])("unarchives a session that is open here and reports its archive state to it: %s", async (kind, meta) => {
+        const {fixture, agent, threadUnarchive} = await createArchiveAgent(kind);
         await openLocalSession(fixture, threadId);
 
         await expect(agent.sessionIndex.setArchived({sessionId: threadId}, false)).resolves.toEqual({});
@@ -1228,7 +1360,7 @@ describe("_session/archive and _session/unarchive", () => {
         expect(fixture.getAcpConnectionEvents([])
             .filter(event => event.method === "sessionUpdate" && event.args[0].update.sessionUpdate === "session_info_update")).toEqual([{
             method: "sessionUpdate",
-            args: [{sessionId: threadId, update: {sessionUpdate: "session_info_update", _meta: {jetbrains: {air: {version: 1, archived: false}}}}}],
+            args: [{sessionId: threadId, update: {sessionUpdate: "session_info_update", _meta: meta}}],
         }]);
     });
 
@@ -1275,8 +1407,8 @@ describe("session/delete", () => {
         return {...created, threadArchive, threadDelete};
     }
 
-    it("deletes the thread for a sessionIndex client and archives it for other clients", async () => {
-        const calls: Record<ClientKind, string[]> = {sessionIndex: [], airWithoutSessionIndex: [], plain: []};
+    it("deletes the thread for a sessionIndex client, AIR or neutral, and archives it for other clients", async () => {
+        const calls: Record<ClientKind, string[]> = {sessionIndex: [], neutral: [], airWithoutSessionIndex: [], plain: []};
         for (const kind of Object.keys(calls) as ClientKind[]) {
             const {agent, threadArchive, threadDelete} = await createDeleteAgent(kind);
             await expect(agent.deleteSession({sessionId: threadId})).resolves.toEqual({});
@@ -1288,6 +1420,7 @@ describe("session/delete", () => {
 
         expect(calls).toEqual({
             sessionIndex: ["thread/delete"],
+            neutral: ["thread/delete"],
             airWithoutSessionIndex: ["thread/archive"],
             plain: ["thread/archive"],
         });
