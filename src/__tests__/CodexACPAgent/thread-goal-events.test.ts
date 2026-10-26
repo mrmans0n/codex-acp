@@ -2,6 +2,8 @@ import { describe, it, expect, vi, beforeEach } from "vitest";
 import type { SessionState } from "../../CodexAcpServer";
 import type { ServerNotification } from "../../app-server";
 import { AgentMode } from "../../AgentMode";
+import {ClientCapabilities} from "../../tool-calls/ClientCapabilities";
+import {goalSessionInfoUpdate, toThreadGoalSnapshot} from "../../ThreadGoalSnapshot";
 import {
     createCodexMockTestFixture,
     createTestSessionState,
@@ -42,6 +44,64 @@ describe("CodexEventHandler - thread goal events", () => {
         await expect(mockFixture.getAcpConnectionDump([])).toMatchFileSnapshot(
             "data/thread-goal-updated.json"
         );
+    });
+
+    it("sends goal updates to a non-AIR client that opts in", async () => {
+        const goalUpdatedNotification: ServerNotification = {
+            method: "thread/goal/updated",
+            params: {
+                threadId: sessionId,
+                turnId: "turn-1",
+                goal: {
+                    threadId: sessionId,
+                    objective: "Ship the goal update",
+                    status: "active",
+                    tokenBudget: null,
+                    tokensUsed: 42,
+                    timeUsedSeconds: 12,
+                    createdAt: 1710000000,
+                    updatedAt: 1710000012,
+                },
+            },
+        };
+
+        await setupPromptAndSendNotifications(mockFixture, sessionId, createSessionState({
+            clientCapabilities: ClientCapabilities.from({_meta: {goal: {}}}),
+        }), [goalUpdatedNotification]);
+
+        const events = mockFixture.getAcpConnectionEvents([]);
+        expect(events).toHaveLength(1);
+        expect(events[0]!.args[0].update._meta).toEqual({
+            goal: expect.objectContaining({
+                objective: "Ship the goal update",
+                status: "active",
+            }),
+        });
+    });
+
+    it("keeps the goal opt-in an ACP v1 extension and sends no goal to a v2 client that declares it", () => {
+        const v2OptIn = ClientCapabilities.fromV2({_meta: {goal: {}}});
+
+        expect(v2OptIn.goal).toBe(false);
+        expect(goalSessionInfoUpdate(toThreadGoalSnapshot(goalUpdated("Ship the goal update").params.goal), v2OptIn))
+            .toBeNull();
+        expect(goalSessionInfoUpdate(null, v2OptIn)).toBeNull();
+    });
+
+    it("keeps sending goal updates to AIR on ACP v2", async () => {
+        await setupPromptAndSendNotifications(mockFixture, sessionId, createSessionState({
+            clientCapabilities: ClientCapabilities.fromV2({_meta: {jetbrains: {air: {}}}}),
+        }), [goalUpdated("Ship the goal update")]);
+
+        const events = mockFixture.getAcpConnectionEvents([]);
+        expect(events).toHaveLength(1);
+        expect(events[0]!.args[0].update._meta).toEqual({
+            jetbrains: {
+                air: expect.objectContaining({
+                    goal: expect.objectContaining({objective: "Ship the goal update", status: "active"}),
+                }),
+            },
+        });
     });
 
     it("should trim multiline thread goal objectives in session metadata", async () => {
@@ -262,11 +322,32 @@ describe("CodexEventHandler - thread goal events", () => {
         });
     });
 
-    function createSessionState(): SessionState {
+    function goalUpdated(objective: string): Extract<ServerNotification, {method: "thread/goal/updated"}> {
+        return {
+            method: "thread/goal/updated",
+            params: {
+                threadId: sessionId,
+                turnId: "turn-1",
+                goal: {
+                    threadId: sessionId,
+                    objective,
+                    status: "active",
+                    tokenBudget: null,
+                    tokensUsed: 42,
+                    timeUsedSeconds: 12,
+                    createdAt: 1710000000,
+                    updatedAt: 1710000012,
+                },
+            },
+        };
+    }
+
+    function createSessionState(overrides: Partial<SessionState> = {}): SessionState {
         return createTestSessionState({
             sessionId,
             currentModelId: "model-id[effort]",
             agentMode: AgentMode.DEFAULT_AGENT_MODE,
+            ...overrides,
         });
     }
 });

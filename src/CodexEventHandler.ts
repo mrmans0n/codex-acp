@@ -863,7 +863,7 @@ export class CodexEventHandler {
         }
         this.sessionState.currentGoal = goalSnapshot;
 
-        return goalSessionInfoUpdate(goalSnapshot, this.sessionState.clientCapabilities.airClient);
+        return goalSessionInfoUpdate(goalSnapshot, this.sessionState.clientCapabilities);
     }
 
     private createThreadGoalClearedEvent(_event: ThreadGoalClearedNotification): UpdateSessionEvent | null {
@@ -873,7 +873,7 @@ export class CodexEventHandler {
         }
         this.sessionState.currentGoal = null;
 
-        return goalSessionInfoUpdate(null, this.sessionState.clientCapabilities.airClient);
+        return goalSessionInfoUpdate(null, this.sessionState.clientCapabilities);
     }
 
     private createReasoningDeltaEvent(
