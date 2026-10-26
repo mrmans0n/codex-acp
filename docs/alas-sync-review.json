@@ -1,8 +1,8 @@
 {
   "schemaVersion": 2,
-  "fromTag": "v2.1.1",
-  "toTag": "v2.2.2",
-  "toCommit": "202e66e63343ec4f5a5e35ab590251d813d129ca",
+  "fromTag": "v2.2.2",
+  "toTag": "v2.3.0",
+  "toCommit": "344a520632e4c8c02f781a7a20490dfac52d4d0a",
   "canonicalHead": null,
   "patches": [
     {
@@ -17,12 +17,14 @@
         "docs/air-extensions.md",
         "src/CodexAcpServer.ts",
         "src/CodexEventHandler.ts",
-        "src/__tests__/CodexACPAgent/initialize.test.ts"
+        "src/__tests__/CodexACPAgent/initialize.test.ts",
+        "src/tool-calls/ClientCapabilities.ts"
       ],
       "resolution": {
-        "action": "retain",
+        "action": "adapt",
+        "commit": "b160987ed8496ce18f8a853883184abaed1de478",
         "automatic": false,
-        "rationale": "v2.2.2 changes these files for live MCP status, pre-session hook trust, the AIR sessionIndex extension, and app-server recovery. None of them implements goal opt-in for non-AIR clients; upstream PR #583 is still open. The original commit replays cleanly on v2.2.2 and its added and removed lines are unchanged.",
+        "rationale": "Upstream v2.3.0 (ACP v2 support #620/#622, SDK 2.0 #649) moved the initialize extension metadata into initializeExtensionsMeta(protocolVersion), added ClientCapabilities.airToolCallContract and ClientCapabilities.fromV2, but still serves the goal extension only to AIR (no upstream absorption; upstream PR #583 is still the open proposal). The adaptation keeps the original +/- lines (sorted line diff differs only by re-indentation, upstream's pre-existing `const airClient`, and a local goalCapability const) and adds the neutral `_meta.goal` capability inside initializeExtensionsMeta. ClientCapabilities.fromV2 sets goal only for AIR, so the neutral opt-in stays an ACP v1 extension (the only protocol the Alas client speaks) and AIR keeps its v2 goal exactly as upstream serves it. New tests prove both v2 rules and fail when the fromV2 line is reverted either way.",
         "tests": [
           "src/__tests__/CodexACPAgent/initialize.test.ts",
           "src/__tests__/CodexACPAgent/thread-goal-events.test.ts"
@@ -32,21 +34,24 @@
     {
       "name": "async-tasks-opt-in",
       "originalCommit": "16817016d25a9eed9f3dc7cd1cbdf446569e179d",
-      "commit": "16817016d25a9eed9f3dc7cd1cbdf446569e179d",
-      "appliedCommit": null,
+      "commit": "9602512a647a7ed4097e8847499443bfec5bc1db",
+      "appliedCommit": "9602512a647a7ed4097e8847499443bfec5bc1db",
       "disposition": "active",
-      "patchId": "fc7312b1b446af367c92a5bd9dbe52a9e7653132",
+      "patchId": "6f025e9d6205eb630a5ed21e3f672c3ed9a2bba4",
       "classification": "overlap",
       "overlappingFiles": [
         "src/CodexAcpServer.ts",
+        "src/__tests__/CodexACPAgent/async-tasks.test.ts",
         "src/__tests__/CodexACPAgent/initialize.test.ts",
-        "src/__tests__/tool-calls/tool-call-contract.test.ts"
+        "src/__tests__/tool-calls/tool-call-contract.test.ts",
+        "src/async-tasks/AsyncTaskExtension.ts",
+        "src/tool-calls/ClientCapabilities.ts"
       ],
       "resolution": {
         "action": "adapt",
-        "commit": "9602512a647a7ed4097e8847499443bfec5bc1db",
+        "commit": "808ea06d8f1975241f02eb21bb2ffcbb311010b6",
         "automatic": false,
-        "rationale": "v2.2.2 adds the SessionIndexService imports directly before the async task import in src/CodexAcpServer.ts, and the patch edits the same capability lines as goal-opt-in. The adaptation is stacked on the goal-opt-in binding; every added and removed line is identical to 1681701. v2.2.2 has no provider-neutral async task negotiation.",
+        "rationale": "Upstream v2.3.0 did not absorb the provider-neutral async-task opt-in (no upstream PR; upstream still enables async tasks only for AIR clients that declare the asyncTasks AIR capability). The overlap comes from ACP v2 support (#620), SDK 2.0 (#649) and the subagent model report (#678): the initialize metadata moved into initializeExtensionsMeta(protocolVersion) and ClientCapabilities gained fromV2. The adaptation keeps every original +/- line (sorted line diff differs only by the re-indented capability block) and stacks on the v2.3.0 goal opt-in binding. On ACP v2, asyncTasks follows the upstream rule exactly (AIR with the asyncTasks capability), so the neutral opt-in stays an ACP v1 extension, which is what the Alas client speaks. A new ClientCapabilities test fails if fromV2 adopts the neutral opt-in or drops the AIR rule.",
         "tests": [
           "src/__tests__/CodexACPAgent/async-tasks.test.ts",
           "src/__tests__/CodexACPAgent/initialize.test.ts",
@@ -57,10 +62,10 @@
     {
       "name": "goal-before-first-prompt",
       "originalCommit": "9d2c300ec82da759d3a1606962c04304d2e60fa7",
-      "commit": "9d2c300ec82da759d3a1606962c04304d2e60fa7",
-      "appliedCommit": null,
+      "commit": "a52405dcabb22bc41b013da4c682ce2cdba31652",
+      "appliedCommit": "a52405dcabb22bc41b013da4c682ce2cdba31652",
       "disposition": "active",
-      "patchId": "1a14179c22ecb73e697620e4a9de0f47a092d32a",
+      "patchId": "84dea3dbc013f5a5989845db828cf8b6d6e28743",
       "classification": "overlap",
       "overlappingFiles": [
         "src/CodexAcpServer.ts",
@@ -68,15 +73,274 @@
       ],
       "resolution": {
         "action": "adapt",
-        "commit": "a52405dcabb22bc41b013da4c682ce2cdba31652",
+        "commit": "fa916afe71557747c2b6c4b4d164ddbf9c807bc2",
         "automatic": false,
-        "rationale": "v2.2.2 adds app-server crash and provider restart recovery: goal control now awaits ensureSessionReady, and a restarted app-server has a new client. 9d2c300 kept one subscription per session, so after a restart goal work from the new app-server was dropped. The adaptation binds the pre-prompt subscription to its client, subscribes again on the installed client, and cancels its permission requests and elicitations when that app-server dies. Upstream PR #584 is still open.",
+        "rationale": "Upstream PR #584 is still open and v2.3.0 did not absorb the patch. Upstream #620 added a baseline session subscription (startCodexTurnTracker) at session open, resume and provider restart, so Codex-started turns before the first prompt are tracked; but it denies every approval/elicitation and the lazy resume after a crash restart does not reinstall it. Replaying only the patch tests on v2.3.0 fails the restart test (goal work after a crash restart is dropped) and the permission-cancellation test (upstream denies instead of asking the client). The adaptation keeps every original +/- line (ensureSessionEventSubscription, loss-aware interactions, prompt marks eventSubscription), does not restore startGoalContinuationIfCurrent (upstream removed adapter-started goal continuations; Codex starts goal turns itself), and adds upstream tracker duties (trackCodexForegroundWork, trackSteerLanding, handleSkillsChanged, trackCodexTurnCompletion) to the goal-control handler because that subscription replaces the baseline tracker. A new test fails when those duties are removed.",
         "tests": [
           "src/__tests__/CodexACPAgent/CodexAcpClient.test.ts"
+        ]
+      }
+    },
+    {
+      "name": "session-system-prompt-append",
+      "originalCommit": "fc0eb68e9be4d407397cd6bf22620f304afaab96",
+      "commit": "fc0eb68e9be4d407397cd6bf22620f304afaab96",
+      "appliedCommit": null,
+      "disposition": "active",
+      "patchId": "4b8be72f09153925979e8f14b4f60ce3f78e6772",
+      "classification": "overlap",
+      "overlappingFiles": [
+        "docs/air-extensions.md",
+        "src/CodexAcpClient.ts",
+        "src/CodexAcpServer.ts",
+        "src/SessionFork.ts",
+        "src/__tests__/CodexACPAgent/agent-file-change-report.test.ts",
+        "src/__tests__/CodexACPAgent/data/initialize-v1-routed-response.json",
+        "src/__tests__/CodexACPAgent/initialize.test.ts",
+        "src/__tests__/acp-test-utils.ts",
+        "src/__tests__/scenarios/baseline.ts",
+        "src/__tests__/scenarios/data/air/agent-message-and-reasoning.jsonl",
+        "src/__tests__/scenarios/data/air/background-terminal.jsonl",
+        "src/__tests__/scenarios/data/air/collab-agent.jsonl",
+        "src/__tests__/scenarios/data/air/collab-controls.jsonl",
+        "src/__tests__/scenarios/data/air/command-approval.jsonl",
+        "src/__tests__/scenarios/data/air/command-failed.jsonl",
+        "src/__tests__/scenarios/data/air/command-output-stdin.jsonl",
+        "src/__tests__/scenarios/data/air/command-without-streamed-output.jsonl",
+        "src/__tests__/scenarios/data/air/context-compaction.jsonl",
+        "src/__tests__/scenarios/data/air/dynamic-tool.jsonl",
+        "src/__tests__/scenarios/data/air/file-change-approval.jsonl",
+        "src/__tests__/scenarios/data/air/file-changes.jsonl",
+        "src/__tests__/scenarios/data/air/fuzzy-file-search.jsonl",
+        "src/__tests__/scenarios/data/air/goal-update.jsonl",
+        "src/__tests__/scenarios/data/air/guardian-review.jsonl",
+        "src/__tests__/scenarios/data/air/history-replay.jsonl",
+        "src/__tests__/scenarios/data/air/image-generation.jsonl",
+        "src/__tests__/scenarios/data/air/image-view.jsonl",
+        "src/__tests__/scenarios/data/air/late-subagent-update.jsonl",
+        "src/__tests__/scenarios/data/air/mcp-elicitation.jsonl",
+        "src/__tests__/scenarios/data/air/mcp-startup-failure.jsonl",
+        "src/__tests__/scenarios/data/air/mcp-tool-approval.jsonl",
+        "src/__tests__/scenarios/data/air/mcp-tool.jsonl",
+        "src/__tests__/scenarios/data/air/mcp-url-elicitation.jsonl",
+        "src/__tests__/scenarios/data/air/native-subagent-session.jsonl",
+        "src/__tests__/scenarios/data/air/nested-subagent-session.jsonl",
+        "src/__tests__/scenarios/data/air/network-and-sandbox-approval.jsonl",
+        "src/__tests__/scenarios/data/air/plan-deltas-and-turn-plan.jsonl",
+        "src/__tests__/scenarios/data/air/plan-review-permission.jsonl",
+        "src/__tests__/scenarios/data/air/plan-stream.jsonl",
+        "src/__tests__/scenarios/data/air/read-search-list.jsonl",
+        "src/__tests__/scenarios/data/air/subagent-activity.jsonl",
+        "src/__tests__/scenarios/data/air/web-search.jsonl"
+      ],
+      "resolution": {
+        "action": "adapt",
+        "commit": "febcd2b9f8a7c470ce23ba60547be2c1298ff7da",
+        "automatic": false,
+        "rationale": "Upstream v2.3.0 implements the standard ACP append-mode systemPrompt (#653: ClientSystemPrompt, SessionInstructions gate, systemPrompt agent capability); upstream PR #585 for the downstream _meta form was closed. Alas speaks ACP v1, so the downstream _meta.systemPrompt.append becomes an ACP v1 alias that feeds upstream's gate (withSessionInstructionAppend; both forms together are invalidParams) instead of a second implementation; the downstream CodexAcpClient/SessionFork plumbing is dropped and the _meta capability is advertised only on ACP v1. Tests cover v1 and v2 (describe.each), the native Codex 0.164 developer-message path, and fail under three mutations (no alias, alias on v2, no advertisement). The v1 advertisement changes the upstream snapshot initialize-v1-routed-response.json, which the ledger lists for this patch since the option-B tooling change.",
+        "tests": [
+          "src/__tests__/SessionInstructions.test.ts",
+          "src/__tests__/CodexACPAgent/session-instructions.test.ts",
+          "src/__tests__/CodexACPAgent/session-instructions-native.test.ts",
+          "src/__tests__/CodexACPAgent/initialize.test.ts",
+          "src/__tests__/CodexACPAgent/data/initialize-v1-routed-response.json"
+        ]
+      }
+    },
+    {
+      "name": "neutral-session-index",
+      "originalCommit": "bf6dd64df0bf990d6528ceaa62c5ba94c8ba9cb0",
+      "commit": "bf6dd64df0bf990d6528ceaa62c5ba94c8ba9cb0",
+      "appliedCommit": null,
+      "disposition": "active",
+      "patchId": "31714d8cd617c199c030d1c5fa02630ce860cc18",
+      "classification": "overlap",
+      "overlappingFiles": [
+        "docs/air-extensions.md",
+        "src/CodexAcpServer.ts",
+        "src/SessionIndex.ts",
+        "src/SessionIndexService.ts",
+        "src/SessionListSubscriptions.ts",
+        "src/__tests__/CodexACPAgent/initialize.test.ts",
+        "src/__tests__/CodexACPAgent/session-index.test.ts",
+        "src/__tests__/tool-calls/tool-call-contract.test.ts"
+      ],
+      "resolution": {
+        "action": "adapt",
+        "commit": "aff30ea39da255979e31bc18e8868ca9946b40ee",
+        "automatic": false,
+        "rationale": "No upstream PR absorbs the client-neutral session index. Upstream v2.3.0 extended the AIR session index with the agentWorktree row field and sessionWorktrees capability (#631), a fork hold-back keyed by forkedFrom (#642) and ACP v2 serving (#622). The adaptation keeps every original line except the initialize metadata moved into initializeExtensionsMeta, gives the neutral namespace the same agentWorktree field and sessionWorktrees capability, reads forkedFrom from either namespace for the hold-back, and keeps the neutral opt-in ACP v1 only (initializeV2 configures neutral: false). New tests fail when any of the three is reverted.",
+        "tests": [
+          "src/__tests__/CodexACPAgent/session-index.test.ts",
+          "src/__tests__/CodexACPAgent/initialize.test.ts",
+          "src/__tests__/tool-calls/tool-call-contract.test.ts"
+        ]
+      }
+    },
+    {
+      "name": "neutral-codex-hook-review",
+      "originalCommit": "4d4340534856c343cb68a295a9d48177cf079ee7",
+      "commit": "4d4340534856c343cb68a295a9d48177cf079ee7",
+      "appliedCommit": null,
+      "disposition": "active",
+      "patchId": "9e4766c2367a35de2c92342150d09d21c718972a",
+      "classification": "overlap",
+      "overlappingFiles": [
+        "docs/air-extensions.md",
+        "src/AcpAgentRouter.ts",
+        "src/CodexAcpServer.ts",
+        "src/CodexAppServerClient.ts",
+        "src/__tests__/CodexACPAgent/initialize.test.ts",
+        "src/__tests__/app-server-recovery/recovery.test.ts",
+        "src/__tests__/scenarios/client-profiles.test.ts",
+        "src/index.ts"
+      ],
+      "resolution": {
+        "action": "adapt",
+        "commit": "c07bc0f3a802bcbca5f2e17f228643bc873e7c37",
+        "automatic": false,
+        "rationale": "No upstream PR absorbs the process-bound hook review. Upstream v2.3.0 moved ACP routing into AcpAgentRouter.ts (#620), wraps app-server errors with explainCodexError (#626), adds insertion-aware prompts (#620), orders providers/set requests (#627) and registers a baseline turn tracker before a provider restart resume. The gate still fences thread/start, resume, fork, turn/start and review/start inside the new error wrapper; session/new, load, resume, fork and prompt still run under review; providers/set still invalidates it; the codexHooks capability moves into initializeExtensionsMeta (ACP v1 only). _codex/hooks/trust must accept reviewToken in AcpAgentRouter.ts, which the ledger lists for this patch since the option-B tooling change. A router test fails without it.",
+        "tests": [
+          "src/__tests__/CodexACPAgent/initialize.test.ts",
+          "src/__tests__/app-server-recovery/recovery.test.ts",
+          "src/__tests__/scenarios/client-profiles.test.ts"
+        ]
+      }
+    },
+    {
+      "name": "neutral-codex-hook-review-execution",
+      "originalCommit": "960f77945bf94d7cb5fa6ea7fcedb01d210f2ce6",
+      "commit": "960f77945bf94d7cb5fa6ea7fcedb01d210f2ce6",
+      "appliedCommit": null,
+      "disposition": "active",
+      "patchId": "7aa4af7022335562eead828909d231a2407e10ce",
+      "classification": "overlap",
+      "overlappingFiles": [
+        "src/AcpExtensions.ts",
+        "src/CodexAcpClient.ts",
+        "src/CodexAcpServer.ts",
+        "src/CodexAppServerClient.ts",
+        "src/GoalExtension.ts",
+        "src/__tests__/app-server-recovery/recovery.test.ts"
+      ],
+      "resolution": {
+        "action": "adapt",
+        "commit": "c0e41b9a03a5847aa4ee01198bc9535224840edd",
+        "automatic": false,
+        "rationale": "No upstream PR absorbs this patch. Upstream v2.3.0 (#620) removed adapter-started goal continuation turns and added a turn-start reservation passed into prompt(). The downstream continueOperation moves into promptAfterReservation so a turn started inside a reviewed operation continues that review; goal set/resume review, the active thread/goal/set gate, provider inputs and the authentication invalidation apply unchanged. The fallback-goal tests expect no adapter turn/start, and the dispatch-history test moves to a prompt after a crash (lazy thread/resume then turn/start). The hook review doc is left as in the original so the later non-ledger docs commit 6b51376 replays cleanly; its sentence on generated goal continuations is stale after #620 and needs a post-sync doc fix. Mutating the dispatch mark, the goal gate or the goal control review fails the tests.",
+        "tests": [
+          "src/__tests__/app-server-recovery/recovery.test.ts"
         ]
       }
     }
   ],
   "preservedCommits": [],
+  "downstreamCommits": [
+    {
+      "commit": "80d0acaeba53523cbcde1d54d0cd4179ebda128c",
+      "subject": "build: prepare Alas downstream package metadata",
+      "patchId": "3af45780c60446d436598117d0c1c04e3452b99f",
+      "equivalentCommits": [
+        "e4a8efbd0506ddb742db99a8f0423c5434c9ffca"
+      ],
+      "resolution": {
+        "action": "adapt",
+        "commit": "d4ce188f0cfb7573de0e15c1d4498d7dcb02119d",
+        "automatic": false,
+        "rationale": "Non-ledger fork commit (downstream package metadata: prepare:alas-package script, scripts/prepare-alas-package.mjs and its test). Upstream v2.3.0 (#649, ACP SDK 2.0) moved the codex-test script from .claude/skills to .agents/skills on the package.json line next to it, so the original no longer applies. The adaptation changes the same three paths; its sorted +/- lines equal the original's except the codex-test path, which follows upstream. Its equivalent copy e4a8efb is retired with it.",
+        "tests": [
+          "scripts/prepare-alas-package.test.mjs"
+        ]
+      }
+    },
+    {
+      "commit": "6c5fe81ae35e7541910ea0e4149557ecf6ee4f5c",
+      "subject": "ci: harden downstream fork maintenance",
+      "patchId": "891e348aa17c0fa1fad597ffd47511dcdcd42b36",
+      "equivalentCommits": [
+        "ae18089597602b1f8560d663905b22a1fb398348"
+      ],
+      "resolution": {
+        "action": "adapt",
+        "commit": "0e05e3f8f6b92c9d9782f6f18d6ed73c1891c836",
+        "automatic": false,
+        "rationale": "Non-ledger fork commit (fork maintenance hardening: sync, ledger and source-verification tooling, workflow pins). Upstream v2.3.0 (#625) changed the test script and added test:integration in package.json exactly where this commit adds test:maintenance. The adaptation keeps both upstream lines and adds test:maintenance after them; its sorted +/- lines are identical to the original's and it changes the same paths. Its workflow edits are superseded by the retained alas workflow tree. Its equivalent copy ae18089 is retired with it.",
+        "tests": [
+          "scripts/downstream-patches.test.mjs",
+          "scripts/select-upstream-sync.test.mjs",
+          "scripts/sync-candidate.test.mjs",
+          "scripts/sync-upstream.test.mjs",
+          "scripts/verify-alas-source.test.mjs"
+        ]
+      }
+    },
+    {
+      "commit": "4c365fb299c869bd0809c394cab89c762a539571",
+      "subject": "fix: harden stable fork synchronization",
+      "patchId": "29e653cde6f2978b7e4895a5cda5e1b5131aac44",
+      "equivalentCommits": [
+        "75a64c60badfcbe6cde31e269a85a29a45d96f85"
+      ],
+      "resolution": {
+        "action": "adapt",
+        "commit": "c00a789019d8fd6db7cf5146d536cb75ad0960e8",
+        "automatic": false,
+        "rationale": "Non-ledger fork commit (stable sync hardening: sync review, upstream release checks, E2E waiver steps). Upstream v2.3.0 (#665) added check-latest: true to the setup-node steps of e2e.yml and publish.yml right before the downstream E2E waiver step. The adaptation keeps upstream's line and the downstream step; its sorted +/- lines are identical to the original's and it changes the same paths. The candidate restores the alas workflow tree afterwards. Its equivalent copy 75a64c6 is retired with it.",
+        "tests": [
+          "scripts/downstream-patches.test.mjs",
+          "scripts/sync-candidate.test.mjs",
+          "scripts/sync-review.test.mjs",
+          "scripts/sync-upstream.test.mjs",
+          "scripts/upstream-release.test.mjs"
+        ]
+      }
+    }
+  ],
+  "upstreamWorkflowChanges": [
+    {
+      "path": ".github/workflows/ci.yml",
+      "resolution": {
+        "action": "retain-downstream",
+        "automatic": false,
+        "rationale": "Upstream #625 adds an `npm run test:integration` step and #665 adds `check-latest: true` to setup-node. The integration-test script only exists from v2.3.0, so alas cannot take the step before this sync; the alas ci.yml (pinned actions, full history, alas branches) still runs typecheck, npm test and all bundles. The candidate keeps the alas workflow; a separate reviewed automation PR mirrors this upstream change into alas after the sync merges.",
+        "tests": [
+          "scripts/sync-upstream.test.mjs"
+        ]
+      }
+    },
+    {
+      "path": ".github/workflows/codex-update.yml",
+      "resolution": {
+        "action": "retain-downstream",
+        "automatic": false,
+        "rationale": "Upstream #630 bumps openai/codex-action from 86365089 (1.12) to bdf19a4a (1.13) in the scheduled Codex update job. That job is not the required ci check and neither sync-upstream.yml nor publish-alas.yml depends on it; the alas copy pins its other actions to reviewed SHAs. The candidate keeps the alas workflow; a separate reviewed automation PR mirrors this upstream change into alas after the sync merges.",
+        "tests": [
+          "scripts/sync-upstream.test.mjs"
+        ]
+      }
+    },
+    {
+      "path": ".github/workflows/e2e.yml",
+      "resolution": {
+        "action": "retain-downstream",
+        "automatic": false,
+        "rationale": "Upstream #665 adds `check-latest: true` to setup-node. The alas e2e.yml pins setup-node to a reviewed SHA and records the visible OPENAI_API_KEY waiver; the change does not affect what is tested or published. The candidate keeps the alas workflow; a separate reviewed automation PR mirrors this upstream change into alas after the sync merges.",
+        "tests": [
+          "scripts/sync-upstream.test.mjs"
+        ]
+      }
+    },
+    {
+      "path": ".github/workflows/publish.yml",
+      "resolution": {
+        "action": "retain-downstream",
+        "automatic": false,
+        "rationale": "Upstream #665 adds `check-latest: true` to three setup-node steps of the upstream release workflow, which never publishes @alas-ide/codex-acp (publish-alas.yml does). The alas copy pins setup-node to a reviewed SHA and records the E2E waiver. The candidate keeps the alas workflow; a separate reviewed automation PR mirrors this upstream change into alas after the sync merges.",
+        "tests": [
+          "scripts/sync-upstream.test.mjs"
+        ]
+      }
+    }
+  ],
   "resolved": true
 }

@@ -7,7 +7,7 @@
  * predicate keeps the match anchored on the stable part of the phrasing.
  */
 
-import {RequestError} from "@agentclientprotocol/sdk";
+import {RequestError} from "@agentclientprotocol/sdk/unstable";
 
 function errorText(err: unknown): string {
     if (err instanceof Error) return err.message;
@@ -26,6 +26,11 @@ function errorText(err: unknown): string {
  */
 export function isMissingRolloutError(err: unknown): boolean {
     return errorText(err).includes("no rollout found for thread id");
+}
+
+/** History paging rejects a live thread whose rollout has not been written yet. */
+export function isThreadNotMaterializedError(err: unknown): boolean {
+    return errorText(err).includes("not materialized");
 }
 
 /**
@@ -70,6 +75,16 @@ export function isInvalidThreadIdError(err: unknown): boolean {
  */
 export function isNoActiveTurnError(err: unknown): boolean {
     return errorText(err).includes("no active turn to interrupt");
+}
+
+/**
+ * `turn/interrupt` answers this when Codex has since moved on to another turn --
+ * most commonly a review's child turn -- registered after the id we sent. The
+ * message names the turn Codex considers active, which is the id to retry with.
+ */
+export function parseExpectedActiveTurnMismatch(err: unknown): {expected: string, found: string} | null {
+    const match = errorText(err).match(/expected active turn id (\S+) but found (\S+)/);
+    return match ? {expected: match[1]!, found: match[2]!} : null;
 }
 
 /**

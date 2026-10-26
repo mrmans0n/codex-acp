@@ -498,7 +498,7 @@ describe("Codex background terminal tasks", () => {
         });
         const sessionState = createTestSessionState({sessionId: "thread-1"});
         const session = new ACPSessionConnection(fixture.getAcpConnection(), sessionState.sessionId);
-        sessionState.subagents = new CodexSubagentEventRouter(sessionState.sessionId, true, session, () => {});
+        sessionState.subagents = new CodexSubagentEventRouter(sessionState.sessionId, true, session, () => {}, () => ({currentModel: null, availableModels: []}));
         sessionState.asyncTasks = new CodexBackgroundTerminalTasks(
             true,
             sessionState.sessionId,
@@ -667,6 +667,7 @@ function turnCompleted(threadId: string) {
             turn: {
                 id: "turn-id",
                 items: [],
+                rootTurnId: null,
                 itemsView: "notLoaded" as const,
                 status: "completed" as const,
                 error: null,
@@ -696,6 +697,8 @@ function childSpawned() {
 function childMaterialized() {
     return started({
         type: "subAgentActivity",
+        model: null,
+        reasoningEffort: null,
         id: "child-activity",
         kind: "started",
         agentThreadId: "child-1",
@@ -706,6 +709,8 @@ function childMaterialized() {
 function childInterrupted() {
     return started({
         type: "subAgentActivity",
+        model: null,
+        reasoningEffort: null,
         id: "child-activity-terminal",
         kind: "interrupted",
         agentThreadId: "child-1",
