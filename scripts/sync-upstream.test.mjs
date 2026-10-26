@@ -7,6 +7,8 @@ const root = new URL("..", import.meta.url).pathname;
 const workflowsDir = join(root, ".github/workflows");
 const sync = readFileSync(join(workflowsDir, "sync-upstream.yml"), "utf8");
 const publish = readFileSync(join(workflowsDir, "publish-alas.yml"), "utf8");
+const e2e = readFileSync(join(workflowsDir, "e2e.yml"), "utf8");
+const upstreamPublish = readFileSync(join(workflowsDir, "publish.yml"), "utf8");
 const checkoutSha = "3d3c42e5aac5ba805825da76410c181273ba90b1";
 const setupNodeSha = "820762786026740c76f36085b0efc47a31fe5020";
 
@@ -35,6 +37,54 @@ test("sync reports absorbed, overlap, conflicts, and workflow changes as fail-cl
     assert.match(sync, new RegExp(marker));
   }
   assert.match(sync, /exit 1/);
+});
+
+test("sync and publish verify the GitHub stable release against npm latest and gitHead", () => {
+  for (const workflow of [sync, publish]) {
+    assert.match(workflow, /upstream-release\.mjs/);
+    assert.match(workflow, /verifyUpstreamRelease/);
+    assert.match(workflow, /registry\.npmjs\.org\/.*codex-acp.*latest/i);
+    assert.match(workflow, /releases/);
+  }
+  assert.match(sync, /selectNewestStableRelease/);
+  assert.match(sync, /package\.json/);
+});
+
+test("sync keeps an exact candidate and pushes only a protected-branch-descended integration PR branch", () => {
+  assert.match(sync, /exactBranch/);
+  assert.match(sync, /exactCandidateCommit/);
+  assert.match(sync, /integrationCommit/);
+  assert.match(sync, /pushSyncCandidate[\s\S]*ref:\s*report\.exactBranch/);
+  assert.doesNotMatch(sync, /HEAD:refs\/heads\/alas|push[^\n]*\balas\b/);
+});
+
+test("sync reports stale heads without replay and marks preserved canonical edits for manual review", () => {
+  assert.match(sync, /staleSyncHeads/);
+  assert.match(sync, /preservedSyncCommits/);
+  assert.match(sync, /preserved-canonical-sync-commits/);
+});
+
+test("sync commits a review artifact and publish recomputes and verifies it", () => {
+  for (const workflow of [sync, publish]) assert.match(workflow, /alas-sync-review\.json/);
+  assert.match(publish, /classifyDownstreamPatches/);
+  assert.match(publish, /verifySyncReviewArtifact/);
+});
+
+test("maintenance failures always write a durable summary and update an existing draft PR when possible", () => {
+  assert.match(sync, /if:\s*\$\{\{ always\(\) \}\}/);
+  assert.match(sync, /GITHUB_STEP_SUMMARY/);
+  assert.match(sync, /gh pr edit/);
+  assert.match(publish, /if:\s*\$\{\{ always\(\) \}\}/);
+  assert.match(publish, /GITHUB_STEP_SUMMARY/);
+});
+
+test("e2e and upstream publish visibly waive live e2e when OPENAI_API_KEY is absent", () => {
+  for (const workflow of [e2e, upstreamPublish]) {
+    assert.match(workflow, /OPENAI_API_KEY/);
+    assert.match(workflow, /if:\s*\$\{\{[^\n]*OPENAI_API_KEY[^\n]*!=\s*''/);
+    assert.match(workflow, /E2E.*waived|waived.*E2E/i);
+    assert.match(workflow, /GITHUB_STEP_SUMMARY/);
+  }
 });
 
 test("publish verifies the declared stable tag against the exact upstream-main merge-base", () => {

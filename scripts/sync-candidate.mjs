@@ -1,7 +1,10 @@
 #!/usr/bin/env node
 
 import {execFileSync, spawnSync} from "node:child_process";
+import {existsSync, mkdirSync, readFileSync, writeFileSync} from "node:fs";
+import {dirname} from "node:path";
 import {classifyDownstreamPatches, validatePatchLedger} from "./downstream-patches.mjs";
+import {createSyncReview, verifySyncReviewArtifact} from "./sync-review.mjs";
 
 function git(cwd, args, options = {}) {
   return execFileSync("git", args, {
@@ -13,10 +16,23 @@ function git(cwd, args, options = {}) {
   }).trim();
 }
 
+function lines(value) {
+  return value.split("\n").filter(Boolean);
+}
+
 function patchId(cwd, commit) {
   const patch = git(cwd, ["show", "--pretty=format:", "--binary", commit]);
   if (!patch) return null;
   return git(cwd, ["patch-id", "--stable"], {input: `${patch}\n`}).split(/\s+/)[0] || null;
+}
+
+function patchIdCommits(cwd, ref) {
+  const result = new Map();
+  for (const commit of lines(git(cwd, ["rev-list", "--reverse", "--no-merges", ref]))) {
+    const id = patchId(cwd, commit);
+    if (id && !result.has(id)) result.set(id, commit);
+  }
+  return result;
 }
 
 function isAncestor(cwd, ancestor, descendant) {
@@ -38,8 +54,47 @@ function cherryPick(cwd, commit) {
 }
 
 function commitsBetween(cwd, base, head) {
-  return git(cwd, ["rev-list", "--reverse", "--no-merges", `${base}..${head}`])
-    .split("\n").filter(Boolean);
+  return lines(git(cwd, ["rev-list", "--reverse", "--no-merges", `${base}..${head}`]));
+}
+
+function tagName(ref) {
+  const name = String(ref).split("/").at(-1);
+  if (!/^v\d+\.\d+\.\d+$/.test(name)) throw new Error(`Cannot derive stable tag name from ${ref}`);
+  return name;
+}
+
+function readReviewAtRef(cwd, ref, reviewPath) {
+  const result = spawnSync("git", ["show", `${ref}:${reviewPath}`], {cwd, encoding: "utf8", stdio: "pipe"});
+  if (result.status !== 0) return null;
+  return JSON.parse(result.stdout);
+}
+
+function writeSyncReview(cwd, reviewPath, review) {
+  const fullPath = `${cwd}/${reviewPath}`;
+  mkdirSync(dirname(fullPath), {recursive: true});
+  const contents = `${JSON.stringify(review, null, 2)}\n`;
+  if (existsSync(fullPath) && readFileSync(fullPath, "utf8") === contents) return false;
+  writeFileSync(fullPath, contents);
+  git(cwd, ["add", reviewPath]);
+  git(cwd, ["commit", "-m", `chore: record sync review ${review.toTag}`]);
+  return true;
+}
+
+function isGeneratedReviewCommit(cwd, commit, reviewPath, toTag) {
+  const subject = git(cwd, ["show", "-s", "--format=%s", commit]);
+  const paths = lines(git(cwd, ["diff-tree", "--no-commit-id", "--name-only", "-r", commit]));
+  return subject === `chore: record sync review ${toTag}` &&
+    paths.length === 1 && paths[0] === reviewPath;
+}
+
+function isGeneratedIntegrationMerge(cwd, commit, alasRef) {
+  const subject = git(cwd, ["show", "-s", "--format=%s", commit]);
+  const parents = git(cwd, ["show", "-s", "--format=%P", commit]).split(/\s+/);
+  if (!subject.startsWith("chore: integrate exact upstream ") || parents.length !== 2) return false;
+  const alasCommit = git(cwd, ["rev-parse", `${alasRef}^{commit}`]);
+  const mergeTree = git(cwd, ["rev-parse", `${commit}^{tree}`]);
+  const exactTree = git(cwd, ["rev-parse", `${parents[1]}^{tree}`]);
+  return parents[0] === alasCommit && mergeTree === exactTree;
 }
 
 function restoreWorkflowTree(cwd, alasRef) {
@@ -56,6 +111,41 @@ function restoreWorkflowTree(cwd, alasRef) {
   else if (changed.status !== 0) throw new Error(changed.stderr || "Cannot inspect candidate workflow tree");
 }
 
+function assertContaminationContained(cwd, alasRef, upstreamRef, tagCommit) {
+  const mergeBases = lines(git(cwd, ["merge-base", "--all", alasRef, upstreamRef]));
+  const uncontained = mergeBases.filter((base) => !isAncestor(cwd, base, tagCommit));
+  if (uncontained.length > 0) {
+    throw new Error(`Upstream contamination not contained by target stable tag ${tagCommit}: ${uncontained.join(", ")}`);
+  }
+  return mergeBases;
+}
+
+function createIntegrationMerge(cwd, {branch, alasRef, exactCandidateCommit, tagCommit, upstreamRef}) {
+  git(cwd, ["checkout", "-B", branch, `${alasRef}^{commit}`]);
+  const merge = spawnSync("git", [
+    "merge", "--no-ff", "--no-commit", exactCandidateCommit,
+  ], {cwd, encoding: "utf8", stdio: "pipe"});
+  const mergeHead = spawnSync("git", ["rev-parse", "--verify", "MERGE_HEAD"], {
+    cwd, encoding: "utf8", stdio: "pipe",
+  });
+  if (mergeHead.status !== 0) {
+    throw new Error(merge.stderr || merge.stdout || "Cannot create integration merge");
+  }
+  git(cwd, ["read-tree", "--reset", "-u", exactCandidateCommit]);
+  git(cwd, ["commit", "-m", `chore: integrate exact upstream ${tagCommit.slice(0, 12)}`]);
+  const integrationCommit = git(cwd, ["rev-parse", "HEAD"]);
+  const integrationMergeBases = lines(git(cwd, ["merge-base", "--all", integrationCommit, upstreamRef]));
+  if (integrationMergeBases.length !== 1 || integrationMergeBases[0] !== tagCommit) {
+    throw new Error(`Integration merge-base with upstream main must be exactly ${tagCommit}, got ${integrationMergeBases.join(", ")}`);
+  }
+  const exactTree = git(cwd, ["rev-parse", `${exactCandidateCommit}^{tree}`]);
+  const integrationTree = git(cwd, ["rev-parse", `${integrationCommit}^{tree}`]);
+  if (integrationTree !== exactTree) {
+    throw new Error(`Integration tree ${integrationTree} does not match exact candidate tree ${exactTree}`);
+  }
+  return integrationCommit;
+}
+
 export function buildSyncCandidate({
   cwd,
   tagRef,
@@ -65,28 +155,42 @@ export function buildSyncCandidate({
   branch,
   syncRefs = [],
   ledger,
+  fromTag = tagName(baseRef),
+  toTag = tagName(tagRef),
+  reviewPath = "docs/alas-sync-review.json",
 }) {
   validatePatchLedger(ledger);
+  const tagCommit = git(cwd, ["rev-parse", `${tagRef}^{commit}`]);
+  const previousMergeBases = assertContaminationContained(cwd, alasRef, upstreamRef, tagCommit);
   const classifications = classifyDownstreamPatches({cwd, ledger, baseRef, targetRef: tagRef});
   const ledgerByPatchId = new Map(classifications.filter((patch) => patch.patchId)
     .map((patch) => [patch.patchId, patch]));
+  const targetPatchIds = patchIdCommits(cwd, tagRef);
+  const upstreamPatchIds = patchIdCommits(cwd, upstreamRef);
   const downstreamCommits = commitsBetween(cwd, upstreamRef, alasRef);
   const downstreamPatchIds = new Set(downstreamCommits.map((commit) => patchId(cwd, commit)).filter(Boolean));
   const preserved = [];
   const preservedPatchIds = new Set();
   const syncHeads = [];
-  const unsupportedMergeCommits = new Set(
-    git(cwd, ["rev-list", "--reverse", "--merges", `${upstreamRef}..${alasRef}`]).split("\n").filter(Boolean),
-  );
+  const staleSyncHeads = [];
+  const unsupportedMergeCommits = [];
+  const canonicalRef = `origin/${branch}`;
+  let previousReview = null;
 
   for (const ref of syncRefs) {
     const head = git(cwd, ["rev-parse", `${ref}^{commit}`]);
     syncHeads.push({ref, head});
-    for (const merge of git(cwd, ["rev-list", "--reverse", "--merges", `${alasRef}..${ref}`]).split("\n").filter(Boolean)) {
-      if (!isAncestor(cwd, merge, upstreamRef)) unsupportedMergeCommits.add(merge);
+    const commits = commitsBetween(cwd, alasRef, ref).filter((commit) => !isAncestor(cwd, commit, upstreamRef));
+    if (ref !== canonicalRef && ref !== branch) {
+      staleSyncHeads.push({ref, head, commits});
+      continue;
     }
-    for (const commit of commitsBetween(cwd, alasRef, ref)) {
-      if (isAncestor(cwd, commit, upstreamRef)) continue;
+    for (const merge of lines(git(cwd, ["rev-list", "--reverse", "--merges", `${alasRef}..${ref}`]))) {
+      if (!isGeneratedIntegrationMerge(cwd, merge, alasRef)) unsupportedMergeCommits.push(merge);
+    }
+    previousReview = readReviewAtRef(cwd, ref, reviewPath);
+    for (const commit of commits) {
+      if (isGeneratedReviewCommit(cwd, commit, reviewPath, toTag)) continue;
       const id = patchId(cwd, commit);
       if (id && (downstreamPatchIds.has(id) || preservedPatchIds.has(id))) continue;
       if (id) preservedPatchIds.add(id);
@@ -94,10 +198,35 @@ export function buildSyncCandidate({
     }
   }
 
-  git(cwd, ["checkout", "-B", branch, `${tagRef}^{commit}`]);
+  previousReview ??= readReviewAtRef(cwd, alasRef, reviewPath);
+  const syncReview = createSyncReview({
+    fromTag,
+    toTag,
+    toCommit: tagCommit,
+    classifications,
+    previousReview,
+  });
+  let syncReviewError = null;
+  try {
+    verifySyncReviewArtifact({
+      review: syncReview,
+      fromTag,
+      toTag,
+      toCommit: tagCommit,
+      classifications,
+    });
+  } catch (error) {
+    syncReviewError = error.message;
+  }
+  const reviewByName = new Map(syncReview.patches.map((patch) => [patch.name, patch]));
+
+  const exactBranch = `${branch}-exact`;
+  git(cwd, ["checkout", "-B", exactBranch, tagCommit]);
   const appliedPatches = [];
   const appliedDownstreamCommits = [];
   const appliedSyncCommits = [];
+  const excludedUpstreamEquivalents = [];
+  const excludedUpstreamLaterEquivalents = [];
   const conflicts = [];
   const seenLedgerPatches = new Set();
   for (const commit of downstreamCommits) {
@@ -105,7 +234,13 @@ export function buildSyncCandidate({
     const patch = id ? ledgerByPatchId.get(id) : undefined;
     if (patch) {
       seenLedgerPatches.add(patch.name);
-      if (patch.classification !== "unaffected") continue;
+      if (patch.classification !== "unaffected" &&
+          reviewByName.get(patch.name)?.resolution?.action !== "retain") continue;
+    } else if (id && upstreamPatchIds.has(id)) {
+      const equivalent = {commit, upstreamCommit: upstreamPatchIds.get(id)};
+      if (targetPatchIds.has(id)) excludedUpstreamEquivalents.push(equivalent);
+      else excludedUpstreamLaterEquivalents.push(equivalent);
+      continue;
     }
     if (!cherryPick(cwd, commit)) {
       conflicts.push({commit, kind: "downstream", ...(patch ? {patch: patch.name} : {})});
@@ -120,37 +255,60 @@ export function buildSyncCandidate({
   if (conflicts.length === 0) {
     for (const commit of preserved) {
       if (!cherryPick(cwd, commit)) {
-        conflicts.push({commit, kind: "sync-review"});
+        conflicts.push({commit, kind: "canonical-sync-review"});
         break;
       }
       appliedSyncCommits.push(commit);
     }
   }
 
-  const workflowChanges = git(cwd, ["diff", "--name-only", baseRef, tagRef, "--", ".github/workflows"])
-    .split("\n").filter(Boolean);
+  const workflowChanges = lines(git(cwd, ["diff", "--name-only", baseRef, tagRef, "--", ".github/workflows"]));
   if (workflowChanges.length > 0) restoreWorkflowTree(cwd, alasRef);
-  const manualPatches = classifications.filter((patch) => patch.classification !== "unaffected");
-  const tagCommit = git(cwd, ["rev-parse", `${tagRef}^{commit}`]);
-  const candidateCommit = git(cwd, ["rev-parse", "HEAD"]);
-  const candidateMergeBase = git(cwd, ["merge-base", candidateCommit, upstreamRef]);
-  if (candidateMergeBase !== tagCommit) {
-    throw new Error(`Candidate merge-base ${candidateMergeBase} is not exact stable tag ${tagCommit}`);
+  writeSyncReview(cwd, reviewPath, syncReview);
+  const exactCandidateCommit = git(cwd, ["rev-parse", "HEAD"]);
+  const exactMergeBase = git(cwd, ["merge-base", exactCandidateCommit, upstreamRef]);
+  if (exactMergeBase !== tagCommit) {
+    throw new Error(`Exact candidate merge-base ${exactMergeBase} is not stable tag ${tagCommit}`);
   }
+  const integrationCommit = createIntegrationMerge(cwd, {
+    branch,
+    alasRef,
+    exactCandidateCommit,
+    tagCommit,
+    upstreamRef,
+  });
+
+  const manualReviewReasons = [];
+  if (syncReviewError) manualReviewReasons.push("sync-review-unresolved");
+  if (workflowChanges.length > 0) manualReviewReasons.push("upstream-workflow-changes");
+  if (conflicts.length > 0) manualReviewReasons.push("cherry-pick-conflicts");
+  if (missingLedgerPatches.length > 0) manualReviewReasons.push("missing-ledger-patches");
+  if (unsupportedMergeCommits.length > 0) manualReviewReasons.push("canonical-sync-merge-commits");
+  if (appliedSyncCommits.length > 0) manualReviewReasons.push("preserved-canonical-sync-commits");
+
   return {
     tagCommit,
-    candidateCommit,
+    exactBranch,
+    exactCandidateCommit,
+    integrationCommit,
+    candidateCommit: integrationCommit,
+    previousMergeBases,
     classifications,
     appliedPatches,
     appliedDownstreamCommits,
+    excludedUpstreamEquivalents,
+    excludedUpstreamLaterEquivalents,
+    syncReview,
+    syncReviewError,
     missingLedgerPatches,
     preservedSyncCommits: appliedSyncCommits,
     syncHeads,
+    staleSyncHeads,
     workflowChanges,
     conflicts,
-    unsupportedMergeCommits: [...unsupportedMergeCommits],
-    manualReview: manualPatches.length > 0 || workflowChanges.length > 0 ||
-      conflicts.length > 0 || unsupportedMergeCommits.size > 0 || missingLedgerPatches.length > 0,
+    unsupportedMergeCommits,
+    manualReviewReasons,
+    manualReview: manualReviewReasons.length > 0,
   };
 }
 
@@ -165,12 +323,15 @@ export function verifyRemoteSyncHeads({cwd, syncHeads, remote = "origin"}) {
   });
 }
 
-export function pushSyncCandidate({cwd, branch, expectedRemoteSha = "", remote = "origin"}) {
+export function pushSyncCandidate({cwd, branch, expectedRemoteSha = "", remote = "origin", ref = "HEAD"}) {
+  if (branch === "alas" || branch === "refs/heads/alas") {
+    throw new Error("Refusing to push a sync candidate directly to protected alas");
+  }
   const lease = `--force-with-lease=refs/heads/${branch}:${expectedRemoteSha}`;
   try {
-    git(cwd, ["push", lease, remote, `HEAD:refs/heads/${branch}`]);
+    git(cwd, ["push", lease, remote, `${ref}:refs/heads/${branch}`]);
   } catch (error) {
     throw new Error(String(error.stderr || error.message));
   }
-  return git(cwd, ["rev-parse", "HEAD"]);
+  return git(cwd, ["rev-parse", ref]);
 }
