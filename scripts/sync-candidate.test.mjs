@@ -36,12 +36,11 @@ function fixture() {
   git(cwd, "tag", "v2.0.0", base);
   git(cwd, "tag", "v2.1.0", stable);
   writeFileSync(join(cwd, "preview-only.txt"), "must not leak\n");
-  writeFileSync(join(cwd, "stable.txt"), "preview mutation\n");
-  git(cwd, "add", ".");
+  git(cwd, "add", "preview-only.txt");
   git(cwd, "commit", "-m", "preview after stable");
   const preview = git(cwd, "rev-parse", "HEAD");
 
-  git(cwd, "checkout", "-b", "alas");
+  git(cwd, "checkout", "-b", "alas", base);
   const patch = commitFile(cwd, "downstream.txt", "downstream\n", "downstream patch");
   const maintenance = commitFile(cwd, "maintenance.txt", "fork maintenance\n", "downstream maintenance");
   const alas = git(cwd, "rev-parse", "HEAD");
@@ -64,7 +63,7 @@ function fixture() {
   return {root, cwd, remote, base, stable, preview, alas, patch, maintenance, maintainer, ledger};
 }
 
-test("builds from the exact stable tag, reapplies downstream patches, and preserves sync review commits", () => {
+test("keeps an exact-tag candidate and creates a protected-branch-descended no-ff integration", () => {
   const f = fixture();
   try {
     const report = buildSyncCandidate({
@@ -78,7 +77,11 @@ test("builds from the exact stable tag, reapplies downstream patches, and preser
       ledger: f.ledger,
     });
     const head = git(f.cwd, "rev-parse", "HEAD");
+    assert.equal(head, report.integrationCommit);
     assert.equal(git(f.cwd, "merge-base", head, "upstream"), f.stable);
+    assert.equal(git(f.cwd, "rev-parse", `${head}^1`), f.alas);
+    assert.equal(git(f.cwd, "rev-parse", `${head}^2`), report.exactCandidateCommit);
+    assert.equal(git(f.cwd, "rev-parse", report.exactBranch), report.exactCandidateCommit);
     assert.equal(existsSync(join(f.cwd, "preview-only.txt")), false);
     assert.equal(existsSync(join(f.cwd, "downstream.txt")), true);
     assert.equal(existsSync(join(f.cwd, "maintenance.txt")), true);
@@ -86,7 +89,15 @@ test("builds from the exact stable tag, reapplies downstream patches, and preser
     assert.deepEqual(report.appliedPatches, ["downstream"]);
     assert.ok(report.appliedDownstreamCommits.includes(f.maintenance));
     assert.deepEqual(report.preservedSyncCommits, [f.maintainer]);
-    assert.equal(report.manualReview, false);
+    assert.equal(report.manualReview, true);
+    assert.deepEqual(report.manualReviewReasons, ["preserved-canonical-sync-commits"]);
+    const review = JSON.parse(readFileSync(join(f.cwd, "docs/alas-sync-review.json"), "utf8"));
+    assert.equal(review.fromTag, "v2.0.0");
+    assert.equal(review.toTag, "v2.1.0");
+    assert.equal(review.toCommit, f.stable);
+    assert.equal(review.patches[0].classification, "unaffected");
+    assert.equal(review.patches[0].resolution.automatic, true);
+    assert.equal(JSON.parse(git(f.cwd, "show", `${report.exactCandidateCommit}:docs/alas-sync-review.json`)).toCommit, f.stable);
   } finally {
     rmSync(f.root, {recursive: true, force: true});
   }
@@ -118,6 +129,20 @@ test("uses an explicit force-with-lease and rejects a concurrent canonical-branc
   }
 });
 
+test("refuses to push a sync candidate directly to the protected alas branch", () => {
+  const f = fixture();
+  try {
+    assert.throws(() => pushSyncCandidate({
+      cwd: f.cwd,
+      branch: "alas",
+      expectedRemoteSha: f.alas,
+    }), /protected.*alas/i);
+    assert.equal(git(f.cwd, `--git-dir=${f.remote}`, "rev-parse", "refs/heads/alas"), f.alas);
+  } finally {
+    rmSync(f.root, {recursive: true, force: true});
+  }
+});
+
 test("detects a concurrent update on every source sync branch before retiring it", () => {
   const f = fixture();
   try {
@@ -135,12 +160,12 @@ test("detects a concurrent update on every source sync branch before retiring it
   }
 });
 
-test("keeps a partial exact-tag candidate and reports a cherry-pick conflict for draft review", () => {
+test("reports stale sync heads without replaying their commits", () => {
   const f = fixture();
   try {
     const reviewBranch = "sync/upstream-2.0.9";
     git(f.cwd, "checkout", "-b", reviewBranch, "alas");
-    const conflicting = commitFile(f.cwd, "stable.txt", "maintainer resolution\n", "conflicting review edit");
+    const stale = commitFile(f.cwd, "stale.txt", "stale review edit\n", "stale review edit");
     git(f.cwd, "push", "origin", reviewBranch);
     const report = buildSyncCandidate({
       cwd: f.cwd,
@@ -152,8 +177,13 @@ test("keeps a partial exact-tag candidate and reports a cherry-pick conflict for
       syncRefs: [`origin/${reviewBranch}`],
       ledger: f.ledger,
     });
-    assert.equal(report.manualReview, true);
-    assert.deepEqual(report.conflicts, [{commit: conflicting, kind: "sync-review"}]);
+    assert.deepEqual(report.staleSyncHeads, [{
+      ref: `origin/${reviewBranch}`,
+      head: stale,
+      commits: [stale],
+    }]);
+    assert.deepEqual(report.preservedSyncCommits, []);
+    assert.equal(existsSync(join(f.cwd, "stale.txt")), false);
     assert.equal(existsSync(join(f.cwd, "preview-only.txt")), false);
     assert.equal(readFileSync(join(f.cwd, "stable.txt"), "utf8"), "stable\n");
   } finally {
@@ -182,8 +212,42 @@ test("fails closed when a source sync branch contains an unreviewed merge commit
       syncRefs: [`origin/${reviewBranch}`],
       ledger: f.ledger,
     });
+    assert.equal(report.manualReview, false);
+    assert.deepEqual(report.unsupportedMergeCommits, []);
+    assert.deepEqual(report.staleSyncHeads, [{
+      ref: `origin/${reviewBranch}`,
+      head: merge,
+      commits: git(f.cwd, "rev-list", "--reverse", "--no-merges", `alas..origin/${reviewBranch}`).split("\n"),
+    }]);
+  } finally {
+    rmSync(f.root, {recursive: true, force: true});
+  }
+});
+
+test("fails closed on a non-generated merge in the canonical same-version sync branch", () => {
+  const f = fixture();
+  try {
+    const branch = "sync/upstream-2.1.0";
+    git(f.cwd, "checkout", "-b", "canonical-side", `origin/${branch}`);
+    commitFile(f.cwd, "canonical-side.txt", "side\n", "canonical side edit");
+    git(f.cwd, "checkout", branch);
+    commitFile(f.cwd, "canonical-main.txt", "main\n", "canonical main edit");
+    git(f.cwd, "merge", "--no-ff", "canonical-side", "-m", "merge canonical review edits");
+    const merge = git(f.cwd, "rev-parse", "HEAD");
+    git(f.cwd, "push", "--force", "origin", branch);
+    const report = buildSyncCandidate({
+      cwd: f.cwd,
+      tagRef: "v2.1.0",
+      baseRef: "v2.0.0",
+      upstreamRef: "upstream",
+      alasRef: "alas",
+      branch,
+      syncRefs: [`origin/${branch}`],
+      ledger: f.ledger,
+    });
+    assert.ok(report.unsupportedMergeCommits.includes(merge));
+    assert.ok(report.manualReviewReasons.includes("canonical-sync-merge-commits"));
     assert.equal(report.manualReview, true);
-    assert.deepEqual(report.unsupportedMergeCommits, [merge]);
   } finally {
     rmSync(f.root, {recursive: true, force: true});
   }
@@ -219,6 +283,52 @@ test("does not mistake previously generated downstream cherry-picks for review c
     assert.deepEqual(report.conflicts, []);
     assert.deepEqual(report.preservedSyncCommits, []);
     assert.equal(report.manualReview, false);
+  } finally {
+    rmSync(f.root, {recursive: true, force: true});
+  }
+});
+
+test("excludes and reports a non-ledger cherry-pick equivalent to upstream main but absent from the stable tag", () => {
+  const f = fixture();
+  try {
+    git(f.cwd, "checkout", "alas");
+    git(f.cwd, "cherry-pick", f.preview);
+    const cherryPickedPreview = git(f.cwd, "rev-parse", "HEAD");
+    const report = buildSyncCandidate({
+      cwd: f.cwd,
+      tagRef: "v2.1.0",
+      baseRef: "v2.0.0",
+      upstreamRef: "upstream",
+      alasRef: "alas",
+      branch: "sync/upstream-2.1.0",
+      syncRefs: [],
+      ledger: f.ledger,
+    });
+    assert.equal(existsSync(join(f.cwd, "preview-only.txt")), false);
+    assert.deepEqual(report.excludedUpstreamLaterEquivalents, [{
+      commit: cherryPickedPreview,
+      upstreamCommit: f.preview,
+    }]);
+    assert.equal(report.appliedDownstreamCommits.includes(cherryPickedPreview), false);
+  } finally {
+    rmSync(f.root, {recursive: true, force: true});
+  }
+});
+
+test("fails closed when origin alas contains upstream contamination not contained by the target stable tag", () => {
+  const f = fixture();
+  try {
+    git(f.cwd, "branch", "contaminated", f.preview);
+    assert.throws(() => buildSyncCandidate({
+      cwd: f.cwd,
+      tagRef: "v2.1.0",
+      baseRef: "v2.0.0",
+      upstreamRef: "upstream",
+      alasRef: "contaminated",
+      branch: "sync/upstream-2.1.0",
+      syncRefs: [],
+      ledger: f.ledger,
+    }), /contamination.*not contained/i);
   } finally {
     rmSync(f.root, {recursive: true, force: true});
   }
