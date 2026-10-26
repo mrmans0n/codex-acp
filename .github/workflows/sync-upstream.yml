@@ -19,176 +19,194 @@ jobs:
     permissions:
       contents: write
       pull-requests: write
-      issues: write
       actions: write
     env:
       GH_TOKEN: ${{ github.token }}
     steps:
-      - uses: actions/checkout@v7
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1
         with:
           ref: alas
           fetch-depth: 0
-      - uses: actions/setup-node@v7
+      - uses: actions/setup-node@820762786026740c76f36085b0efc47a31fe5020
         with:
           node-version: "24"
-      - name: Select upstream tag and sync head
+      - name: Select the newest stable tag
         id: select
         run: |
           git fetch origin refs/heads/alas:refs/remotes/origin/alas
           git fetch --no-tags https://github.com/agentclientprotocol/codex-acp.git \
-            '+refs/tags/*:refs/alas-upstream-tags/*'
+            '+refs/tags/*:refs/alas-upstream-tags/*' \
+            '+refs/heads/main:refs/alas-upstream-main'
           gh api --paginate --slurp "repos/$GITHUB_REPOSITORY/pulls?state=open&base=alas&per_page=100" \
             > /tmp/alas-open-pulls.json
           node --input-type=module <<'NODE'
-          import { execFileSync, spawnSync } from 'node:child_process';
-          import { appendFileSync, readFileSync, writeFileSync } from 'node:fs';
-          import { selectUpstreamSync } from './scripts/select-upstream-sync.mjs';
-          const refs = execFileSync('git', ['for-each-ref', '--format=%(refname)', 'refs/alas-upstream-tags/'], { encoding: 'utf8' });
-          const tags = refs.trim().split('\n').filter(Boolean).map(ref => {
+          import {execFileSync, spawnSync} from 'node:child_process';
+          import {appendFileSync, readFileSync, writeFileSync} from 'node:fs';
+          import {selectUpstreamSync} from './scripts/select-upstream-sync.mjs';
+
+          const refs = execFileSync('git', ['for-each-ref', '--format=%(refname)', 'refs/alas-upstream-tags/'], {encoding: 'utf8'});
+          const tags = refs.trim().split('\n').filter(Boolean).map((ref) => {
             const result = spawnSync('git', ['merge-base', '--is-ancestor', ref, 'origin/alas']);
             if (result.status !== 0 && result.status !== 1) throw new Error(`Cannot check ancestry of ${ref}`);
-            return { name: ref.slice('refs/alas-upstream-tags/'.length), merged: result.status === 0 };
+            return {name: ref.slice('refs/alas-upstream-tags/'.length), merged: result.status === 0};
           });
-          writeFileSync('/tmp/alas-sync-merged-tags.json', JSON.stringify(tags.filter(tag => tag.merged).map(tag => tag.name)));
           const pulls = JSON.parse(readFileSync('/tmp/alas-open-pulls.json', 'utf8')).flat()
-            .filter(pr => pr.head.repo?.full_name === process.env.GITHUB_REPOSITORY);
+            .filter((pr) => pr.head.repo?.full_name === process.env.GITHUB_REPOSITORY);
           writeFileSync('/tmp/alas-sync-pulls.json', JSON.stringify(pulls));
-          const selection = selectUpstreamSync({ tags, openHeads: pulls.map(pr => pr.head.ref) });
+          const selection = selectUpstreamSync({tags, openHeads: pulls.map((pr) => pr.head.ref)});
           if (selection) {
+            if (!selection.baseTag) throw new Error(`No merged stable base tag exists for ${selection.tag}`);
             writeFileSync('/tmp/alas-sync-selection.json', JSON.stringify(selection));
-            appendFileSync(process.env.GITHUB_OUTPUT, `tag=${selection.tag}\nbranch=${selection.branch}\n`);
+            appendFileSync(process.env.GITHUB_OUTPUT,
+              `tag=${selection.tag}\nbranch=${selection.branch}\nbase_tag=${selection.baseTag}\n`);
           }
           NODE
-      - name: Close resolved synchronization issues
-        run: |
-          gh issue list --repo "$GITHUB_REPOSITORY" --state open --limit 1000 \
-            --json number,title,body > /tmp/alas-sync-open-issues.json
-          node --input-type=module <<'NODE' > /tmp/alas-sync-resolved-issues.txt
-          import { readFileSync } from 'node:fs';
-          const merged = JSON.parse(readFileSync('/tmp/alas-sync-merged-tags.json', 'utf8'));
-          const issues = JSON.parse(readFileSync('/tmp/alas-sync-open-issues.json', 'utf8'));
-          for (const issue of issues) {
-            if (merged.some(tag => issue.title === `Upstream synchronization required: ${tag}` ||
-                (issue.title === 'Upstream synchronization conflict' &&
-                 (issue.body ?? '').includes(`Merging upstream tag ${tag} into alas failed.`)))) {
-              console.log(issue.number);
-            }
-          }
-          NODE
-          while read -r issue; do
-            gh issue close "$issue" --repo "$GITHUB_REPOSITORY" --reason completed
-          done < /tmp/alas-sync-resolved-issues.txt
-      - name: Merge upstream on the canonical sync branch
+      - name: Fetch sync branches
         if: ${{ steps.select.outputs.tag != '' }}
-        id: merge
+        env:
+          BRANCH: ${{ steps.select.outputs.branch }}
+        run: |
+          : > /tmp/alas-sync-refs.txt
+          git ls-remote --heads origin "refs/heads/$BRANCH" > /tmp/alas-sync-canonical.txt
+          if [ -s /tmp/alas-sync-canonical.txt ]; then
+            git fetch origin "+refs/heads/$BRANCH:refs/remotes/origin/$BRANCH"
+            printf 'origin/%s\n' "$BRANCH" >> /tmp/alas-sync-refs.txt
+          fi
+          jq -r '.staleHeads[]' /tmp/alas-sync-selection.json | while read -r head; do
+            git fetch origin "+refs/heads/$head:refs/remotes/origin/$head"
+            printf 'origin/%s\n' "$head" >> /tmp/alas-sync-refs.txt
+          done
+      - name: Build and safely push the exact-tag candidate
+        if: ${{ steps.select.outputs.tag != '' }}
+        id: candidate
         env:
           TAG: ${{ steps.select.outputs.tag }}
+          BASE_TAG: ${{ steps.select.outputs.base_tag }}
           BRANCH: ${{ steps.select.outputs.branch }}
         run: |
           git config user.name "github-actions[bot]"
           git config user.email "github-actions[bot]@users.noreply.github.com"
-          git ls-remote --heads origin "refs/heads/$BRANCH" > /tmp/alas-sync-remote.txt
-          jq -r '.staleHeads[]' /tmp/alas-sync-selection.json > /tmp/alas-sync-stale-heads.txt
-          while read -r head; do
-            git fetch origin "+refs/heads/$head:refs/remotes/origin/$head"
-          done < /tmp/alas-sync-stale-heads.txt
-          if [ -s /tmp/alas-sync-remote.txt ]; then
-            git fetch origin "+refs/heads/$BRANCH:refs/remotes/origin/$BRANCH"
-            seed="origin/$BRANCH"
-          elif [ -s /tmp/alas-sync-stale-heads.txt ]; then
-            seed="origin/$(head -n 1 /tmp/alas-sync-stale-heads.txt)"
-          else
-            seed="origin/alas"
-          fi
-          git checkout -B "$BRANCH" "$seed"
-          {
-            echo origin/alas
-            sed 's|^|origin/|' /tmp/alas-sync-stale-heads.txt
-            echo "refs/alas-upstream-tags/$TAG"
-          } > /tmp/alas-sync-merge-refs.txt
-          while read -r ref; do
-            if ! git merge --no-edit "$ref"; then
-              git diff --name-only --diff-filter=U > /tmp/alas-sync-conflicts.txt
-              git merge --abort
-              test -s /tmp/alas-sync-conflicts.txt
-              echo "conflict=true" >> "$GITHUB_OUTPUT"
-              exit 0
-            fi
-          done < /tmp/alas-sync-merge-refs.txt
-          git diff --name-only origin/alas HEAD -- .github/workflows > /tmp/alas-sync-workflows.txt
-          if [ -s /tmp/alas-sync-workflows.txt ]; then
-            echo "manual=true" >> "$GITHUB_OUTPUT"
-            exit 0
-          fi
-          git push origin "HEAD:refs/heads/$BRANCH"
-      - name: Create or update the manual-sync issue
-        if: ${{ steps.merge.outputs.conflict == 'true' || steps.merge.outputs.manual == 'true' }}
+          node --input-type=module <<'NODE'
+          import {appendFileSync, readFileSync, writeFileSync} from 'node:fs';
+          import {
+            buildSyncCandidate,
+            pushSyncCandidate,
+            verifyRemoteSyncHeads,
+          } from './scripts/sync-candidate.mjs';
+
+          const ledger = JSON.parse(readFileSync('docs/alas-downstream-patches.json', 'utf8'));
+          const syncRefs = readFileSync('/tmp/alas-sync-refs.txt', 'utf8').trim().split('\n').filter(Boolean);
+          const branch = process.env.BRANCH;
+          const report = buildSyncCandidate({
+            cwd: process.cwd(),
+            tagRef: `refs/alas-upstream-tags/${process.env.TAG}`,
+            baseRef: `refs/alas-upstream-tags/${process.env.BASE_TAG}`,
+            upstreamRef: 'refs/alas-upstream-main',
+            alasRef: 'origin/alas',
+            branch,
+            syncRefs,
+            ledger,
+          });
+          const staleHeads = report.syncHeads.filter(({ref}) => ref !== `origin/${branch}`);
+          report.concurrentChanges = verifyRemoteSyncHeads({cwd: process.cwd(), syncHeads: staleHeads});
+          if (report.concurrentChanges.length > 0) report.manualReview = true;
+          const canonical = report.syncHeads.find(({ref}) => ref === `origin/${branch}`);
+          try {
+            pushSyncCandidate({
+              cwd: process.cwd(),
+              branch,
+              expectedRemoteSha: canonical?.head ?? '',
+            });
+            report.pushed = true;
+          } catch (error) {
+            report.pushed = false;
+            report.pushError = error.message;
+            report.manualReview = true;
+          }
+          const lateChanges = verifyRemoteSyncHeads({cwd: process.cwd(), syncHeads: staleHeads});
+          if (lateChanges.length > 0) {
+            report.concurrentChanges = lateChanges;
+            report.manualReview = true;
+          }
+          writeFileSync('/tmp/alas-sync-report.json', `${JSON.stringify(report, null, 2)}\n`);
+          appendFileSync(process.env.GITHUB_OUTPUT,
+            `manualReview=${report.manualReview}\npushed=${report.pushed}\n`);
+          NODE
+      - name: Write sync report and PR body
+        if: ${{ steps.select.outputs.tag != '' }}
         env:
           TAG: ${{ steps.select.outputs.tag }}
           BRANCH: ${{ steps.select.outputs.branch }}
-          MANUAL: ${{ steps.merge.outputs.manual }}
         run: |
-          title="Upstream synchronization required: $TAG"
-          gh issue list --repo "$GITHUB_REPOSITORY" --state open \
-            --search 'in:title "Upstream synchronization"' --limit 100 --json number,title,body > /tmp/alas-sync-issues.json
-          issue="$(jq -r --arg title "$title" --arg tag "$TAG" \
-            '[.[] | select(.title == $title or (.title == "Upstream synchronization conflict" and
-              ((.body // "") | contains("Merging upstream tag \($tag) into alas failed."))))][0].number // empty' \
-            /tmp/alas-sync-issues.json)"
-          {
-            echo "Upstream tag $TAG requires manual synchronization into alas. No sync branch was pushed."
-            echo
-            if [ "$MANUAL" = true ]; then
-              echo "GITHUB_TOKEN cannot push workflow-file changes. Workflow files:"
-              cat /tmp/alas-sync-workflows.txt
-            else
-              echo "The merge conflicted and was aborted. Conflicting files:"
-              cat /tmp/alas-sync-conflicts.txt
-            fi
-            echo
-            echo "Fetch the upstream tag, then create or update $BRANCH locally, preserving the remote sync PR edits."
-            echo "Merge these refs in order, resolving conflicts:"
-            cat /tmp/alas-sync-merge-refs.txt
-            echo
-            echo "Push with your maintainer login, open or update the PR into alas, and run ci.yml on $BRANCH."
-            echo "Close older sync PRs only after the replacement PR succeeds. Never add stored credentials to Actions."
-            echo "See docs/ALAS_DOWNSTREAM.md for the manual procedure. This issue closes after $TAG is in origin/alas."
-          } > /tmp/alas-sync-issue.md
-          if [ -n "$issue" ]; then
-            gh issue edit "$issue" --repo "$GITHUB_REPOSITORY" --title "$title" --body-file /tmp/alas-sync-issue.md
-          else
-            gh issue create --repo "$GITHUB_REPOSITORY" --title "$title" --body-file /tmp/alas-sync-issue.md
-          fi
-          exit 1
-      - name: Create or update one sync PR and request CI
-        if: ${{ steps.select.outputs.tag != '' && steps.merge.outputs.conflict != 'true' && steps.merge.outputs.manual != 'true' }}
+          test -n "$GITHUB_STEP_SUMMARY"
+          node --input-type=module <<'NODE'
+          import {readFileSync, writeFileSync, appendFileSync} from 'node:fs';
+          const report = JSON.parse(readFileSync('/tmp/alas-sync-report.json', 'utf8'));
+          const lines = [
+            `## Stable upstream sync: ${process.env.TAG}`,
+            '',
+            `Candidate branch: \`${process.env.BRANCH}\``,
+            `Exact stable base: \`${report.tagCommit}\``,
+            `Candidate commit: \`${report.candidateCommit}\``,
+            '',
+            '### Downstream patch classification',
+            'Possible classifications: unaffected, absorbed, overlap.',
+            ...report.classifications.map((patch) =>
+              `- **${patch.name}**: **${patch.classification}**${patch.overlappingFiles.length ? ` (${patch.overlappingFiles.join(', ')})` : ''}`),
+          ];
+          if (report.conflicts.length) {
+            lines.push('', '### conflict', ...report.conflicts.map((item) => `- ${item.kind}: \`${item.commit}\``));
+          }
+          if (report.workflowChanges.length) {
+            lines.push('', '### workflowChanges', ...report.workflowChanges.map((path) => `- \`${path}\``));
+          }
+          if (report.unsupportedMergeCommits.length) {
+            lines.push('', '### Sync-branch merge commits requiring review',
+              ...report.unsupportedMergeCommits.map((commit) => `- \`${commit}\``));
+          }
+          if (report.missingLedgerPatches.length) {
+            lines.push('', '### Ledger patches missing from origin/alas',
+              ...report.missingLedgerPatches.map((name) => `- **${name}**`));
+          }
+          if (report.concurrentChanges.length) {
+            lines.push('', '### Concurrent sync-branch changes', ...report.concurrentChanges.map((change) =>
+              `- \`${change.branch}\`: expected \`${change.expected}\`, found \`${change.actual}\``));
+          }
+          if (report.pushError) lines.push('', '### Push failure', '```', report.pushError, '```');
+          lines.push('', report.manualReview
+            ? '**manualReview required. This PR must remain draft and this workflow fails closed.**'
+            : 'All patches are unaffected; CI is requested automatically. Publication remains manual and environment-gated.');
+          const body = `${lines.join('\n')}\n`;
+          writeFileSync('/tmp/alas-sync-pr.md', body);
+          appendFileSync(process.env.GITHUB_STEP_SUMMARY, body);
+          NODE
+      - name: Create or update persistent sync PR
+        if: ${{ steps.select.outputs.tag != '' && steps.candidate.outputs.pushed == 'true' }}
         env:
           TAG: ${{ steps.select.outputs.tag }}
           BRANCH: ${{ steps.select.outputs.branch }}
+          MANUAL: ${{ steps.candidate.outputs.manualReview }}
         run: |
           pr="$(jq -r --arg branch "$BRANCH" '[.[] | select(.head.ref == $branch)][0].number // empty' /tmp/alas-sync-pulls.json)"
-          printf 'Merge stable upstream tag %s into alas. Downstream patches are retained. Publication remains manual.\n' "$TAG" > /tmp/alas-sync-pr.md
+          draft="$(jq -r --arg branch "$BRANCH" '[.[] | select(.head.ref == $branch)][0].draft // false' /tmp/alas-sync-pulls.json)"
           if [ -n "$pr" ]; then
-            gh pr edit "$pr" --repo "$GITHUB_REPOSITORY" --title "chore: sync upstream $TAG" --body-file /tmp/alas-sync-pr.md
+            gh pr edit "$pr" --repo "$GITHUB_REPOSITORY" \
+              --title "chore: sync upstream $TAG" --body-file /tmp/alas-sync-pr.md
+            if [ "$MANUAL" = true ] && [ "$draft" != true ]; then
+              gh pr ready "$pr" --repo "$GITHUB_REPOSITORY" --undo
+            elif [ "$MANUAL" != true ] && [ "$draft" = true ]; then
+              gh pr ready "$pr" --repo "$GITHUB_REPOSITORY"
+            fi
+          elif [ "$MANUAL" = true ]; then
+            gh pr create --repo "$GITHUB_REPOSITORY" --base alas --head "$BRANCH" --draft \
+              --title "chore: sync upstream $TAG" --body-file /tmp/alas-sync-pr.md
           else
             gh pr create --repo "$GITHUB_REPOSITORY" --base alas --head "$BRANCH" \
               --title "chore: sync upstream $TAG" --body-file /tmp/alas-sync-pr.md
           fi
-          # Token-created pushes and PRs require an explicit CI dispatch.
           gh workflow run ci.yml --repo "$GITHUB_REPOSITORY" --ref "$BRANCH"
-          jq -r --slurpfile selection /tmp/alas-sync-selection.json \
-            '.[] | select(.head.ref as $head | $selection[0].staleHeads | index($head)) | .number' \
-            /tmp/alas-sync-pulls.json |
-          while read -r stale; do
-            current_head="$(gh api "repos/$GITHUB_REPOSITORY/pulls/$stale" --jq '.head.sha')"
-            git fetch origin "$current_head"
-            if git merge-base --is-ancestor "$current_head" HEAD; then
-              gh pr close "$stale" --repo "$GITHUB_REPOSITORY"
-            else
-              status=$?
-              if [ "$status" -ne 1 ]; then
-                exit "$status"
-              fi
-              echo "Leaving stale PR $stale open: current head $current_head is not in the pushed replacement. The next sync will retain its edits."
-            fi
-          done
+      - name: Fail closed when manual review is required
+        if: ${{ steps.select.outputs.tag != '' && (steps.candidate.outputs.manualReview == 'true' || steps.candidate.outputs.pushed != 'true') }}
+        run: |
+          echo "Manual review is required; see the job summary and persistent draft PR."
+          exit 1
