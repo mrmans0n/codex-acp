@@ -270,16 +270,32 @@ test("rejects duplicate, missing, renamed, swapped, and unexpected functional pa
   }
 });
 
-test("the committed ledger matches the exact downstream patch commits", () => {
+// Paths a patch's adaptation must touch although its anchored original commit does not, because a
+// stable upstream release moved the patched contract into them. Each extension is reviewed here; any
+// other difference from the original commit's paths fails.
+const REVIEWED_LEDGER_PATH_EXTENSIONS = Object.freeze({
+  // v2.3.0 (#620, #649, #653) snapshots the routed ACP v1 initialize response, which advertises the
+  // downstream _meta.systemPrompt capability.
+  "session-system-prompt-append": ["src/__tests__/CodexACPAgent/data/initialize-v1-routed-response.json"],
+  // v2.3.0 (#620) moved ACP extension routing, including _codex/hooks/trust, into AcpAgentRouter.ts.
+  "neutral-codex-hook-review": ["src/AcpAgentRouter.ts"],
+});
+
+test("the committed ledger matches the exact downstream patch commits plus reviewed path extensions", () => {
   const ledger = validatePatchLedger(JSON.parse(readFileSync(
     new URL("../docs/alas-downstream-patches.json", import.meta.url),
     "utf8",
   )));
   assert.equal(ledger.patches.length, KNOWN_PATCH_IDENTITIES.length);
+  for (const name of Object.keys(REVIEWED_LEDGER_PATH_EXTENSIONS)) {
+    assert.ok(ledger.patches.some((patch) => patch.name === name), name);
+  }
   for (const patch of ledger.patches) {
     const changed = git(new URL("..", import.meta.url).pathname, "diff-tree", "--no-commit-id", "--name-only", "-r", patch.commit)
       .split("\n").filter(Boolean).sort();
-    assert.deepEqual([...patch.files].sort(), changed, patch.name);
+    const extensions = REVIEWED_LEDGER_PATH_EXTENSIONS[patch.name] ?? [];
+    assert.ok(extensions.every((path) => !changed.includes(path)), patch.name);
+    assert.deepEqual([...patch.files].sort(), [...changed, ...extensions].sort(), patch.name);
     assert.ok(patch.tests.every((path) => patch.files.includes(path)), patch.name);
   }
 });
@@ -323,13 +339,18 @@ test("the committed sync review matches recomputed classifications and has expli
     targetRef: review.toTag,
     expectedPatchIdentities: KNOWN_PATCH_IDENTITIES.filter(({name}) => reviewed.has(name)),
   });
+  const workflowChanges = git(cwd, "diff", "--name-only", review.fromTag, review.toTag, "--", ".github/workflows")
+    .split("\n").filter(Boolean);
   assert.deepEqual(verifySyncReviewArtifact({
     review,
     fromTag: review.fromTag,
     toTag: review.toTag,
     toCommit: git(cwd, "rev-parse", `${review.toTag}^{commit}`),
     classifications,
+    workflowChanges,
   }), review);
   assert.ok(review.patches.every((patch) => patch.classification === "overlap"));
   assert.ok(review.patches.every((patch) => patch.resolution.automatic === false));
-});
+  // Classification computes the patch-id of every upstream commit that touches a ledger path, which
+  // takes about 4 s on v2.2.2 and 5 s on v2.3.0 locally: above vitest's 5 s default.
+}, 120_000);
