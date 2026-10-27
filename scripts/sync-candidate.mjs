@@ -12,6 +12,7 @@ import {
   advancePatchLedger,
   createSyncReview,
   verifySyncReviewArtifact,
+  workflowChangesResolved,
 } from "./sync-review.mjs";
 
 const BOT_IDENTITY = {
@@ -341,6 +342,75 @@ function restoreWorkflowTree(cwd, alasRef, targetCommit) {
   else if (changed.status !== 0) throw new Error(changed.stderr || "Cannot inspect candidate workflow tree");
 }
 
+function workflowTree(cwd, ref) {
+  const result = spawnSync("git", ["rev-parse", "--verify", "--quiet", `${ref}:.github/workflows`], {
+    cwd, encoding: "utf8", stdio: "pipe",
+  });
+  return result.status === 0 ? result.stdout.trim() : null;
+}
+
+function pathExists(cwd, ref, path) {
+  return spawnSync("git", ["cat-file", "-e", `${ref}:${path}`], {cwd, encoding: "utf8", stdio: "pipe"}).status === 0;
+}
+
+/**
+ * Returns the stable workflow delta and the paths in it that the fork owns.
+ *
+ * A fork-owned workflow exists on protected alas but not in the previous stable tag (for example
+ * publish-alas.yml or sync-upstream.yml). An upstream change to such a path can never be accepted by
+ * review: the candidate always keeps the fork's own workflows.
+ */
+export function upstreamWorkflowDelta({cwd, baseRef, tagRef, alasRef}) {
+  const workflowChanges = lines(git(cwd, ["diff", "--name-only", baseRef, tagRef, "--", ".github/workflows"]));
+  const forkWorkflowChanges = workflowChanges
+    .filter((path) => pathExists(cwd, alasRef, path) && !pathExists(cwd, baseRef, path));
+  return {workflowChanges, forkWorkflowChanges};
+}
+
+function downstreamCommitIdentities({
+  cwd,
+  entries,
+  downstreamCommits,
+  patchIds,
+  ledgerByPatchId,
+  ledgerCommits,
+  retiredCommits,
+  upstreamPatchIds,
+}) {
+  const identities = [];
+  const invalid = [];
+  const seen = new Set();
+  for (const entry of entries) {
+    const commit = entry?.commit;
+    const index = downstreamCommits.indexOf(commit);
+    const id = index >= 0 ? patchIds[index] : null;
+    let reason = null;
+    if (seen.has(commit)) reason = "listed more than once";
+    else if (index < 0) reason = "not a downstream commit of protected alas";
+    else if (!id) reason = "has no patch";
+    else if (ledgerCommits.has(commit) || ledgerByPatchId.has(id)) reason = "is a ledger patch commit";
+    else if (retiredCommits.has(commit)) reason = "is retired";
+    else if (upstreamPatchIds.has(id)) reason = "is equivalent to an upstream commit";
+    else if (downstreamCommits.findIndex((candidate, position) =>
+      patchIds[position] === id && !retiredCommits.has(candidate)) !== index) {
+      reason = "is not the first replayed copy of its patch";
+    }
+    seen.add(commit);
+    if (reason) {
+      invalid.push({commit: commit ?? null, reason});
+      continue;
+    }
+    identities.push({
+      commit,
+      subject: git(cwd, ["show", "-s", "--format=%s", commit]),
+      patchId: id,
+      equivalentCommits: downstreamCommits.filter((candidate, position) =>
+        position !== index && patchIds[position] === id && !retiredCommits.has(candidate)),
+    });
+  }
+  return {identities, invalid};
+}
+
 function assertContaminationContained(cwd, alasRef, upstreamRef, tagCommit) {
   const mergeBases = lines(git(cwd, ["merge-base", "--all", alasRef, upstreamRef]));
   const uncontained = mergeBases.filter((base) => !isAncestor(cwd, base, tagCommit));
@@ -420,7 +490,8 @@ export function buildSyncCandidate({
   const targetPatchIds = patchIdCommits(cwd, tagRef);
   const upstreamPatchIds = patchIdCommits(cwd, upstreamRef);
   const downstreamCommits = commitsBetween(cwd, upstreamRef, alasRef);
-  const downstreamPatchIds = new Set(downstreamCommits.map((commit) => patchId(cwd, commit)).filter(Boolean));
+  const downstreamCommitPatchIds = downstreamCommits.map((commit) => patchId(cwd, commit));
+  const downstreamPatchIds = new Set(downstreamCommitPatchIds.filter(Boolean));
   let preserved = [];
   const preservedPatchIds = new Set();
   const syncHeads = [];
@@ -475,6 +546,25 @@ export function buildSyncCandidate({
   }
 
   previousReview ??= readReviewAtRef(cwd, alasRef, reviewPath);
+  const {workflowChanges, forkWorkflowChanges} = upstreamWorkflowDelta({cwd, baseRef, tagRef, alasRef});
+  // Non-ledger downstream adaptations exist only as explicit entries of the review for this exact
+  // transition. Each identity is recomputed here; an entry that does not name the first replayed
+  // copy of a non-ledger, non-retired, non-upstream downstream commit is rejected.
+  const reviewedDownstream = previousReview?.schemaVersion === 2 &&
+    previousReview.fromTag === fromTag && previousReview.toTag === toTag &&
+    previousReview.toCommit === tagCommit && Array.isArray(previousReview.downstreamCommits)
+    ? previousReview.downstreamCommits
+    : [];
+  const {identities: downstreamIdentities, invalid: invalidDownstreamCommits} = downstreamCommitIdentities({
+    cwd,
+    entries: reviewedDownstream,
+    downstreamCommits,
+    patchIds: downstreamCommitPatchIds,
+    ledgerByPatchId,
+    ledgerCommits: new Set(classifications.flatMap((patch) => [patch.originalCommit, patch.commit])),
+    retiredCommits,
+    upstreamPatchIds,
+  });
   const syncReview = createSyncReview({
     fromTag,
     toTag,
@@ -482,6 +572,8 @@ export function buildSyncCandidate({
     classifications,
     canonicalHead,
     preservedCommits: preserved,
+    downstreamCommits: downstreamIdentities,
+    workflowChanges,
     previousReview,
   });
   let syncReviewError = null;
@@ -494,12 +586,14 @@ export function buildSyncCandidate({
       classifications,
       canonicalHead,
       preservedCommits: preserved,
+      workflowChanges,
     });
   } catch (error) {
     syncReviewError = error.message;
   }
   const reviewByName = new Map(syncReview.patches.map((patch) => [patch.name, patch]));
   const preservedReviewByCommit = new Map(syncReview.preservedCommits.map((entry) => [entry.commit, entry]));
+  const downstreamReviewByCommit = new Map((syncReview.downstreamCommits ?? []).map((entry) => [entry.commit, entry]));
 
   const exactBranch = `${branch}-exact`;
   git(cwd, ["checkout", "-B", exactBranch, tagCommit]);
@@ -508,6 +602,7 @@ export function buildSyncCandidate({
   const appliedDownstreamCommits = [];
   const appliedSyncCommits = [];
   const appliedPreservedAdaptations = [];
+  const appliedDownstreamAdaptations = [];
   const excludedUpstreamEquivalents = [];
   const excludedUpstreamLaterEquivalents = [];
   const excludedCanonicalUpstreamEquivalents = [];
@@ -515,8 +610,8 @@ export function buildSyncCandidate({
   const conflicts = [];
   const seenLedgerPatches = new Set();
   const seenNonLedgerPatchIds = new Set();
-  for (const commit of downstreamCommits) {
-    const id = patchId(cwd, commit);
+  for (const [index, commit] of downstreamCommits.entries()) {
+    const id = downstreamCommitPatchIds[index];
     const matchingPatch = id ? ledgerByPatchId.get(id) : undefined;
     if (matchingPatch && commit !== matchingPatch.commit) continue;
     const patch = matchingPatch;
@@ -563,6 +658,25 @@ export function buildSyncCandidate({
       continue;
     }
     if (!patch && id && seenNonLedgerPatchIds.has(id)) continue;
+    const downstreamResolution = patch ? undefined : downstreamReviewByCommit.get(commit)?.resolution;
+    if (downstreamResolution?.action === "adapt") {
+      // Bound exactly like a ledger adaptation: single parent equal to the exact tag or the exact
+      // candidate commit at this replay point, merge-base equal to the tag, and only the original
+      // commit's paths changed.
+      if (!bindExactAdaptation(cwd, {
+        commit: downstreamResolution.commit,
+        patch: {name: `downstream commit ${commit}`, files: changedPaths(cwd, commit), tests: []},
+        tagCommit,
+        upstreamRef,
+      })) {
+        conflicts.push({commit: downstreamResolution.commit, kind: "downstream-adaptation"});
+        break;
+      }
+      appliedDownstreamCommits.push(downstreamResolution.commit);
+      appliedDownstreamAdaptations.push({commit, replacementCommit: downstreamResolution.commit});
+      seenNonLedgerPatchIds.add(id);
+      continue;
+    }
     if (!cherryPick(cwd, commit)) {
       conflicts.push({commit, kind: "downstream", ...(patch ? {patch: patch.name} : {})});
       break;
@@ -615,14 +729,24 @@ export function buildSyncCandidate({
       appliedSyncCommits.push(commit);
     }
   }
+  const unappliedDownstreamAdaptations = (syncReview.downstreamCommits ?? [])
+    .filter((entry) => !appliedDownstreamAdaptations.some(({commit}) => commit === entry.commit))
+    .map((entry) => entry.commit);
   const missingLedgerPatches = classifications
     .filter((patch) => ["retain", "adapt"].includes(reviewByName.get(patch.name)?.resolution?.action) &&
       !seenLedgerPatches.has(patch.name))
     .map((patch) => patch.name);
 
-  const workflowChanges = lines(git(cwd, ["diff", "--name-only", baseRef, tagRef, "--", ".github/workflows"]));
   if (workflowChanges.length > 0) restoreWorkflowTree(cwd, alasRef, tagCommit);
-  const advancedLedger = syncReviewError || conflicts.length > 0 || missingLedgerPatches.length > 0
+  // The fork's own workflow tree must survive the candidate unchanged whenever the stable delta
+  // touches workflows; reviewed acceptance never imports an upstream workflow edit.
+  const workflowTreeMatchesAlas = workflowChanges.length === 0 ||
+    workflowTree(cwd, "HEAD") === workflowTree(cwd, alasRef);
+  const workflowChangesAccepted = workflowChanges.length > 0 &&
+    forkWorkflowChanges.length === 0 && workflowTreeMatchesAlas &&
+    workflowChangesResolved(syncReview, workflowChanges);
+  const advancedLedger = syncReviewError || conflicts.length > 0 || missingLedgerPatches.length > 0 ||
+      invalidDownstreamCommits.length > 0 || unappliedDownstreamAdaptations.length > 0
     ? ledger
     : advancePatchLedger({ledger, review: syncReview});
   writeSyncArtifacts(cwd, reviewPath, syncReview, ledgerPath, advancedLedger);
@@ -642,7 +766,11 @@ export function buildSyncCandidate({
 
   const manualReviewReasons = [];
   if (syncReviewError) manualReviewReasons.push("sync-review-unresolved");
-  if (workflowChanges.length > 0) manualReviewReasons.push("upstream-workflow-changes");
+  if (workflowChanges.length > 0 && !workflowChangesAccepted) manualReviewReasons.push("upstream-workflow-changes");
+  if (forkWorkflowChanges.length > 0) manualReviewReasons.push("upstream-fork-workflow-changes");
+  if (!workflowTreeMatchesAlas) manualReviewReasons.push("candidate-workflows-differ-from-alas");
+  if (invalidDownstreamCommits.length > 0) manualReviewReasons.push("invalid-downstream-adaptations");
+  if (unappliedDownstreamAdaptations.length > 0) manualReviewReasons.push("unapplied-downstream-adaptations");
   if (conflicts.length > 0) manualReviewReasons.push("cherry-pick-conflicts");
   if (missingLedgerPatches.length > 0) manualReviewReasons.push("missing-ledger-patches");
   if (unsupportedMergeCommits.length > 0) manualReviewReasons.push("canonical-sync-merge-commits");
@@ -679,9 +807,14 @@ export function buildSyncCandidate({
     missingLedgerPatches,
     preservedSyncCommits: appliedSyncCommits,
     appliedPreservedAdaptations,
+    appliedDownstreamAdaptations,
+    invalidDownstreamCommits,
+    unappliedDownstreamAdaptations,
     syncHeads,
     staleSyncHeads,
     workflowChanges,
+    forkWorkflowChanges,
+    acceptedWorkflowChanges: workflowChangesAccepted ? [...workflowChanges] : [],
     conflicts,
     unsupportedMergeCommits,
     manualReviewReasons,
