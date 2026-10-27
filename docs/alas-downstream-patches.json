@@ -97,6 +97,7 @@
         "src/SessionFork.ts",
         "src/SessionInstructions.ts",
         "src/__tests__/CodexACPAgent/agent-file-change-report.test.ts",
+        "src/__tests__/CodexACPAgent/data/initialize-v1-routed-response.json",
         "src/__tests__/CodexACPAgent/initialize.test.ts",
         "src/__tests__/CodexACPAgent/session-instructions-native.test.ts",
         "src/__tests__/CodexACPAgent/session-instructions.test.ts",
@@ -141,7 +142,8 @@
         "src/__tests__/SessionInstructions.test.ts",
         "src/__tests__/CodexACPAgent/session-instructions.test.ts",
         "src/__tests__/CodexACPAgent/session-instructions-native.test.ts",
-        "src/__tests__/CodexACPAgent/initialize.test.ts"
+        "src/__tests__/CodexACPAgent/initialize.test.ts",
+        "src/__tests__/CodexACPAgent/data/initialize-v1-routed-response.json"
       ],
       "disposition": "active",
       "retiredCommits": []
@@ -175,6 +177,7 @@
       "files": [
         "docs/air-extensions.md",
         "docs/codex-hook-review.md",
+        "src/AcpAgentRouter.ts",
         "src/CodexAcpServer.ts",
         "src/CodexAppServerClient.ts",
         "src/CodexHookReview.ts",
