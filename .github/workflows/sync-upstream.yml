@@ -227,6 +227,18 @@ jobs:
             lines.push('', '### Sync review resolutions', ...report.syncReview.patches.map((patch) =>
               `- **${patch.name}**: ${patch.resolution.action ?? 'unresolved'}${patch.resolution.automatic ? ' (automatic)' : ' (manual)'}`));
           }
+          if (report.syncReview?.downstreamCommits?.length) {
+            lines.push('', '### Reviewed adaptations of non-ledger downstream commits', ...report.syncReview.downstreamCommits.map((entry) =>
+              `- \`${entry.commit}\` -> ${entry.resolution.action === 'adapt' ? `\`${entry.resolution.commit}\`` : 'unresolved'} (${entry.subject})`));
+          }
+          if (report.invalidDownstreamCommits?.length) {
+            lines.push('', '### Rejected downstream adaptation entries (manual review)', ...report.invalidDownstreamCommits.map((item) =>
+              `- \`${item.commit}\`: ${item.reason}`));
+          }
+          if (report.syncReview?.upstreamWorkflowChanges?.length) {
+            lines.push('', '### Upstream workflow changes (candidate keeps the alas workflows)', ...report.syncReview.upstreamWorkflowChanges.map((entry) =>
+              `- \`${entry.path}\`: ${entry.resolution.action ?? 'unresolved'}`));
+          }
           if (report.syncReviewError) lines.push('', '### Sync review blocker', report.syncReviewError);
           if (report.excludedUpstreamLaterEquivalents?.length) {
             lines.push('', '### Excluded upstream-later equivalents from protected alas', ...report.excludedUpstreamLaterEquivalents.map((item) =>
