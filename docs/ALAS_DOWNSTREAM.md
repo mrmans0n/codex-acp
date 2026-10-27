@@ -31,7 +31,9 @@ already loaded), and `neutral-session-index` (no upstream PR yet: the session
 index under `_meta.sessionIndex` for a client that does not declare AIR).
 Keep ledger entries and their file
 lists exact when a patch changes. `npm run test:maintenance` verifies the ledger
-against the recorded commits. A patch added to the ledger after the latest sync
+against the recorded commits. A file list may extend the original commit's paths
+only with a path that a stable release moved the patched contract into; each
+such extension is listed and justified in `scripts/downstream-patches.test.mjs`. A patch added to the ledger after the latest sync
 review has no transition yet; the next stable sync classifies it with the
 others.
 
@@ -100,7 +102,14 @@ protected `alas` history is never rewritten.
 
 When the stable delta changes workflow files, the exact candidate restores the
 current downstream `.github/workflows` tree and lists the upstream paths for
-manual reconciliation. A push failure, canonical review edit, cherry-pick
+manual reconciliation. The review records one `upstreamWorkflowChanges` entry per
+changed path. A maintainer may resolve each entry with `retain-downstream`
+(`automatic: false`, a rationale and tests): the candidate keeps the alas
+workflows unchanged, and the upstream edit is mirrored into alas by a separate
+reviewed `automation/*` PR after the sync. The candidate stays in manual review
+while any entry is unresolved, when an upstream change touches a fork-owned
+workflow (a path on alas that the previous stable tag does not have), or when the
+candidate's workflow tree differs from alas. A push failure, canonical review edit, cherry-pick
 conflict, workflow-file change, missing ledger patch, unresolved review,
 release/npm mismatch, or contamination check failure makes the run fail closed.
 Every path, including exceptions and push failures, writes the Actions job
@@ -154,6 +163,21 @@ when every earlier replay reproduces that same parent; any drift fails closed.
 Push adaptation commits where the workflow can fetch them before rerunning it;
 once bound, they are ancestors of the integration commit.
 
+A fork-only commit outside the ledger is normally replayed as is. When it
+conflicts with the new stable release, the review may name an adaptation in
+`downstreamCommits`: the commit, its subject, its stable patch-id, every other
+alas copy with the same patch-id (`equivalentCommits`), and an `adapt`
+resolution with `automatic: false`, a rationale and tests. The key is the first
+replayed copy of a non-ledger commit that is not retired and not equivalent to an
+upstream commit; the identity is recomputed on every build and a mismatch
+discards the resolution. The adaptation is bound with the same rules as a ledger
+adaptation: a single parent equal to the exact tag or to the exact candidate
+commit at that replay point, merge-base equal to the tag, and only paths the
+original commit changes. An entry that is invalid or never applied keeps the
+candidate in manual review. The advanced ledger retires the original and its
+equivalent copies and records the transition in `downstreamTransitions`; later
+syncs replay the adaptation instead.
+
 Commit the review edit on its own on the canonical same-version branch and
 rerun **Sync stable upstream**. Resolutions are matched by `fromTag`, `toTag`,
 `toCommit`, each patch classification, and each preserved commit identity, not
@@ -206,10 +230,14 @@ following:
   present, equals the tag commit;
 - the source is exactly the fetched protected branch head;
 - the declared tag matches `package.json`'s upstream version;
-- `git merge-base SOURCE_COMMIT upstream/main` is exactly that tag commit; and
+- `git merge-base SOURCE_COMMIT upstream/main` is exactly that tag commit;
 - `docs/alas-sync-review.json` matches recomputed classifications for its
   independently derived base tag, the declared `toTag`/`toCommit`, and contains
-  no unresolved manual resolution.
+  no unresolved manual resolution; and
+- when the stable delta changes workflows, the review lists exactly those paths,
+  none of them is fork-owned, and the source's `.github/workflows` tree equals
+  the protected alas tree before the sync. Reviewed non-ledger adaptations must
+  be reproduced exactly by the independent candidate reconstruction.
 
 The merge-base equality is intentionally stricter than an ancestry check. Any
 post-tag upstream or preview commit in the source causes publication to stop,

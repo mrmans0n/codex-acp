@@ -11,6 +11,7 @@ import {
 import {
   buildSyncCandidate,
   discoverCanonicalPreservedCommits,
+  upstreamWorkflowDelta,
 } from "./sync-candidate.mjs";
 import {
   verifyPatchLedgerTransition,
@@ -64,6 +65,13 @@ function verifySourceTree(cwd, sourceCommit, candidateCommit) {
   if (sourceTree !== candidateTree) {
     throw new Error("Publication source tree does not match the independently reconstructed reviewed candidate");
   }
+}
+
+function workflowTree(cwd, ref) {
+  const result = spawnSync("git", ["rev-parse", "--verify", "--quiet", `${ref}:.github/workflows`], {
+    cwd, encoding: "utf8", stdio: "pipe",
+  });
+  return result.status === 0 ? result.stdout.trim() : null;
 }
 
 function isAncestor(cwd, ancestor, descendant) {
@@ -136,6 +144,25 @@ export function verifyReconstructedPatchState({cwd, reconstructed, review, ledge
       throw new Error(`Exact preserved adaptation ${entry.resolution.commit} is absent from candidate ancestry`);
     }
   }
+  const downstreamEntries = review.downstreamCommits ?? [];
+  const expectedDownstreamAdaptations = downstreamEntries
+    .map((entry) => ({commit: entry.commit, replacementCommit: entry.resolution.commit}));
+  if (!isDeepStrictEqual(reconstructed.appliedDownstreamAdaptations, expectedDownstreamAdaptations) ||
+      !isDeepStrictEqual(reconstructed.invalidDownstreamCommits, []) ||
+      !isDeepStrictEqual(reconstructed.unappliedDownstreamAdaptations, [])) {
+    throw new Error("Reconstructed downstream adaptations do not exactly match committed review resolutions");
+  }
+  for (const entry of downstreamEntries) {
+    if (!isAncestor(cwd, entry.resolution.commit, reconstructed.exactCandidateCommit)) {
+      throw new Error(`Exact downstream adaptation ${entry.resolution.commit} is absent from candidate ancestry`);
+    }
+  }
+  const reviewedWorkflowChanges = (review.upstreamWorkflowChanges ?? []).map((entry) => entry.path);
+  if (!isDeepStrictEqual(reconstructed.workflowChanges, reviewedWorkflowChanges) ||
+      !isDeepStrictEqual(reconstructed.acceptedWorkflowChanges, reviewedWorkflowChanges) ||
+      !isDeepStrictEqual(reconstructed.forkWorkflowChanges, [])) {
+    throw new Error("Reconstructed upstream workflow changes do not exactly match committed review resolutions");
+  }
   return true;
 }
 
@@ -192,6 +219,15 @@ export function verifySyncSourceReview({
     targetRef: upstreamTag,
     expectedPatchIdentities,
   });
+  const {workflowChanges, forkWorkflowChanges} = upstreamWorkflowDelta({
+    cwd,
+    baseRef: source.reviewBaseTag,
+    tagRef: upstreamTag,
+    alasRef: source.previousAlas,
+  });
+  if (forkWorkflowChanges.length > 0) {
+    throw new Error(`Upstream stable delta changes fork-owned workflows: ${forkWorkflowChanges.join(", ")}`);
+  }
   verifySyncReviewArtifact({
     review,
     fromTag: source.reviewBaseTag,
@@ -200,7 +236,14 @@ export function verifySyncSourceReview({
     classifications,
     canonicalHead,
     preservedCommits,
+    workflowChanges,
   });
+  // A reviewed upstream workflow change is never imported: the published source keeps exactly the
+  // workflow tree protected alas had before the sync.
+  if (workflowChanges.length > 0 &&
+      workflowTree(cwd, source.sourceCommit) !== workflowTree(cwd, source.previousAlas)) {
+    throw new Error("Publication source workflows differ from the protected alas workflows before the sync");
+  }
   verifyPatchLedgerTransition({
     ledger,
     previousLedger,
