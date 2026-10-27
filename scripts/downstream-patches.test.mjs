@@ -351,4 +351,6 @@ test("the committed sync review matches recomputed classifications and has expli
   }), review);
   assert.ok(review.patches.every((patch) => patch.classification === "overlap"));
   assert.ok(review.patches.every((patch) => patch.resolution.automatic === false));
-});
+  // Classification computes the patch-id of every upstream commit that touches a ledger path, which
+  // takes about 4 s on v2.2.2 and 5 s on v2.3.0 locally: above vitest's 5 s default.
+}, 120_000);
