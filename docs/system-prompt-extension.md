@@ -1,6 +1,6 @@
 # Session system prompt append
 
-Clients may send `_meta.systemPrompt.append` on `session/new`, `session/load`,
+ACP v1 clients may send `_meta.systemPrompt.append` on `session/new`, `session/load`,
 `session/resume`, and `session/fork` to install session-scoped developer
 instructions. Ordinary prompts remain ordinary user messages. Codex owns tool
 execution, history, and compaction; this extension does not replace its base
@@ -9,7 +9,7 @@ instructions or write instruction files.
 Check the initialization response before using the extension:
 
 ```json
-{"_meta":{"systemPrompt":{"version":1,"append":true,"maxBytes":262144}}}
+{"_meta":{"systemPrompt":{"version":1,"append":true,"clear":true,"maxBytes":262144}}}
 ```
 
 Example session metadata:
@@ -18,29 +18,31 @@ Example session metadata:
 {"_meta":{"systemPrompt":{"append":"Review database migrations for this session."}}}
 ```
 
-The adapter reads effective user/project `developer_instructions` for the
-requested working directory, honoring a `CODEX_CONFIG` override, and appends the
-client text with a blank line. The underlying configuration is not modified.
-Each session gets its own value; repeated loads reconstruct it from configuration
-rather than appending to the already-appended restored instructions.
+The adapter applies the append exactly like the standard ACP append-mode
+`systemPrompt` with one text block (`{"mode":"append","content":[{"type":"text","text":"..."}]}`).
+Clients that speak the standard field can use it instead; a request must not carry both.
+The extension is offered on ACP v1 only. ACP v2 clients use the standard `systemPrompt`.
 
-Absent or whitespace-only text leaves the existing native lifecycle unchanged.
-With explicit text, new and forked threads receive the combined value; load and
-resume apply it to an **unloaded** thread. Codex ignores instruction overrides on
-already-loaded threads, including idle threads. Those requests are rejected
-rather than silently claiming success: close/unload the thread first, or open it
-in a fresh adapter process. A thread that this adapter process opened with the
-same append text is the exception: a client that reconnects to the live process
-and repeats the load or resume with unchanged text is accepted without a new
-override, because Codex already holds those instructions. Omitting metadata
-leaves native restoration and inheritance behavior to Codex. This is not an
-in-place instruction editor.
+The adapter appends the client text with a blank line to AIR `customInstructions`
+when present, otherwise to the effective user/project `developer_instructions` for
+the requested working directory, honoring a `CODEX_CONFIG` override. The
+underlying configuration is not modified. Each session gets its own value.
+
+The adapter keeps the instructions it opened a session with while the session is
+open, also across an app-server restart. A load or resume that omits the metadata,
+or repeats the same text, keeps them without reloading the thread, so a client that
+reconnects to a live adapter can send the same append again. A changed append on
+an idle, persisted thread reloads the thread with the new instructions; they reach
+the model at the next compaction, because the retained history keeps the previous
+developer message. A changed append is rejected while a turn or a background
+terminal runs, or when the thread has no saved rollout yet. New and forked threads
+receive the instructions from their first turn.
 
 Only the `{ "append": "..." }` form is supported. Replacement strings, unknown
 fields, non-string values, and values over 256 KiB in UTF-8 are rejected before
 session creation or skill changes. Config lookup failures are propagated; the
 adapter never substitutes an empty configuration and loses user instructions.
 
-AIR `customInstructions` remains supported on its upstream new-session path. Combining a nonblank `systemPrompt.append` with AIR `customInstructions` is rejected before thread creation rather than silently choosing an override.
-
-The `clear: true` capability advertises explicit empty append support: `{append:""}` reloads only effective configured developer instructions, clearing a prior session addition. Omitted metadata remains unchanged. This requires an unloaded thread just like a nonempty append.
+The `clear: true` capability advertises explicit empty append support: `{append:""}`
+restores the effective configured developer instructions (or AIR `customInstructions`),
+clearing a prior session addition. Omitted metadata keeps the known instructions.

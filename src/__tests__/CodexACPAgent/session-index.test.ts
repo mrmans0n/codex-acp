@@ -1,11 +1,12 @@
 import {afterEach, describe, expect, it, vi} from "vitest";
-import * as acp from "@agentclientprotocol/sdk";
+import * as acp from "@agentclientprotocol/sdk/unstable";
 import fs from "node:fs";
 import os from "node:os";
 import path from "node:path";
 import {createCodexMockTestFixture, createTestModel, deferred, type CodexMockTestFixture} from "../acp-test-utils";
 import type {Thread, ThreadListParams, ThreadListResponse} from "../../app-server/v2";
-import {SESSION_LIST_CHANGES_METHOD} from "../../SessionIndex";
+import {SESSION_LIST_CHANGES_METHOD, sessionIndexRowForkedFrom} from "../../SessionIndex";
+import {connectSession} from "./v2-prompt-harness";
 import {MAX_SESSION_TITLE_LENGTH} from "../../SessionTitle";
 
 const threadId = "01a0637c-5b99-7242-9064-04545d605fdb";
@@ -111,6 +112,24 @@ function listChanges(fixture: CodexMockTestFixture): any[] {
     return fixture.getAcpConnectionEvents([])
         .filter(event => event.method === "notify" && event.args[0] === SESSION_LIST_CHANGES_METHOD)
         .map(event => event.args[1]);
+}
+
+/** The Git administrative files of a repository at `<root>/repo` and its linked worktrees at `<root>/<name>`. */
+function createGitLayout(root: string, worktreeNames: string[]): {repo: string, worktrees: string[]} {
+    const repo = path.join(root, "repo");
+    fs.mkdirSync(path.join(repo, ".git", "worktrees"), {recursive: true});
+    fs.writeFileSync(path.join(repo, ".git", "HEAD"), "ref: refs/heads/main\n");
+    const worktrees = worktreeNames.map(name => {
+        const worktree = path.join(root, name);
+        const adminDir = path.join(repo, ".git", "worktrees", name);
+        fs.mkdirSync(adminDir);
+        fs.mkdirSync(worktree);
+        fs.writeFileSync(path.join(worktree, ".git"), `gitdir: ${adminDir}\n`);
+        fs.writeFileSync(path.join(adminDir, "commondir"), "../..\n");
+        fs.writeFileSync(path.join(adminDir, "gitdir"), `${path.join(worktree, ".git")}\n`);
+        return worktree;
+    });
+    return {repo, worktrees};
 }
 
 afterEach(() => {
@@ -255,6 +274,88 @@ describe("session/list", () => {
             expect(response.sessions[0]?.cwd).toBe(worktree);
         } finally {
             fs.rmSync(root, {recursive: true, force: true});
+        }
+    });
+
+    it("marks the rows of threads in a worktree that Codex made", async () => {
+        const root = fs.realpathSync.native(fs.mkdtempSync(path.join(os.tmpdir(), "codex-acp-session-index-")));
+        try {
+            const {repo, worktrees} = createGitLayout(root, ["codex", "user"]);
+            fs.writeFileSync(
+                path.join(repo, ".git", "worktrees", "codex", "codex-thread.json"),
+                `${JSON.stringify({version: 1, ownerThreadId: "codex-root"})}\n`,
+            );
+            const [codexWorktree, userWorktree] = worktrees as [string, string];
+            fs.mkdirSync(path.join(codexWorktree, "pkg"));
+            const threads = [
+                createThread({id: "codex-root", cwd: codexWorktree}),
+                // Another thread in the same worktree: the file names only its first owner.
+                createThread({id: "codex-subdirectory", cwd: path.join(codexWorktree, "pkg")}),
+                createThread({id: "user-worktree", cwd: userWorktree}),
+                createThread({id: "main-checkout", cwd: repo}),
+            ];
+            const {agent} = await createAgent("sessionIndex", threads);
+
+            const response = await agent.listSessions({cwd: repo, _meta: {jetbrains: {air: {list: {includeWorktrees: true}}}}});
+
+            const rows = response.sessions.map(session => ({
+                sessionId: session.sessionId,
+                cwd: path.relative(root, session.cwd).split(path.sep).join("/"),
+                agentWorktree: (session._meta as any)?.jetbrains?.air?.agentWorktree ?? null,
+            }));
+            await expect(`${JSON.stringify(rows, null, 2)}\n`).toMatchFileSnapshot("data/session-index-agent-worktree-rows.json");
+            expect(response.sessions[0]!._meta).toMatchObject({jetbrains: {air: {version: 1, agentWorktree: true}}});
+        } finally {
+            fs.rmSync(root, {recursive: true, force: true});
+        }
+    });
+
+    it("sends a client-neutral opt-in the agentWorktree row field under _meta.sessionIndex", async () => {
+        const root = fs.realpathSync.native(fs.mkdtempSync(path.join(os.tmpdir(), "codex-acp-session-index-")));
+        try {
+            const {repo, worktrees} = createGitLayout(root, ["codex", "user"]);
+            fs.writeFileSync(
+                path.join(repo, ".git", "worktrees", "codex", "codex-thread.json"),
+                `${JSON.stringify({version: 1, ownerThreadId: "codex-root"})}\n`,
+            );
+            const [codexWorktree, userWorktree] = worktrees as [string, string];
+            const threads = [
+                createThread({id: "codex-root", cwd: codexWorktree}),
+                createThread({id: "user-worktree", cwd: userWorktree}),
+            ];
+            const list = async (kind: ClientKind) => (await createAgent(kind, threads)).agent
+                .listSessions({cwd: repo, _meta: listMeta(kind, {includeWorktrees: true})});
+
+            const air = await list("sessionIndex");
+            const neutral = await list("neutral");
+
+            expect(neutral).toEqual(asNeutral(air));
+            expect(neutral.sessions.find(row => row.sessionId === "codex-root")?._meta)
+                .toMatchObject({sessionIndex: {agentWorktree: true}});
+        } finally {
+            fs.rmSync(root, {recursive: true, force: true});
+        }
+    });
+
+    it("reads the forkedFrom row field of either namespace for the fork hold-back", () => {
+        const row = (meta: Record<string, unknown>) => ({sessionId: "fork", cwd: "/repo", _meta: meta});
+        expect(sessionIndexRowForkedFrom(row({jetbrains: {air: {version: 1, forkedFrom: "source"}}}))).toBe("source");
+        expect(sessionIndexRowForkedFrom(row({sessionIndex: {forkedFrom: "source"}}))).toBe("source");
+        expect(sessionIndexRowForkedFrom(row({}))).toBeNull();
+    });
+
+    it("keeps the client-neutral opt-in an ACP v1 extension", async () => {
+        const v2 = await connectSession(2, {clientCapabilities: {_meta: {sessionIndex: {version: 1}}}});
+        try {
+            expect(v2.agent.sessionIndex.enabled).toBe(false);
+        } finally {
+            v2.connection.close();
+        }
+        const air = await connectSession(2, {clientCapabilities: {_meta: {jetbrains: {air: {version: 1, capabilities: ["sessionIndex"]}}}}});
+        try {
+            expect(air.agent.sessionIndex.enabled).toBe(true);
+        } finally {
+            air.connection.close();
         }
     });
 
@@ -913,6 +1014,31 @@ describe("_session/list/subscribe", () => {
             fs.rmSync(link);
         } finally {
             fs.rmSync(dir, {recursive: true, force: true});
+        }
+    });
+
+    it("marks a changed row of a thread in a worktree that Codex made", async () => {
+        const root = fs.realpathSync.native(fs.mkdtempSync(path.join(os.tmpdir(), "codex-acp-scope-")));
+        try {
+            const {repo, worktrees} = createGitLayout(root, ["codex"]);
+            fs.writeFileSync(path.join(repo, ".git", "worktrees", "codex", "codex-thread.json"), `${JSON.stringify({version: 1, ownerThreadId: threadId})}\n`);
+            vi.useFakeTimers();
+            const {fixture, agent, appServer} = await createAgent("sessionIndex");
+            const {subscriptionId} = await agent.sessionIndex.subscribeList({cwd: repo});
+            fixture.clearAcpConnectionDump();
+            vi.spyOn(appServer, "threadRead").mockResolvedValue({thread: createThread({cwd: worktrees[0]!, path: path.join(root, "rollout.jsonl")})});
+
+            fixture.sendServerNotification({method: "thread/name/updated", params: {threadId}} as never);
+            await vi.advanceTimersByTimeAsync(100);
+
+            expect(listChanges(fixture)).toEqual([{
+                subscriptionId,
+                sessions: [expect.objectContaining({cwd: worktrees[0], _meta: {jetbrains: {air: expect.objectContaining({agentWorktree: true})}}})],
+                removed: [],
+            }]);
+            agent.sessionIndex.dispose();
+        } finally {
+            fs.rmSync(root, {recursive: true, force: true});
         }
     });
 

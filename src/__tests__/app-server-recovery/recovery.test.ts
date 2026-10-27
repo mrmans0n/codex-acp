@@ -1,9 +1,13 @@
-import * as acp from "@agentclientprotocol/sdk";
+import * as acp from "@agentclientprotocol/sdk/unstable";
 import {describe, expect, it, vi} from "vitest";
 import {ConnectionError, ConnectionErrors, ResponseError} from "vscode-jsonrpc/node";
 import {createRecoveryFixture, defaultAnswer, initialize, MODEL, type RecoveryFixture, requestsOf} from "./recovery-fixture";
 import {AppServerRecovery} from "../../app-server-recovery/AppServerRecovery";
 import type {CodexAcpClient} from "../../CodexAcpClient";
+import {stubGatewayModelListing} from "../acp-test-utils";
+import {createAcpAgentRouter} from "../../AcpAgentRouter";
+import type {CodexAcpServer} from "../../CodexAcpServer";
+import {CODEX_HOOKS_TRUST_METHOD} from "../../CodexHookTrust";
 
 const resumed = (id: string) => ({
     thread: {id, turns: [], historyMode: "paginated", status: {type: "idle"}, preview: "", ephemeral: false, modelProvider: "openai",
@@ -45,6 +49,8 @@ function completeTurn(fixture: RecoveryFixture, sessionId: string, turnId = "tur
         params: {threadId: sessionId, turn: {id: turnId, items: [], status: "completed", error: null, startedAt: null, completedAt: null, durationMs: null}},
     });
 }
+
+stubGatewayModelListing(["gpt-test"]);
 
 describe("app-server recovery", () => {
     it("starts the app-server again on the next request after an idle crash, with the same handshake", async () => {
@@ -418,7 +424,8 @@ describe("app-server recovery", () => {
         if (tokenState === "current") {
             await expect(control).resolves.toEqual({});
             expect(requestsOf(fixture.current(), "thread/goal/set")).toHaveLength(1);
-            expect(requestsOf(fixture.current(), "turn/start")).toHaveLength(mode === "fallback" ? 1 : 0);
+            // Since v2.3.0 (#620) Codex continues a goal itself; the adapter starts no fallback turn.
+            expect(requestsOf(fixture.current(), "turn/start")).toEqual([]);
         } else {
             await expect(control).rejects.toMatchObject({code: -32044});
             expect(requestsOf(fixture.current(), "thread/goal/set")).toEqual([]);
@@ -501,24 +508,22 @@ describe("app-server recovery", () => {
         expect(requestsOf(fixture.current(), "turn/start")).toEqual([]);
     });
 
-    it("does not return retry-safe review errors after a prior goal dispatch", async () => {
+    it("does not return retry-safe review errors after a prior dispatch of the operation", async () => {
+        // Since v2.3.0 (#620) a goal control dispatches only thread/goal/set: the adapter starts no fallback
+        // turn after it. A prompt after a crash still dispatches twice: its lazy thread/resume, then turn/start.
         const fixture = createRecoveryFixture();
         await initializeHookReview(fixture);
         const token = await reviewHooks(fixture);
         const {sessionId} = await fixture.agent.newSession({cwd: "/work", mcpServers: [], _meta: reviewedMeta(token)});
-        const goal = {threadId: sessionId, objective: "ship it", status: "active", tokenBudget: null, tokensUsed: 0, timeUsedSeconds: 0, createdAt: 1, updatedAt: 2};
-        fixture.answers.set("thread/goal/get", () => ({goal}));
-        fixture.answers.set("thread/goal/set", (_params, server) => {
-            fixture.answers.set("hooks/list", () => ({data: [{cwd: "/work", hooks: [], warnings: ["changed after native dispatch"], errors: []}]}));
-            setImmediate(() => {
-                server.rpc.notify({method: "thread/goal/updated", params: {threadId: sessionId, turnId: null, goal}});
-                server.rpc.notify({method: "thread/status/changed", params: {threadId: sessionId, status: {type: "idle"}}});
-            });
-            return {goal};
+        await fixture.kill();
+        const replacementToken = await reviewHooks(fixture);
+        fixture.answers.set("thread/resume", params => {
+            fixture.answers.set("hooks/list", () => ({data: [{cwd: "/work", hooks: [], warnings: ["changed after resume"], errors: []}]}));
+            return defaultAnswer("thread/resume", params);
         });
-        await expect(fixture.agent.extMethod("_session/goal", {sessionId, action: "set", objective: goal.objective, _meta: reviewedMeta(token)}))
+        await expect(fixture.agent.prompt({sessionId, prompt: [{type: "text", text: "hi"}], _meta: reviewedMeta(replacementToken)}))
             .rejects.toMatchObject({code: -32603});
-        expect(requestsOf(fixture.current(), "thread/goal/set")).toHaveLength(1);
+        expect(requestsOf(fixture.current(), "thread/resume")).toHaveLength(1);
         expect(requestsOf(fixture.current(), "turn/start")).toEqual([]);
     });
 
@@ -1373,5 +1378,33 @@ describe("app-server recovery", () => {
 
         await expect(fixture.agent.setProvider({providerId: "openai", apiType: "openai", baseUrl: "https://gateway.example/v1"}))
             .resolves.toEqual({});
+    });
+});
+
+describe("codex hook review over the ACP router", () => {
+    it("passes the review token of _codex/hooks/trust to the agent", async () => {
+        const trustHooks = vi.fn(async () => ({trusted: true}));
+        const agent = {
+            initialize: vi.fn(async () => ({protocolVersion: acp.PROTOCOL_VERSION, agentCapabilities: {}, authMethods: []})),
+            trustHooks,
+            sessionIndex: {dispose: () => {}},
+        } as unknown as CodexAcpServer;
+        const clientToAgent = new TransformStream<Uint8Array, Uint8Array>();
+        const agentToClient = new TransformStream<Uint8Array, Uint8Array>();
+        createAcpAgentRouter(() => agent).connect(acp.ndJsonStream(agentToClient.writable, clientToAgent.readable));
+        const connection = acp.client({name: "test-client"})
+            .connect(acp.ndJsonStream(clientToAgent.writable, agentToClient.readable));
+        try {
+            await connection.agent.request(acp.methods.agent.initialize, {protocolVersion: acp.PROTOCOL_VERSION});
+            const hooks = [{key: "startup", currentHash: "hash"}];
+
+            await expect(connection.agent.request(CODEX_HOOKS_TRUST_METHOD, {cwd: "/work", hooks, reviewToken: "token"} as never))
+                .resolves.toEqual({trusted: true});
+            await connection.agent.request(CODEX_HOOKS_TRUST_METHOD, {cwd: "/work", hooks} as never);
+
+            expect(trustHooks.mock.calls).toEqual([["/work", hooks, "token"], ["/work", hooks, undefined]]);
+        } finally {
+            connection.close();
+        }
     });
 });

@@ -7,6 +7,7 @@ import {once} from "node:events";
 import {startCodexConnection, type CodexConnection} from "../../CodexJsonRpcConnection";
 import {CodexAppServerClient} from "../../CodexAppServerClient";
 import {CodexAcpClient} from "../../CodexAcpClient";
+import {withSessionInstructionAppend} from "../../SessionInstructions";
 
 // Real Codex, isolated home, local fixture provider: inspect the actual model
 // request rather than treating a successful thread/start as proof of injection.
@@ -45,7 +46,7 @@ it("native Codex retains appended roles across turns, compaction, fork and proce
     const open = async () => {
         native = startCodexConnection(resolve("node_modules/.bin/codex"), {...process.env, HOME:home, CODEX_HOME:home});
         const app = new CodexAppServerClient(native.connection), client = new CodexAcpClient(app);
-        await client.initialize({protocolVersion:1});
+        await client.initialize({});
         return {app,client};
     };
     const close = async () => {
@@ -56,7 +57,7 @@ it("native Codex retains appended roles across turns, compaction, fork and proce
     const metadata = {_meta:{systemPrompt:{append:"native-office-role"}}};
     try {
         let {app,client} = await open();
-        const session = await client.newSession({cwd,mcpServers:[],...metadata});
+        const session = await client.newSession(withSessionInstructionAppend({cwd,mcpServers:[],...metadata}));
         const turn = async (text:string, threadId = session.sessionId) => {
             const before = requests.length;
             const result = await app.runTurn({threadId,input:[{type:"text",text,text_elements:[]}]});
@@ -67,36 +68,35 @@ it("native Codex retains appended roles across turns, compaction, fork and proce
             expect(developer).toContain("native-user-rules");
             expect(developer.split("native-office-role")).toHaveLength(2);
             expect(JSON.stringify(sent.body.input.filter((x:any)=>x.role==="user"))).not.toContain("native-office-role");
-            expect(sent.body.instructions).toBeTruthy();
+            // Codex 0.164 sends its base instructions as a developer message of their own instead of
+            // `instructions`; either way they are kept next to the configured rules and the role.
+            const developerMessages = sent.body.input.filter((x:any)=>x.role==="developer");
+            expect(sent.body.instructions
+                ?? developerMessages.find((x:any)=>!JSON.stringify(x).includes("native-user-rules"))).toBeTruthy();
         };
         await turn("first native turn"); await turn("second native turn");
-        // A reconnecting client repeats the same append on the loaded thread: accepted, and the
-        // next request still carries the role once. A different append is still refused.
-        await client.loadSession({sessionId:session.sessionId,cwd,mcpServers:[],...metadata});
+        // A reconnecting client repeats the same append on the loaded thread: the known instructions
+        // are kept without a reload, and the next request still carries the role once.
+        await client.loadSession(withSessionInstructionAppend({sessionId:session.sessionId,cwd,mcpServers:[],...metadata}),
+            undefined, session.instructions);
         await turn("after repeated load");
-        await expect(client.loadSession({sessionId:session.sessionId,cwd,mcpServers:[],
-            _meta:{systemPrompt:{append:"another-role"}}})).rejects.toThrow(/loaded/);
         const beforeCompact = requests.length;
         const compacted = await app.runCompact({threadId:session.sessionId});
         expect(requests.length).toBeGreaterThan(beforeCompact);
-        expect(JSON.stringify(compacted)).toMatch(/completed|compacted/);
-        if (compacted.method !== "turn/completed") {
-            const completed = await app.awaitTurnCompleted(session.sessionId, compacted.params.turnId);
-            expect(completed.turn.status).toBe("completed");
-        }
+        expect(compacted.turn.status).toBe("completed");
         await turn("after native compaction");
-        const fork = await client.forkSession({sessionId:session.sessionId,cwd,mcpServers:[],...metadata});
+        const fork = await client.forkSession(withSessionInstructionAppend({sessionId:session.sessionId,cwd,mcpServers:[],...metadata}));
         await close();
         ({app,client} = await open());
-        await client.resumeSession({sessionId:fork.sessionId,cwd,mcpServers:[],...metadata});
+        await client.resumeSession(withSessionInstructionAppend({sessionId:fork.sessionId,cwd,mcpServers:[],...metadata}));
         await turn("forked native turn",fork.sessionId);
         await close();
         ({app,client} = await open());
-        await client.loadSession({sessionId:session.sessionId,cwd,mcpServers:[],...metadata});
+        await client.loadSession(withSessionInstructionAppend({sessionId:session.sessionId,cwd,mcpServers:[],...metadata}));
         await turn("after native restart");
         await close();
         ({app,client} = await open());
-        await client.loadSession({sessionId:session.sessionId,cwd,mcpServers:[],_meta:{systemPrompt:{append:""}}});
+        await client.loadSession(withSessionInstructionAppend({sessionId:session.sessionId,cwd,mcpServers:[],_meta:{systemPrompt:{append:""}}}));
         const resetBefore=requests.length;
         expect((await app.runTurn({threadId:session.sessionId,input:[{type:"text",text:"after clearing role",text_elements:[]}]})).turn.status).toBe("completed");
         const reset=requests.slice(resetBefore).find(x=>x.url?.endsWith("/responses"));
@@ -104,7 +104,7 @@ it("native Codex retains appended roles across turns, compaction, fork and proce
         // Codex may retain old instruction messages in history; its new override
         // must explicitly restore only the configured developer rules.
         expect(JSON.stringify(reset.body.input.filter((x:any)=>x.role==="user"))).not.toContain("native-office-role");
-        const plain = await client.newSession({cwd,mcpServers:[]});
+        const plain = await client.newSession(withSessionInstructionAppend({cwd,mcpServers:[]}));
         const before = requests.length;
         expect((await app.runTurn({threadId:plain.sessionId,input:[{type:"text",text:"ordinary session",text_elements:[]}]})).turn.status).toBe("completed");
         expect(JSON.stringify(requests.slice(before))).not.toContain("native-office-role");

@@ -4,7 +4,7 @@ import {afterEach, beforeEach, describe, expect, it, vi} from 'vitest';
 import path from "node:path";
 import fs from "node:fs";
 import os from "node:os";
-import type {McpServerStdio} from "@agentclientprotocol/sdk";
+import type {McpServerStdio} from "@agentclientprotocol/sdk/unstable";
 import {startCodexConnection} from "../../CodexJsonRpcConnection";
 import {createBaseTestFixture, removeDirectoryWithRetry, type TestFixture} from "../acp-test-utils";
 
@@ -150,7 +150,7 @@ url = "https://example.com/mcp"
             cwd: "",
             mcpServers: [conflictingMcp],
         })).rejects.toMatchObject({
-            data: expect.stringContaining("url is not supported for stdio"),
+            message: expect.stringMatching(/url is not supported for stdio[\s\S]*config\.toml/),
         });
     });
 });
