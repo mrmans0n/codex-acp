@@ -3,6 +3,9 @@ import {isDeepStrictEqual} from "node:util";
 const FULL_COMMIT = /^[0-9a-f]{40}$/i;
 const STABLE_TAG = /^v(0|[1-9]\d*)\.(0|[1-9]\d*)\.(0|[1-9]\d*)$/;
 const MANUAL_ACTIONS = new Set(["retain", "adapt", "drop"]);
+// The only resolution for an upstream workflow change: the candidate keeps the downstream workflow
+// tree and the upstream change is mirrored into alas by a separate reviewed automation PR.
+const WORKFLOW_ACTION = "retain-downstream";
 
 function assertTag(value, field) {
   if (!STABLE_TAG.test(String(value ?? ""))) throw new Error(`${field} must be a stable vX.Y.Z tag`);
@@ -90,11 +93,39 @@ function manualResolutionValid(resolution) {
     resolution.tests.every((path) => typeof path === "string" && path.trim() !== "");
 }
 
+// A non-ledger downstream commit can only be resolved by an explicit, reviewed adaptation.
+function downstreamResolutionValid(resolution) {
+  return resolution?.action === "adapt" && manualResolutionValid(resolution);
+}
+
+function workflowResolutionValid(resolution) {
+  return resolution?.action === WORKFLOW_ACTION &&
+    resolution.automatic === false &&
+    typeof resolution.rationale === "string" && resolution.rationale.trim() !== "" &&
+    Array.isArray(resolution.tests) && resolution.tests.length > 0 &&
+    resolution.tests.every((path) => typeof path === "string" && path.trim() !== "");
+}
+
+function downstreamIdentity(entry) {
+  return {
+    commit: entry.commit,
+    subject: entry.subject,
+    patchId: entry.patchId,
+    equivalentCommits: [...(entry.equivalentCommits ?? [])],
+  };
+}
+
+function sameDownstreamIdentity(left, right) {
+  return isDeepStrictEqual(downstreamIdentity(left), downstreamIdentity(right));
+}
+
 function reviewResolved(review) {
   return review.patches.every((patch) => patch.resolution?.automatic === true
     ? automaticResolutionValid(patch)
     : manualResolutionValid(patch.resolution)) &&
-    review.preservedCommits.every((entry) => manualResolutionValid(entry.resolution));
+    review.preservedCommits.every((entry) => manualResolutionValid(entry.resolution)) &&
+    (review.downstreamCommits ?? []).every((entry) => downstreamResolutionValid(entry.resolution)) &&
+    (review.upstreamWorkflowChanges ?? []).every((entry) => workflowResolutionValid(entry.resolution));
 }
 
 export function createSyncReview({
@@ -104,6 +135,8 @@ export function createSyncReview({
   classifications,
   canonicalHead = null,
   preservedCommits = [],
+  downstreamCommits = [],
+  workflowChanges = [],
   previousReview = null,
 }) {
   assertTag(fromTag, "fromTag");
@@ -114,6 +147,8 @@ export function createSyncReview({
     throw new Error("classifications must be a non-empty array");
   }
   if (!Array.isArray(preservedCommits)) throw new Error("preservedCommits must be an array");
+  if (!Array.isArray(downstreamCommits)) throw new Error("downstreamCommits must be an array");
+  if (!Array.isArray(workflowChanges)) throw new Error("workflowChanges must be an array");
   // Resolutions are keyed by the exact stable transition, then per patch classification and per
   // preserved commit identity. The canonical head is deliberately not part of the key: a maintainer
   // records resolutions in a commit on the canonical branch, and that commit cannot name its own SHA.
@@ -125,6 +160,12 @@ export function createSyncReview({
     : []);
   const previousPreserved = new Map(sameReview
     ? (previousReview.preservedCommits ?? []).map((entry) => [entry.commit, entry])
+    : []);
+  const previousDownstream = new Map(sameReview
+    ? (previousReview.downstreamCommits ?? []).map((entry) => [entry.commit, entry])
+    : []);
+  const previousWorkflows = new Map(sameReview
+    ? (previousReview.upstreamWorkflowChanges ?? []).map((entry) => [entry.path, entry])
     : []);
   const review = {
     schemaVersion: 2,
@@ -155,8 +196,32 @@ export function createSyncReview({
     }),
     resolved: false,
   };
-  review.resolved = reviewResolved(review);
-  return review;
+  // Both sections are emitted only when they have entries, so reviews of transitions without
+  // non-ledger adaptations or upstream workflow changes keep their existing shape.
+  if (downstreamCommits.length > 0) {
+    // The caller recomputes each identity from the replayed history; a resolution carries over
+    // only when the reviewed identity matches it exactly.
+    review.downstreamCommits = downstreamCommits.map((entry) => {
+      const identity = downstreamIdentity(entry);
+      const previous = previousDownstream.get(entry.commit);
+      return {
+        ...identity,
+        resolution: previous && sameDownstreamIdentity(previous, identity)
+          ? previous.resolution
+          : unresolvedResolution(),
+      };
+    });
+  }
+  if (workflowChanges.length > 0) {
+    review.upstreamWorkflowChanges = workflowChanges.map((path) => ({
+      path,
+      resolution: previousWorkflows.get(path)?.resolution ?? unresolvedResolution(),
+    }));
+  }
+  const {resolved, ...rest} = review;
+  const ordered = {...rest, resolved};
+  ordered.resolved = reviewResolved(ordered);
+  return ordered;
 }
 
 export function verifySyncReviewArtifact({
@@ -167,6 +232,7 @@ export function verifySyncReviewArtifact({
   classifications,
   canonicalHead = null,
   preservedCommits = [],
+  workflowChanges = [],
 }) {
   assertTag(fromTag, "fromTag");
   assertTag(toTag, "toTag");
@@ -222,12 +288,69 @@ export function verifySyncReviewArtifact({
       throw new Error(`unresolved preserved commit ${entry.commit}: choose retain, adapt, or drop with rationale and tests`);
     }
   }
+  verifyDownstreamCommitEntries(review);
+  verifyWorkflowChangeEntries(review, workflowChanges);
   const resolved = reviewResolved(review);
   if (Object.hasOwn(review, "resolved") && review.resolved !== resolved) {
     throw new Error("sync review resolved flag does not match its resolutions");
   }
   if (!resolved) throw new Error("sync review contains unresolved manual-review items");
   return review;
+}
+
+// Structural check of the non-ledger adaptation entries. Their identities are recomputed from the
+// replayed history by buildSyncCandidate, which resets any resolution whose identity differs, and
+// publication verification reconstructs the candidate and requires the identical review.
+function verifyDownstreamCommitEntries(review) {
+  if (!Object.hasOwn(review, "downstreamCommits")) return;
+  const entries = review.downstreamCommits;
+  if (!Array.isArray(entries) || entries.length === 0) {
+    throw new Error("sync review downstreamCommits must be a non-empty array when present");
+  }
+  const seen = new Set();
+  for (const entry of entries) {
+    if (!FULL_COMMIT.test(String(entry?.commit ?? "")) || !FULL_COMMIT.test(String(entry?.patchId ?? "")) ||
+        typeof entry.subject !== "string" || !Array.isArray(entry.equivalentCommits) ||
+        entry.equivalentCommits.some((commit) => !FULL_COMMIT.test(String(commit)))) {
+      throw new Error(`sync review downstream commit entry ${entry?.commit ?? "unnamed"} has an invalid identity`);
+    }
+    for (const commit of [entry.commit, ...entry.equivalentCommits]) {
+      if (seen.has(commit)) throw new Error(`sync review downstream commit ${commit} is listed more than once`);
+      seen.add(commit);
+    }
+    if (!downstreamResolutionValid(entry.resolution)) {
+      throw new Error(`unresolved downstream commit ${entry.commit}: an explicit adapt resolution with commit, rationale, and tests is required`);
+    }
+  }
+}
+
+/** True when every path of the stable workflow delta has its own explicit reviewed resolution. */
+export function workflowChangesResolved(review, workflowChanges) {
+  const entries = review?.upstreamWorkflowChanges;
+  return Array.isArray(workflowChanges) && workflowChanges.length > 0 && Array.isArray(entries) &&
+    isDeepStrictEqual(entries.map((entry) => entry?.path), workflowChanges) &&
+    entries.every((entry) => workflowResolutionValid(entry.resolution));
+}
+
+function verifyWorkflowChangeEntries(review, workflowChanges) {
+  if (!Array.isArray(workflowChanges)) throw new Error("workflowChanges must be an array");
+  if (workflowChanges.length === 0) {
+    if (Object.hasOwn(review, "upstreamWorkflowChanges")) {
+      throw new Error("sync review lists upstream workflow changes for a transition without workflow changes");
+    }
+    return;
+  }
+  const actual = Array.isArray(review.upstreamWorkflowChanges)
+    ? review.upstreamWorkflowChanges.map((entry) => entry?.path)
+    : null;
+  if (!isDeepStrictEqual(actual, workflowChanges)) {
+    throw new Error("sync review upstream workflow changes do not exactly match the stable workflow delta");
+  }
+  for (const entry of review.upstreamWorkflowChanges) {
+    if (!workflowResolutionValid(entry.resolution)) {
+      throw new Error(`unresolved upstream workflow change ${entry.path}: choose ${WORKFLOW_ACTION} with rationale and tests`);
+    }
+  }
 }
 
 function patchTransition(review, patch) {
@@ -249,6 +372,19 @@ function preservedTransition(review, entry) {
     constituentCommits: [...(entry.constituentCommits ?? [])],
     action: entry.resolution.action,
     ...(entry.resolution.action === "adapt" ? {replacementCommit: entry.resolution.commit} : {}),
+  };
+}
+
+function downstreamTransition(review, entry) {
+  return {
+    fromTag: review.fromTag,
+    toTag: review.toTag,
+    commit: entry.commit,
+    subject: entry.subject,
+    patchId: entry.patchId,
+    equivalentCommits: [...entry.equivalentCommits],
+    action: entry.resolution.action,
+    replacementCommit: entry.resolution.commit,
   };
 }
 
@@ -290,19 +426,30 @@ export function advancePatchLedger({ledger, review}) {
     ...(ledger.preservedTransitions ?? []).filter((entry) => entry.toTag !== review.toTag),
     ...review.preservedCommits.map((entry) => preservedTransition(review, entry)),
   ];
+  const downstreamCommits = review.downstreamCommits ?? [];
   const retiredCommits = [...new Set([
     ...(ledger.retiredCommits ?? []),
     ...review.preservedCommits
       .filter((entry) => ["drop", "adapt"].includes(entry.resolution.action))
       .flatMap((entry) => [entry.commit, ...(entry.constituentCommits ?? [])]),
+    // An adapted non-ledger commit and every equivalent copy of it are replaced by the bound
+    // adaptation, which later syncs replay instead.
+    ...downstreamCommits.flatMap((entry) => [entry.commit, ...entry.equivalentCommits]),
   ])];
-  return {
+  const advanced = {
     ...structuredClone(ledger),
     baseTag: review.toTag,
     patches,
     retiredCommits,
     preservedTransitions,
   };
+  if (downstreamCommits.length > 0 || Object.hasOwn(ledger, "downstreamTransitions")) {
+    advanced.downstreamTransitions = [
+      ...(ledger.downstreamTransitions ?? []).filter((entry) => entry.toTag !== review.toTag),
+      ...downstreamCommits.map((entry) => downstreamTransition(review, entry)),
+    ];
+  }
+  return advanced;
 }
 
 export function verifyPatchLedgerTransition({
