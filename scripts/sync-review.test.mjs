@@ -5,6 +5,7 @@ import {
   createSyncReview,
   verifySyncReviewArtifact,
   verifyPatchLedgerTransition,
+  workflowChangesResolved,
 } from "./sync-review.mjs";
 import {validatePatchLedger} from "./downstream-patches.mjs";
 
@@ -341,4 +342,203 @@ test("rejects stale metadata, recomputed classification mismatch, and incomplete
     toCommit,
     classifications,
   }), /fromTag.*stable/i);
+});
+
+const workflowResolution = {
+  action: "retain-downstream",
+  automatic: false,
+  rationale: "Upstream CI change mirrored into alas by a separate automation PR after the sync.",
+  tests: ["scripts/sync-upstream.test.mjs"],
+};
+const workflowChanges = [".github/workflows/ci.yml", ".github/workflows/e2e.yml"];
+
+function workflowReview(previousReview = null) {
+  return createSyncReview({
+    fromTag: "v2.1.0",
+    toTag: "v2.2.0",
+    toCommit,
+    classifications: [classifications[0]],
+    workflowChanges,
+    previousReview,
+  });
+}
+
+test("lists every upstream workflow change as unresolved until each has an explicit reviewed resolution", () => {
+  const review = workflowReview();
+  assert.deepEqual(review.upstreamWorkflowChanges.map(({path}) => path), workflowChanges);
+  assert.equal(review.resolved, false);
+  assert.equal(workflowChangesResolved(review, workflowChanges), false);
+  const verify = (candidate, changes = workflowChanges) => verifySyncReviewArtifact({
+    review: candidate,
+    fromTag: "v2.1.0",
+    toTag: "v2.2.0",
+    toCommit,
+    classifications: [classifications[0]],
+    workflowChanges: changes,
+  });
+  assert.throws(() => verify(review), /unresolved upstream workflow change/i);
+
+  const resolved = workflowReview({
+    ...review,
+    upstreamWorkflowChanges: review.upstreamWorkflowChanges.map((entry) => ({...entry, resolution: workflowResolution})),
+  });
+  assert.equal(resolved.resolved, true);
+  assert.equal(workflowChangesResolved(resolved, workflowChanges), true);
+  assert.deepEqual(verify(resolved), resolved);
+
+  // An unlisted change, an invented one, a reordered list, or a list for a transition without workflow
+  // changes never verifies.
+  const [first, second] = resolved.upstreamWorkflowChanges;
+  for (const [tampered, changes] of [
+    [{...resolved, upstreamWorkflowChanges: [first]}, workflowChanges],
+    [{...resolved, upstreamWorkflowChanges: [first, second, {...first, path: ".github/workflows/invented.yml"}]}, workflowChanges],
+    [{...resolved, upstreamWorkflowChanges: [second, first]}, workflowChanges],
+    [resolved, []],
+  ]) {
+    assert.throws(() => verify(tampered, changes), /workflow/i);
+  }
+
+  // Only an explicit manual retain-downstream resolution with rationale and tests is accepted.
+  for (const resolution of [
+    {...workflowResolution, action: "retain"},
+    {...workflowResolution, action: "adapt"},
+    {...workflowResolution, automatic: true},
+    {...workflowResolution, rationale: " "},
+    {...workflowResolution, tests: []},
+  ]) {
+    const tampered = {
+      ...resolved,
+      upstreamWorkflowChanges: [first, {...second, resolution}],
+      resolved: false,
+    };
+    assert.equal(workflowChangesResolved(tampered, workflowChanges), false);
+    assert.throws(() => verify(tampered), /unresolved upstream workflow change/i);
+  }
+
+  // A previous resolution for a path outside this transition's delta is not carried over.
+  const unrelated = workflowReview({
+    ...review,
+    upstreamWorkflowChanges: [{path: ".github/workflows/other.yml", resolution: workflowResolution}],
+  });
+  assert.equal(unrelated.resolved, false);
+});
+
+test("omits workflow and downstream sections when the transition has none", () => {
+  const review = createSyncReview({fromTag: "v2.1.0", toTag: "v2.2.0", toCommit, classifications: [classifications[0]]});
+  assert.equal(Object.hasOwn(review, "upstreamWorkflowChanges"), false);
+  assert.equal(Object.hasOwn(review, "downstreamCommits"), false);
+  assert.deepEqual(Object.keys(review), [
+    "schemaVersion", "fromTag", "toTag", "toCommit", "canonicalHead", "patches", "preservedCommits", "resolved",
+  ]);
+});
+
+const downstreamIdentity = {
+  commit: "8".repeat(40),
+  subject: "build: prepare downstream package metadata",
+  patchId: "9".repeat(40),
+  equivalentCommits: ["d".repeat(40)],
+};
+const downstreamResolution = {
+  action: "adapt",
+  commit: "e".repeat(40),
+  automatic: false,
+  rationale: "Reviewed adaptation of the package metadata to the new stable manifest.",
+  tests: ["scripts/prepare-alas-package.test.mjs"],
+};
+
+function downstreamReview(previousEntries) {
+  return createSyncReview({
+    fromTag: "v2.1.0",
+    toTag: "v2.2.0",
+    toCommit,
+    classifications: [classifications[0]],
+    downstreamCommits: [downstreamIdentity],
+    previousReview: {
+      schemaVersion: 2,
+      fromTag: "v2.1.0",
+      toTag: "v2.2.0",
+      toCommit,
+      downstreamCommits: previousEntries,
+    },
+  });
+}
+
+test("carries a non-ledger adaptation only for the exact recomputed downstream identity", () => {
+  const review = downstreamReview([{...downstreamIdentity, resolution: downstreamResolution}]);
+  assert.equal(review.resolved, true);
+  assert.deepEqual(review.downstreamCommits, [{...downstreamIdentity, resolution: downstreamResolution}]);
+  const verify = (candidate) => verifySyncReviewArtifact({
+    review: candidate,
+    fromTag: "v2.1.0",
+    toTag: "v2.2.0",
+    toCommit,
+    classifications: [classifications[0]],
+  });
+  assert.deepEqual(verify(review), review);
+
+  for (const previous of [
+    {...downstreamIdentity, equivalentCommits: []},
+    {...downstreamIdentity, subject: "another commit"},
+    {...downstreamIdentity, patchId: "f".repeat(40)},
+  ]) {
+    const reset = downstreamReview([{...previous, resolution: downstreamResolution}]);
+    assert.equal(reset.resolved, false);
+    assert.equal(reset.downstreamCommits[0].resolution.action, null);
+    assert.throws(() => verify(reset), /unresolved downstream commit/i);
+  }
+
+  for (const resolution of [
+    {...downstreamResolution, action: "retain"},
+    {...downstreamResolution, action: "drop"},
+    {...downstreamResolution, commit: "short"},
+    {...downstreamResolution, automatic: true},
+    {...downstreamResolution, rationale: ""},
+    {...downstreamResolution, tests: []},
+  ]) {
+    const tampered = {...review, downstreamCommits: [{...review.downstreamCommits[0], resolution}], resolved: false};
+    assert.throws(() => verify(tampered), /unresolved downstream commit/i);
+  }
+  for (const tampered of [
+    {...review, downstreamCommits: []},
+    {...review, downstreamCommits: [review.downstreamCommits[0], review.downstreamCommits[0]]},
+    {...review, downstreamCommits: [{...review.downstreamCommits[0], patchId: null}]},
+  ]) {
+    assert.throws(() => verify(tampered), /downstream/i);
+  }
+});
+
+test("retires an adapted non-ledger commit with its equivalents and records the transition", () => {
+  const previousLedger = {
+    schemaVersion: 2,
+    baseTag: "v2.1.0",
+    patches: [{
+      name: "unaffected-patch",
+      commit: "1".repeat(40),
+      upstreamPr: null,
+      files: ["unaffected.ts"],
+      tests: ["unaffected.test.ts"],
+    }],
+    retiredCommits: [],
+    preservedTransitions: [],
+  };
+  const review = downstreamReview([{...downstreamIdentity, resolution: downstreamResolution}]);
+  const advanced = advancePatchLedger({ledger: previousLedger, review});
+  assert.deepEqual(advanced.retiredCommits, [downstreamIdentity.commit, ...downstreamIdentity.equivalentCommits]);
+  assert.deepEqual(advanced.downstreamTransitions, [{
+    fromTag: "v2.1.0",
+    toTag: "v2.2.0",
+    ...downstreamIdentity,
+    action: "adapt",
+    replacementCommit: downstreamResolution.commit,
+  }]);
+  assert.doesNotThrow(() => verifyPatchLedgerTransition({ledger: advanced, previousLedger, review}));
+  assert.throws(() => verifyPatchLedgerTransition({
+    ledger: {...advanced, retiredCommits: [downstreamIdentity.commit]},
+    previousLedger,
+    review,
+  }), /exactly match/i);
+
+  // Without non-ledger adaptations the ledger keeps its existing shape.
+  const plain = createSyncReview({fromTag: "v2.1.0", toTag: "v2.2.0", toCommit, classifications: [classifications[0]]});
+  assert.equal(Object.hasOwn(advancePatchLedger({ledger: previousLedger, review: plain}), "downstreamTransitions"), false);
 });
