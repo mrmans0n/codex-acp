@@ -122,12 +122,12 @@ export async function legacySetSessionModel(
 export type SessionSteerRequest = {
     sessionId: SessionId;
     prompt: ContentBlock[];
-    _meta?: {
+    _meta?: (Record<string, unknown> & {
         steering?: {
             /** Leave idle input unconsumed so the host can own a normal prompt lifecycle. */
             idleBehavior?: "promptRequired";
         };
-    };
+    }) | null;
 }
 
 export type SessionSteeringResponse =
