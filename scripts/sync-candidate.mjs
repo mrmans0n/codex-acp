@@ -94,25 +94,34 @@ function isRedundantPick(cwd, commit) {
   return redundant;
 }
 
-// Replay order of the downstream commits. A reviewed adaptation of a non-ledger commit takes the
-// place of its retired original (and of the original's retired copies), so fork commits that
-// depend on it still replay after it.
-function downstreamReplayOrder({downstreamCommits, patchIds, ledgerByPatchId, retiredCommits, transitions}) {
-  const replacementOf = new Map();
+// Replay order of the downstream commits. A reviewed adaptation takes the place of its retired
+// original (and of the original's retired copies), so fork commits that depend on it still replay
+// after it. This holds for a non-ledger adaptation recorded in `downstreamTransitions` and for a
+// ledger patch whose `appliedCommit` replaced its retired original.
+function downstreamReplayOrder({downstreamCommits, patchIds, ledgerByPatchId, retiredCommits, transitions, ledgerPatches}) {
+  const transitionReplacementOf = new Map();
   for (const transition of transitions) {
     if (transition?.action !== "adapt" || !transition.replacementCommit) continue;
     for (const commit of [transition.commit, ...(transition.equivalentCommits ?? [])]) {
-      replacementOf.set(commit, transition.replacementCommit);
+      transitionReplacementOf.set(commit, transition.replacementCommit);
     }
+  }
+  // A ledger adaptation can keep its original's patch id (same change, same context), so ledger
+  // replacements do not depend on the retired commit's patch id.
+  const ledgerReplacementOf = new Map();
+  for (const patch of ledgerPatches) {
+    if (!patch.appliedCommit) continue;
+    for (const commit of patch.retiredCommits ?? []) ledgerReplacementOf.set(commit, patch.appliedCommit);
   }
   const order = [];
   const placed = new Set();
   for (const [index, commit] of downstreamCommits.entries()) {
     const id = patchIds[index];
-    const replacement = replacementOf.get(commit);
-    if (replacement && retiredCommits.has(commit) && !(id && ledgerByPatchId.has(id))) {
+    const replacement = ledgerReplacementOf.get(commit) ??
+      (id && ledgerByPatchId.has(id) ? undefined : transitionReplacementOf.get(commit));
+    if (replacement && retiredCommits.has(commit)) {
       if (!downstreamCommits.includes(replacement)) {
-        throw new Error(`Downstream transition replacement ${replacement} for ${commit} is not in protected alas`);
+        throw new Error(`Replacement ${replacement} for retired downstream commit ${commit} is not in protected alas`);
       }
       if (!placed.has(replacement)) order.push(replacement);
       placed.add(replacement);
@@ -661,6 +670,7 @@ export function buildSyncCandidate({
     ledgerByPatchId,
     retiredCommits,
     transitions: ledger.downstreamTransitions ?? [],
+    ledgerPatches: ledger.patches,
   });
   for (const commit of replayOrder) {
     const id = patchIdByCommit.get(commit);
