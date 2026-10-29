@@ -1,6 +1,6 @@
 {
   "schemaVersion": 2,
-  "baseTag": "v2.4.0",
+  "baseTag": "v2.5.0",
   "patches": [
     {
       "name": "goal-opt-in",
