@@ -1290,6 +1290,24 @@ export class CodexAppServerClient {
         return [...this.threadLoads.keys()];
     }
 
+    /** Validates a reviewed process/configuration and returns the final synchronous dispatch fence. */
+    hookExecutionGate: ((cwd?: string) => Promise<() => void>) | undefined;
+
+    private dispatchRequest<R>(request: CodexRequest): Promise<R> {
+        if (this.hookExecutionGate !== undefined && ["thread/start", "thread/resume", "thread/fork", "turn/start", "review/start"].includes(request.method)) {
+            return this.dispatchReviewedRequest(request, this.hookExecutionGate);
+        }
+        return request.params ? this.connection.sendRequest<R>(request.method, request.params)
+            : this.connection.sendRequest<R>(request.method);
+    }
+
+    private async dispatchReviewedRequest<R>(request: CodexRequest, gate: (cwd?: string) => Promise<() => void>): Promise<R> {
+        const params = request.params as {cwd?: string | null};
+        const fence = await gate(params.cwd ?? undefined);
+        fence();
+        return await this.connection.sendRequest<R>(request.method, request.params);
+    }
+
     private async sendRequest<R>(request: CodexRequest): Promise<R> {
         for (const callback of this.codexEventHandlers) {
             callback({ eventType: "request", ...request});
@@ -1298,12 +1316,7 @@ export class CodexAppServerClient {
         let result: any;
         try {
             if (loadedThreadId === null) {
-                if (request.params) {
-                    result = await this.connection.sendRequest<R>(request.method, request.params)
-                }
-                else {
-                    result = await this.connection.sendRequest<R>(request.method);
-                }
+                result = await this.dispatchRequest<R>(request);
             } else {
                 result = await this.threadLoadGate(loadedThreadId, () => this.sendThreadLoad<R>(loadedThreadId, request));
             }
@@ -1319,7 +1332,7 @@ export class CodexAppServerClient {
     private async sendThreadLoad<R>(threadId: string, request: CodexRequest): Promise<R> {
         this.threadLoads.set(threadId, (this.threadLoads.get(threadId) ?? 0) + 1);
         try {
-            return await this.connection.sendRequest<R>(request.method, (request as {params?: unknown}).params);
+            return await this.dispatchRequest<R>(request);
         } finally {
             const count = (this.threadLoads.get(threadId) ?? 1) - 1;
             if (count > 0) this.threadLoads.set(threadId, count);
