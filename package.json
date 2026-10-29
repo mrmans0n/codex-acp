@@ -3,7 +3,7 @@
   "publishConfig": {
     "access": "public"
   },
-  "version": "2.3.0",
+  "version": "2.4.0",
   "description": "",
   "main": "dist/index.js",
   "bin": {
@@ -71,7 +71,7 @@
   },
   "dependencies": {
     "@agentclientprotocol/sdk": "~2.0.2",
-    "@openai/codex": "^0.164.0",
+    "@openai/codex": "^0.165.0",
     "cross-spawn": "^7.0.6",
     "diff": "^9.0.0",
     "open": "^11.0.1",

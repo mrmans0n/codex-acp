@@ -26,6 +26,14 @@ import {
     initialize as initializeRecoveryFixture,
     requestsOf as requestsOfRecoveryServer,
 } from "../app-server-recovery/recovery-fixture";
+import {
+    connectSession,
+    cwd as harnessCwd,
+    itemStarted as harnessItemStarted,
+    sessionId as harnessSessionId,
+    turnCompleted as harnessTurnCompleted,
+    turnStarted as harnessTurnStarted,
+} from "./v2-prompt-harness";
 
 describe('ACP server test', { timeout: 40_000 }, () => {
 
@@ -3645,6 +3653,50 @@ describe('ACP server test', { timeout: 40_000 }, () => {
 
         expect(permissionSignal!.aborted).toBe(true);
         await expect(approval).resolves.toEqual({decision: "cancel"});
+    });
+
+    it.each([1, 2] as const)('hands a standard child approval of goal work set before the first prompt to the child interactions on ACP v%s', async (version) => {
+        const worker = "worker";
+        const childSessionId = `${harnessSessionId}:subagent:${worker}`;
+        const h = await connectSession(version, {
+            v1ClientCapabilities: {subagents: {}} as acp.ClientCapabilities,
+            // The client never answers: only the child interactions withdraw the request when the child turn ends.
+            onRequestPermission: () => new Promise(() => {}),
+        });
+        try {
+            const goal: ThreadGoal = {
+                threadId: harnessSessionId, objective: "ship it", status: "paused", tokenBudget: null,
+                tokensUsed: 0, timeUsedSeconds: 0, createdAt: 1, updatedAt: 2,
+            };
+            h.setCodexResponse("thread/goal/set", async () => {
+                setImmediate(() => h.emit({method: "thread/goal/updated", params: {threadId: harnessSessionId, turnId: null, goal}}));
+                return {goal};
+            });
+            // Goal control replaces the baseline turn tracker of a session that has not run a prompt.
+            await h.request(GOAL_CONTROL_METHOD, {sessionId: harnessSessionId, action: "pause"});
+            h.emit(harnessItemStarted({
+                type: "subAgentActivity", model: null, reasoningEffort: null, id: `activity-${worker}`,
+                agentThreadId: worker, agentPath: `/root/${worker}`, kind: "started",
+            }));
+            const childTurn = harnessTurnStarted("child-turn");
+            h.emit({...childTurn, params: {...childTurn.params, threadId: worker}} as ServerNotification);
+            await h.waitForNotifications();
+
+            const pending = h.triggerApproval("item/commandExecution/requestApproval", {
+                threadId: worker, turnId: "child-turn", itemId: "child-command", command: "echo hello", cwd: harnessCwd,
+                commandActions: [], reason: null, availableDecisions: ["accept", "decline"],
+            });
+            await vi.waitFor(() => expect(h.transcript.flatMap(entry =>
+                "permissionRequest" in entry ? [entry.permissionRequest.sessionId] : [])).toEqual([childSessionId]));
+            const childCompleted = harnessTurnCompleted("child-turn");
+            h.emit({...childCompleted, params: {...childCompleted.params, threadId: worker}} as ServerNotification);
+
+            await expect(Promise.race([pending, new Promise(resolve => setTimeout(() => resolve("still pending"), 2_000))]))
+                .resolves.toEqual({decision: "cancel"});
+        } finally {
+            await h.waitForNotifications();
+            h.connection.close();
+        }
     });
 
     it('ignores an older goal refresh that completes after a newer refresh', async () => {

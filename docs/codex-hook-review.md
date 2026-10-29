@@ -51,7 +51,9 @@ Every opted-in `session/new`, `session/load`, `session/resume`, `session/fork`,
 and `session/prompt` supplies the metadata below. Active `_session/goal` actions
 `set` and `resume` also require it because Codex may start a native model turn.
 A steering request (`_session/steering`) that starts a new turn supplies the
-same metadata. Read-only goal requests and pause/clear on a live thread do not
+same metadata, next to any `_meta.steering`; with
+`_meta.steering.idleBehavior: "promptRequired"` an idle steer starts no turn and
+answers `promptRequired`. Read-only goal requests and pause/clear on a live thread do not
 require a review token:
 
 ```json
