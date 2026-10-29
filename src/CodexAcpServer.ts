@@ -281,6 +281,11 @@ export interface SessionState extends SessionIndexTitleState {
     clientCapabilities: ClientCapabilities;
     currentGoal?: ThreadGoalSnapshot | null;
     goalRevision: number;
+    /**
+     * The app-server client whose notifications for this thread reach an ACP event handler, and when that
+     * subscription settles. A restarted app-server has a new client without the subscription.
+     */
+    eventSubscription?: {client: CodexAcpClient, ready: Promise<void>};
     sessionTitle: string | null;
     sessionTitleSource: "unset" | "fallback" | "explicit" | "unknown";
     sessionFailure?: SessionFailure;
@@ -992,6 +997,7 @@ export class CodexAcpServer {
                 }
                 const sessionReady = this.ensureSessionReady(sessionState);
                 if (sessionReady) await sessionReady;
+                await this.ensureSessionEventSubscription(sessionState);
                 const sessionGeneration = this.getSessionGeneration(sessionState.sessionId);
                 if (methodRequest.params.action === "set") {
                     const objective = methodRequest.params.objective;
@@ -3025,6 +3031,100 @@ export class CodexAcpServer {
         return {outcome: "startedNewTurn"};
     }
 
+    /**
+     * Subscribes a session that has not run a prompt yet to its app-server notifications.
+     *
+     * A prompt subscribes the thread and its handler keeps forwarding session-scoped
+     * notifications after the prompt ends. Before the first prompt nothing is subscribed, so
+     * goal control would drop the goal update and the goal turn app-server starts for it.
+     * The next prompt replaces this handler.
+     *
+     * Upstream's baseline turn tracker covers a session from its open until the first prompt, but it
+     * denies every approval and is not made again when a crashed app-server is restarted. This
+     * subscription forwards approvals and elicitations to the client and is made again on the
+     * installed client; it keeps the tracker's turn tracking.
+     *
+     * The subscription belongs to the client of one app-server. After a crash restart or a
+     * provider restart, the session is resumed in a new app-server whose client has no
+     * subscription, so it is made again on the installed client. Like a prompt, its
+     * permission requests and elicitations end when that app-server is gone.
+     */
+    private ensureSessionEventSubscription(sessionState: SessionState): Promise<void> {
+        const client = this.codexAcpClient;
+        if (sessionState.eventSubscription?.client !== client) {
+            const generation = this.recovery?.generation ?? 0;
+            const ready = this.subscribeSessionEvents(sessionState, client, generation);
+            const subscription = {client, ready};
+            sessionState.eventSubscription = subscription;
+            // A failed subscription is made again by the next goal control request.
+            ready.catch(() => {
+                if (sessionState.eventSubscription === subscription) {
+                    delete sessionState.eventSubscription;
+                }
+            });
+        }
+        return sessionState.eventSubscription.ready;
+    }
+
+    private async subscribeSessionEvents(
+        sessionState: SessionState,
+        client: CodexAcpClient,
+        generation: number,
+    ): Promise<void> {
+        const eventHandler = new CodexEventHandler(
+            this.connection,
+            sessionState,
+            clientSupportsTypedSessionFailures(this.clientCapabilities),
+            this.sessionFailureEpoch,
+            sessionState.subagents,
+            (accountUpdated) => this.handleAccountUpdated(accountUpdated),
+            false,
+            clientSupportsCompaction(this.clientCapabilities),
+            clientSupportsNotices(this.clientCapabilities),
+        );
+        const permissionContext = this.permissionLifecycleContext(sessionState).beginPrompt();
+        const toolCallRenderer = new AcpToolCallRenderer(this.capabilities);
+        const appServerLost = new AbortController();
+        const interactionConnection = this.recovery === null
+            ? this.connection
+            : lossAwareConnection(this.connection, appServerLost.signal);
+        this.recovery?.onGenerationLost(generation, () => appServerLost.abort());
+        const signal = appServerLost.signal;
+        const approvalHandler = new CodexApprovalHandler(interactionConnection, permissionContext, signal, toolCallRenderer);
+        const elicitationHandler = new CodexElicitationHandler(
+            interactionConnection,
+            permissionContext,
+            this.clientCapabilities,
+            signal,
+            toolCallRenderer,
+        );
+        const observeInteraction = async (event: ServerNotification): Promise<void> => {
+            const threadId = (event.params as {threadId?: unknown}).threadId;
+            if (sessionState.subagents instanceof StandardSubagentEventRouter
+                && typeof threadId === "string" && threadId !== sessionState.sessionId) return;
+            permissionContext.handleNotification(event);
+            await elicitationHandler.handleNotification(event);
+        };
+        await client.subscribeToSessionEvents(sessionState.sessionId,
+            async (event) => {
+                // This subscription replaces the baseline turn tracker (`startCodexTurnTracker`) of a
+                // session no prompt has subscribed yet, so it keeps tracking Codex-started turns too.
+                await this.trackCodexForegroundWork(sessionState, event);
+                await this.trackSteerLanding(sessionState, event);
+                this.handleSkillsChanged(sessionState, event);
+                await observeInteraction(event);
+                await eventHandler.handleSessionScopedNotification(event);
+                await this.trackCodexTurnCompletion(sessionState, event, eventHandler);
+            },
+            this.routeChildApprovals(approvalHandler),
+            this.routeChildElicitations(elicitationHandler),
+            this.supportsNativeSubagents(),
+            observeInteraction,
+            childThreadId => eventHandler.waitForNativeSubagentSession(childThreadId),
+            (childId, itemId, request, turnId) => sessionState.subagents.withUserAction?.(childId, itemId, request, turnId) ?? request(),
+            event => this.observeSubagentWorkEnd(sessionState.sessionId, event));
+    }
+
     private async startNewTurnFromExternalPrompt(
         params: acp.PromptRequest,
         source: string,
@@ -4900,6 +5000,7 @@ export class CodexAcpServer {
                 childThreadId => promptEventHandler.waitForNativeSubagentSession(childThreadId),
                 (childId, itemId, request, turnId) => sessionState.subagents.withUserAction?.(childId, itemId, request, turnId) ?? request(),
                 event => this.observeSubagentWorkEnd(params.sessionId, event));
+            sessionState.eventSubscription = {client: promptClient, ready: Promise.resolve()};
 
             if (activePrompt.signal.aborted) {
                 return cancelledPromptResponse();
