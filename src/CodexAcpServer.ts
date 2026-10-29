@@ -973,6 +973,15 @@ export class CodexAcpServer {
     }
 
     async extMethod(method: string, params: Record<string, unknown>): Promise<Record<string, unknown>> {
+        if ((method === GOAL_CONTROL_METHOD || method === LEGACY_GOAL_CONTROL_METHOD)
+            && (params["action"] === "set" || params["action"] === "resume")) {
+            const session = this.sessions.get(params["sessionId"] as string);
+            if (session !== undefined) return this.hookReview.run(session.cwd, params["_meta"], () => this.extMethodReviewed(method, params));
+        }
+        return this.extMethodReviewed(method, params);
+    }
+
+    private async extMethodReviewed(method: string, params: Record<string, unknown>): Promise<Record<string, unknown>> {
         const methodRequest = { method: method, params: params };
         if (!isExtMethodRequest(methodRequest)) {
             return {};
@@ -2185,14 +2194,19 @@ export class CodexAcpServer {
         if (appServer) await appServer;
         const elicitationRequester = this.createUrlElicitationRequester(requestId);
         this.hookReview.invalidate();
-        const isAuthenticated = await this.runWithProcessCheck(() => this.codexAcpClient.authenticate(_params, elicitationRequester));
-        if (!isAuthenticated) {
-            logger.log("Authenticate request failed");
-            throw RequestError.authRequired({methodId: _params.methodId}, "Sign-in did not complete");
+        try {
+            const isAuthenticated = await this.runWithProcessCheck(() => this.codexAcpClient.authenticate(_params, elicitationRequester));
+            if (!isAuthenticated) {
+                logger.log("Authenticate request failed");
+                throw RequestError.authRequired({methodId: _params.methodId}, "Sign-in did not complete");
+            }
+            await this.refreshAuthState(this.getAuthProviderForAuthenticateRequest(_params));
+            logger.log("Authenticate request completed");
+            return { };
+        } finally {
+            // A list may have completed while login waited for its completion/cancellation notification.
+            this.hookReview.invalidate();
         }
-        await this.refreshAuthState(this.getAuthProviderForAuthenticateRequest(_params));
-        logger.log("Authenticate request completed");
-        return { };
     }
 
     private createUrlElicitationRequester(requestId?: acp.JsonRpcId): UrlElicitationRequester | undefined {
@@ -3300,9 +3314,8 @@ export class CodexAcpServer {
         return {
             sessionId: sessionId,
             prompt: prompt as acp.ContentBlock[],
-            ...(idleBehavior === "promptRequired" ? {
-                _meta: {steering: {idleBehavior}},
-            } : {}),
+            // The whole validated `_meta`: a turn the steer starts continues its hook review.
+            ...(meta === undefined ? {} : {_meta: meta as Exclude<SessionSteerRequest["_meta"], undefined>}),
         };
     }
 
@@ -4881,7 +4894,8 @@ export class CodexAcpServer {
         onTurnStarted?: () => void,
         insertion?: UserMessageInsertion,
     ): Promise<acp.PromptResponse> {
-        return this.hookReview.run(this.getSessionState(params.sessionId).cwd, params._meta,
+        // A turn started from inside a reviewed operation (a steer or goal control) continues its review.
+        return this.hookReview.continueOperation(this.getSessionState(params.sessionId).cwd, params._meta,
             () => this.promptReviewed(params, signal, onTurnStarted, insertion));
     }
 
