@@ -1,14 +1,14 @@
 /**
- * The AIR `sessionIndex` extension as `CodexAcpServer` serves it: the session list, `_session/rename`,
+ * The `sessionIndex` extension as `CodexAcpServer` serves it: the session list, `_session/rename`,
  * `_session/archive`, `_session/unarchive`, `session/delete` and `_session/list/subscribe`. Nothing here runs
- * for a client that does not declare `sessionIndex`. See `SessionIndex.ts` and `docs/air-extensions.md`.
+ * for a client that does not declare `sessionIndex`, as AIR or as a client-neutral opt-in.
+ * See `SessionIndex.ts` and `docs/air-extensions.md`.
  */
 
 import path from "node:path";
 import type * as acp from "@agentclientprotocol/sdk/unstable";
 import {RequestError} from "@agentclientprotocol/sdk/unstable";
 import {ACPSessionConnection, type AcpClientConnection} from "./ACPSessionConnection";
-import {clientSupportsAirCapability, withAirMeta} from "./AirExtension";
 import type {ServerNotification} from "./app-server";
 import type {CodexAcpClient} from "./CodexAcpClient";
 import type {SessionState} from "./CodexAcpServer";
@@ -24,6 +24,9 @@ import {
     AIR_SESSION_LIST_SUBSCRIBE_KEY,
     AIR_SESSION_RENAME_KEY,
     AIR_SESSION_WORKTREES_KEY,
+    AIR_SESSION_INDEX_META,
+    NEUTRAL_SESSION_INDEX_META,
+    NEUTRAL_SESSION_INDEX_VERSION,
     readSessionIndexListOptions,
     readSessionIndexPage,
     SESSION_ARCHIVE_METHOD,
@@ -34,10 +37,12 @@ import {
     SESSION_RENAME_METHOD,
     SESSION_UNARCHIVE_METHOD,
     SessionIndexActivity,
+    sessionIndexMetaOf,
     sessionIndexSessionInfo,
     type SessionArchiveRequest,
     type SessionBatchGetRequest,
     type SessionBatchGetResponse,
+    type SessionIndexMeta,
     type SessionIndexListOptions,
     type SessionRenameRequest,
 } from "./SessionIndex";
@@ -68,8 +73,8 @@ export interface SessionIndexHost {
 type SessionPage = {sessions: acp.SessionInfo[], nextCursor: string | null};
 
 export class SessionIndexService {
-    /** The client declared the AIR `sessionIndex` capability. */
-    enabled = false;
+    /** Where this client's session index metadata goes, or `null` when it did not declare `sessionIndex`. */
+    private meta: SessionIndexMeta | null = null;
     private readonly activity: SessionIndexActivity;
     private readonly writes = new SessionWriteQueue();
     private readonly titles: SessionIndexTitles;
@@ -106,19 +111,39 @@ export class SessionIndexService {
     }
 
     /** Reads the client capabilities of `initialize`. */
-    configure(clientCapabilities: acp.ClientCapabilities | undefined): void {
-        this.enabled = clientSupportsAirCapability(clientCapabilities, AIR_SESSION_INDEX_KEY);
+    /**
+     * Reads the session index declaration of the client. The client-neutral opt-in is an ACP v1 extension:
+     * an ACP v2 connection (`neutral: false`) gets the session index only as AIR.
+     */
+    configure(clientCapabilities: acp.ClientCapabilities | undefined, {neutral = true}: {neutral?: boolean} = {}): void {
+        const meta = sessionIndexMetaOf(clientCapabilities);
+        this.meta = meta === NEUTRAL_SESSION_INDEX_META && !neutral ? null : meta;
+    }
+
+    /** The client declared `sessionIndex`, as AIR or as a client-neutral opt-in. */
+    get enabled(): boolean {
+        return this.meta !== null;
     }
 
     /**
-     * The AIR capabilities to answer: only a client that declares `sessionIndex` gets them. `sessionArchive` and
-     * `sessionRename` name the requests that come with it, `sessionWorktrees` the `agentWorktree` row field; the
+     * The AIR capabilities to answer: only an AIR client that declares `sessionIndex` gets them. `sessionArchive`
+     * and `sessionRename` name the requests that come with it, `sessionWorktrees` the `agentWorktree` row field; the
      * client need not declare them.
      */
     agentCapabilities(): string[] {
-        return this.enabled
+        return this.meta === AIR_SESSION_INDEX_META
             ? [AIR_SESSION_INDEX_KEY, AIR_SESSION_BATCH_GET_KEY, AIR_SESSION_ARCHIVE_KEY, AIR_SESSION_RENAME_KEY, AIR_SESSION_LIST_SUBSCRIBE_KEY, AIR_SESSION_WORKTREES_KEY]
             : [];
+    }
+
+    /** The `_meta.sessionIndex` answer of `initialize` to a client-neutral opt-in, or `null`. */
+    neutralCapability(): {version: number, capabilities: string[]} | null {
+        return this.meta === NEUTRAL_SESSION_INDEX_META
+            ? {
+                version: NEUTRAL_SESSION_INDEX_VERSION,
+                capabilities: [AIR_SESSION_BATCH_GET_KEY, AIR_SESSION_ARCHIVE_KEY, AIR_SESSION_RENAME_KEY, AIR_SESSION_LIST_SUBSCRIBE_KEY, AIR_SESSION_WORKTREES_KEY],
+            }
+            : null;
     }
 
     /**
@@ -158,7 +183,7 @@ export class SessionIndexService {
      * reads the local state DB and works without one.
      */
     async list(params: acp.ListSessionsRequest): Promise<SessionPage> {
-        const options = readSessionIndexListOptions(params._meta);
+        const options = readSessionIndexListOptions(params._meta, this.requireMeta());
         const cwd = params.cwd?.trim() || null;
         return await this.readRows(cwd, options, params.cursor ?? null);
     }
@@ -279,14 +304,14 @@ export class SessionIndexService {
         if (archived ? open : this.host.session(sessionId) !== undefined) {
             await new ACPSessionConnection(this.host.connection(), sessionId).update({
                 sessionUpdate: "session_info_update",
-                _meta: withAirMeta(undefined, AIR_ARCHIVED_KEY, archived),
+                _meta: this.requireMeta().write(undefined, AIR_ARCHIVED_KEY, archived),
             });
         }
         return {};
     }
 
     /**
-     * Deletes the thread for `session/delete`: AIR then means "delete", not "done", because it has
+     * Deletes the thread for `session/delete`: a `sessionIndex` client then means "delete", not "done", because it has
      * `_session/archive` for that. A thread that this connection had open but Codex never persisted (no
      * prompt yet) is gone with the close, so it counts as deleted.
      */
@@ -319,6 +344,11 @@ export class SessionIndexService {
         if (!this.enabled) {
             throw RequestError.methodNotFound(method);
         }
+    }
+
+    private requireMeta(): SessionIndexMeta {
+        if (this.meta === null) throw new Error("The client did not declare sessionIndex");
+        return this.meta;
     }
 
     private async readRows(cwd: string | null, options: SessionIndexListOptions, cursor: string | null): Promise<SessionPage> {
@@ -358,7 +388,7 @@ export class SessionIndexService {
             if (activity?.state !== undefined) this.rowsWithState.add(thread.id);
             else this.rowsWithState.delete(thread.id);
             return this.withActiveAdditionalDirectories(
-                sessionIndexSessionInfo(thread, entry.archived, activity, inAgentWorktree(thread.cwd)),
+                sessionIndexSessionInfo(thread, entry.archived, activity, inAgentWorktree(thread.cwd), this.requireMeta()),
             );
         });
     }
