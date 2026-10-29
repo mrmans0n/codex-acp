@@ -176,7 +176,13 @@ commit at that replay point, merge-base equal to the tag, and only paths the
 original commit changes. An entry that is invalid or never applied keeps the
 candidate in manual review. The advanced ledger retires the original and its
 equivalent copies and records the transition in `downstreamTransitions`; later
-syncs replay the adaptation instead.
+syncs replay the adaptation instead, at the position of the retired original, so
+fork commits that depend on it still replay after it. A non-ledger copy from an
+earlier sync whose change the candidate already contains (same change, other
+context, so another patch-id) merges cleanly without changing the tree; it is
+skipped and listed in the report's `redundantDownstreamCommits`. A ledger patch
+is never skipped this way, and a recorded replacement that is not in protected
+`alas` fails the build.
 
 Commit the review edit on its own on the canonical same-version branch and
 rerun **Sync stable upstream**. Resolutions are matched by `fromTag`, `toTag`,
