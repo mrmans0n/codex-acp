@@ -82,6 +82,49 @@ function cherryPick(cwd, commit) {
   return false;
 }
 
+// A copy from an earlier sync can carry the same change on other context, so it has another patch
+// id. After a failed pick, this reapplies it without committing: it is redundant only when it merges
+// cleanly and leaves the tree unchanged.
+function isRedundantPick(cwd, commit) {
+  const head = git(cwd, ["rev-parse", "HEAD"]);
+  const result = spawnSync("git", ["cherry-pick", "--no-commit", commit], {cwd, encoding: "utf8", stdio: "pipe"});
+  const redundant = result.status === 0 && git(cwd, ["write-tree"]) === git(cwd, ["rev-parse", `${head}^{tree}`]);
+  spawnSync("git", ["cherry-pick", "--quit"], {cwd, encoding: "utf8", stdio: "pipe"});
+  git(cwd, ["reset", "--hard", head]);
+  return redundant;
+}
+
+// Replay order of the downstream commits. A reviewed adaptation of a non-ledger commit takes the
+// place of its retired original (and of the original's retired copies), so fork commits that
+// depend on it still replay after it.
+function downstreamReplayOrder({downstreamCommits, patchIds, ledgerByPatchId, retiredCommits, transitions}) {
+  const replacementOf = new Map();
+  for (const transition of transitions) {
+    if (transition?.action !== "adapt" || !transition.replacementCommit) continue;
+    for (const commit of [transition.commit, ...(transition.equivalentCommits ?? [])]) {
+      replacementOf.set(commit, transition.replacementCommit);
+    }
+  }
+  const order = [];
+  const placed = new Set();
+  for (const [index, commit] of downstreamCommits.entries()) {
+    const id = patchIds[index];
+    const replacement = replacementOf.get(commit);
+    if (replacement && retiredCommits.has(commit) && !(id && ledgerByPatchId.has(id))) {
+      if (!downstreamCommits.includes(replacement)) {
+        throw new Error(`Downstream transition replacement ${replacement} for ${commit} is not in protected alas`);
+      }
+      if (!placed.has(replacement)) order.push(replacement);
+      placed.add(replacement);
+      continue;
+    }
+    if (placed.has(commit)) continue;
+    placed.add(commit);
+    order.push(commit);
+  }
+  return order;
+}
+
 function changedPaths(cwd, commit) {
   return lines(git(cwd, ["diff-tree", "--no-commit-id", "--name-only", "-r", commit]));
 }
@@ -610,8 +653,17 @@ export function buildSyncCandidate({
   const conflicts = [];
   const seenLedgerPatches = new Set();
   const seenNonLedgerPatchIds = new Set();
-  for (const [index, commit] of downstreamCommits.entries()) {
-    const id = downstreamCommitPatchIds[index];
+  const redundantDownstreamCommits = [];
+  const patchIdByCommit = new Map(downstreamCommits.map((commit, index) => [commit, downstreamCommitPatchIds[index]]));
+  const replayOrder = downstreamReplayOrder({
+    downstreamCommits,
+    patchIds: downstreamCommitPatchIds,
+    ledgerByPatchId,
+    retiredCommits,
+    transitions: ledger.downstreamTransitions ?? [],
+  });
+  for (const commit of replayOrder) {
+    const id = patchIdByCommit.get(commit);
     const matchingPatch = id ? ledgerByPatchId.get(id) : undefined;
     if (matchingPatch && commit !== matchingPatch.commit) continue;
     const patch = matchingPatch;
@@ -678,6 +730,11 @@ export function buildSyncCandidate({
       continue;
     }
     if (!cherryPick(cwd, commit)) {
+      if (!patch && isRedundantPick(cwd, commit)) {
+        redundantDownstreamCommits.push(commit);
+        if (id) seenNonLedgerPatchIds.add(id);
+        continue;
+      }
       conflicts.push({commit, kind: "downstream", ...(patch ? {patch: patch.name} : {})});
       break;
     }
@@ -795,6 +852,7 @@ export function buildSyncCandidate({
     appliedPatches,
     appliedAdaptations,
     appliedDownstreamCommits,
+    redundantDownstreamCommits,
     excludedUpstreamEquivalents,
     excludedUpstreamLaterEquivalents,
     excludedCanonicalUpstreamEquivalents,
