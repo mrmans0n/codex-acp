@@ -1012,7 +1012,8 @@ This section covers only the AIR bridge.
 ## Session index
 
 AIR uses `session/list` as its index of Codex threads when it declares `sessionIndex`.
-Everything in this section applies only to such a client. The `initialize` answer to it lists `sessionIndex`,
+Everything in this section applies only to such a client, or to a client that is not AIR and opts in as in
+[Client-neutral session index](#client-neutral-session-index). The `initialize` answer to AIR lists `sessionIndex`,
 `sessionBatchGet`, `sessionArchive`, `sessionRename`, `sessionListSubscribe` and `sessionWorktrees` in `_meta.jetbrains.air.capabilities`.
 Another client, AIR included, keeps the old `session/list`, `session/delete` and `initialize` answers.
 ACP v1 and v2 connections get the same session index.
@@ -1374,6 +1375,39 @@ Remaining differences:
   is not affected.
 - Archive stops a session that is open here, as `session/close` does; #2161 leaves execution alone. The ACP session
   list extensions RFD proposes this change to #2161.
+
+### Client-neutral session index
+
+A client that is not AIR gets the same session index without declaring `_meta.jetbrains.air`, which would also
+change its tool call contract and subagent reports. It declares, in `initialize.clientCapabilities._meta`:
+
+```json
+{ "sessionIndex": { "version": 1 } }
+```
+
+- Accepted only when `sessionIndex` is an object whose `version` is an integer of at least 1. Anything else
+  enables nothing.
+- An AIR client is governed only by its `sessionIndex` capability; its top-level `_meta.sessionIndex` is ignored.
+- The opt-in is an ACP v1 extension. On an ACP v2 connection only AIR gets the session index.
+- The `initialize` answer has
+  `_meta.sessionIndex: {"version": 1, "capabilities": ["sessionBatchGet", "sessionArchive", "sessionRename", "sessionListSubscribe", "sessionWorktrees"]}`
+  and no `_meta.jetbrains`.
+
+The payloads and rules are the ones of this section, with `_meta.sessionIndex` in place of `_meta.jetbrains.air`.
+The payloads carry no `version`:
+
+| AIR | Client-neutral |
+| --- | --- |
+| `session/list` `_meta.jetbrains.air.list {limit, includeWorktrees, archived}` | `_meta.sessionIndex.list {limit, includeWorktrees, archived}` |
+| row `_meta.jetbrains.air.{archived, lastPromptAt, model, forkedFrom, state, lastTurnEndedAt, agentWorktree}` | row `_meta.sessionIndex.{…}` |
+| `_session/list/changes` rows | the same rows, `_meta.sessionIndex` |
+| `_session/batch_get` rows | the same rows, `_meta.sessionIndex` |
+| `session_info_update._meta.jetbrains.air.archived` | `session_info_update._meta.sessionIndex.archived` |
+| `_session/batch_get`, `_session/rename`, `_session/archive`, `_session/unarchive`, `_session/list/subscribe`, `_session/list/unsubscribe`, `_session/list/changes` | unchanged |
+
+- The adapter reads the list options only from the client's own namespace.
+- `session/delete` deletes the thread, as for AIR with `sessionIndex`.
+- Everything else is what a client that is not AIR gets: tool calls, subagent reports, `goal` and `async-tasks`.
 
 ## Context compaction
 
