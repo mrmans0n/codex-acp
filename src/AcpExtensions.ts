@@ -120,14 +120,19 @@ export async function legacySetSessionModel(
 }
 
 export type SessionSteerRequest = {
-    _meta?: Record<string, unknown> | null;
     sessionId: SessionId;
     prompt: ContentBlock[];
+    _meta?: (Record<string, unknown> & {
+        steering?: {
+            /** Leave idle input unconsumed so the host can own a normal prompt lifecycle. */
+            idleBehavior?: "promptRequired";
+        };
+    }) | null;
 }
 
-export type SessionSteeringResponse = {
-    outcome: "injected" | "startedNewTurn" | "failed";
-}
+export type SessionSteeringResponse =
+    | {outcome: "injected" | "startedNewTurn" | "failed"}
+    | {outcome: "promptRequired", reason: "noRunningTurn"}
 
 export type SessionSteeringExtRequest = {
     method: typeof SESSION_STEERING_METHOD;

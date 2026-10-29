@@ -460,6 +460,26 @@ describe("app-server recovery", () => {
         expect(requestsOf(fixture.current(), "turn/start")).toHaveLength(1);
     });
 
+    it("keeps the host-owned idle steering fallback next to reviewed metadata", async () => {
+        const fixture = createRecoveryFixture();
+        await initializeHookReview(fixture);
+        const token = await reviewHooks(fixture);
+        const {sessionId} = await fixture.agent.newSession({cwd: "/work", mcpServers: [], _meta: reviewedMeta(token)});
+        const steer = (meta: Record<string, unknown>) =>
+            fixture.agent.extMethod("_session/steering", {sessionId, prompt: [{type: "text", text: "continue"}], _meta: meta});
+
+        await expect(steer({...reviewedMeta(token), steering: {idleBehavior: "promptRequired"}}))
+            .resolves.toEqual({outcome: "promptRequired", reason: "noRunningTurn"});
+        expect(requestsOf(fixture.current(), "turn/start")).toHaveLength(0);
+
+        fixture.answers.set("turn/start", () => {
+            setImmediate(() => completeTurn(fixture, sessionId, "steered-turn"));
+            return {turn: {id: "steered-turn", items: [], status: "inProgress", error: null}};
+        });
+        await expect(steer({...reviewedMeta(token), steering: {}})).resolves.toEqual({outcome: "startedNewTurn"});
+        expect(requestsOf(fixture.current(), "turn/start")).toHaveLength(1);
+    });
+
     it.each([true, false, "error"] as const)("invalidates a review issued during asynchronous authentication on settlement %s", async outcome => {
         const fixture = createRecoveryFixture();
         await initializeHookReview(fixture);

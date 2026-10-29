@@ -166,7 +166,7 @@ describe('CodexACPAgent - initialize', () => {
             steering: {supported: true},
             sessionIndex: {
                 version: 1,
-                capabilities: ["sessionArchive", "sessionRename", "sessionListSubscribe", "sessionWorktrees"],
+                capabilities: ["sessionBatchGet", "sessionArchive", "sessionRename", "sessionListSubscribe", "sessionWorktrees"],
             },
         });
     });
