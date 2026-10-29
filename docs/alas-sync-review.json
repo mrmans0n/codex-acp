@@ -1,8 +1,8 @@
 {
   "schemaVersion": 2,
-  "fromTag": "v2.3.0",
-  "toTag": "v2.4.0",
-  "toCommit": "75cb4682e8b6609663680a99e8c81c6b4c053c9d",
+  "fromTag": "v2.4.0",
+  "toTag": "v2.5.0",
+  "toCommit": "34e08970aa324a2be985f5080674d5aa91d7666f",
   "canonicalHead": null,
   "patches": [
     {
@@ -21,7 +21,7 @@
       "resolution": {
         "action": "retain",
         "automatic": false,
-        "rationale": "Overlap only through the shared files src/CodexAcpServer.ts and docs/air-extensions.md. Upstream v2.4.0 (#682-#688 standard subagent sessions, #669 batch get, #593 idle steering fallback, #698 file citations) does not touch the goal capability, initializeExtensionsMeta, ClientCapabilities, ThreadGoalSnapshot or the two goalSessionInfoUpdate call sites, and adds no new caller. The adapted v2.3.0 commit b160987 replays cleanly with an unchanged contract: the _meta.goal opt-in stays an ACP v1 extension for clients that are not AIR.",
+        "rationale": "Overlap only through the shared files src/CodexAcpServer.ts, src/CodexEventHandler.ts and docs/air-extensions.md. Upstream v2.5.0 (#703 AIR-only _meta.promptSuggestions, #704 ACP SDK 2.1 protocol alignment) does not touch the goal capability, initializeExtensionsMeta, ClientCapabilities, ThreadGoalSnapshot or the goalSessionInfoUpdate call sites. The CodexEventHandler change only remembers the last main-thread agent message on item/completed. The new session_info_update carries _meta.promptSuggestions for AIR only, so it never mixes with the downstream _meta.goal update, and an unknown session in goal control still fails with upstream's own invalidParams. The adapted v2.3.0 commit b160987 replays cleanly with an unchanged contract: the _meta.goal opt-in stays an ACP v1 extension for clients that are not AIR.",
         "tests": [
           "src/__tests__/CodexACPAgent/initialize.test.ts",
           "src/__tests__/CodexACPAgent/thread-goal-events.test.ts"
@@ -42,7 +42,7 @@
       "resolution": {
         "action": "retain",
         "automatic": false,
-        "rationale": "Overlap only through the shared file src/CodexAcpServer.ts. Upstream v2.4.0 does not change createAsyncTasks, CodexBackgroundTerminalTasks, AsyncTaskExtension, ClientCapabilities or the tool call contract; its standard subagent routers leave background terminal tasks alone. The adapted v2.3.0 commit 808ea06 replays cleanly with an unchanged contract.",
+        "rationale": "Overlap only through the shared file src/CodexAcpServer.ts. Upstream v2.5.0 refactors installSessionState to clear the previous state's async tasks and prompt suggestions together, but does not change createAsyncTasks, CodexBackgroundTerminalTasks, AsyncTaskExtension, ClientCapabilities or the tool call contract. The adapted v2.3.0 commit 808ea06 replays cleanly with an unchanged contract.",
         "tests": [
           "src/__tests__/CodexACPAgent/async-tasks.test.ts",
           "src/__tests__/CodexACPAgent/initialize.test.ts",
@@ -53,19 +53,18 @@
     {
       "name": "goal-before-first-prompt",
       "originalCommit": "9d2c300ec82da759d3a1606962c04304d2e60fa7",
-      "commit": "fa916afe71557747c2b6c4b4d164ddbf9c807bc2",
-      "appliedCommit": "fa916afe71557747c2b6c4b4d164ddbf9c807bc2",
+      "commit": "8f65eb87351c4937ac883c60723a40922cf1df76",
+      "appliedCommit": "8f65eb87351c4937ac883c60723a40922cf1df76",
       "disposition": "active",
-      "patchId": "75562f269ba05549ac0b9bf32463c8e7df8727b2",
+      "patchId": "12a196c177802e69a5e218fcb69a59be623af906",
       "classification": "overlap",
       "overlappingFiles": [
         "src/CodexAcpServer.ts"
       ],
       "resolution": {
-        "action": "adapt",
-        "commit": "8f65eb87351c4937ac883c60723a40922cf1df76",
+        "action": "retain",
         "automatic": false,
-        "rationale": "Upstream v2.4.0 (#682, #688) adds standard ACP subagent sessions: the baseline turn tracker and the prompt subscription route child approvals and elicitations through routeChildApprovals/routeChildElicitations, use supportsNativeSubagents() (clientSupportsSubagents was removed), pass withUserAction and observeSubagentWorkEnd, and skip child-thread events in the root permission context. The pre-prompt goal subscription replaces that tracker, so the adaptation subscribes the same way; the rest of the patch is unchanged. The new ACP v1/v2 test (a pending child approval of pre-prompt goal work is withdrawn when the child turn ends) fails with the v2.3.0 subscription arguments.",
+        "rationale": "Overlap only through the shared file src/CodexAcpServer.ts. Upstream v2.5.0 adds assertPromptContentSupported and an AIR-only promptSuggestions.clear() at the start of a prompt, and makes getSessionState throw RequestError -32002 for unknown sessions. None of these touch the pre-prompt goal subscription, ensureSessionEventSubscription, the baseline turn tracker or the recovery rebinding that the v2.4.0 adaptation 8f65eb8 introduced; the new rebindAppServer calls only rebind prompt suggestion generators. 8f65eb8 replays cleanly with an unchanged contract.",
         "tests": [
           "src/__tests__/CodexACPAgent/CodexAcpClient.test.ts"
         ]
@@ -80,7 +79,6 @@
       "patchId": "291cc473f7a264305eaed0e0d80f99de17fab55d",
       "classification": "overlap",
       "overlappingFiles": [
-        "README.md",
         "docs/air-extensions.md",
         "src/CodexAcpClient.ts",
         "src/CodexAcpServer.ts"
@@ -88,7 +86,7 @@
       "resolution": {
         "action": "retain",
         "automatic": false,
-        "rationale": "Overlap only through shared files (src/CodexAcpServer.ts, src/CodexAcpClient.ts, README.md, docs/air-extensions.md). Upstream v2.4.0 does not change systemPrompt handling, SessionInstructions, SessionFork, JsonSnapshot or the AIR scenario fixtures; Codex-spawned child sessions take no client system prompt, and upstream rejects client mutations of child sessions. The v2.3.0 commit febcd2b replays cleanly with an unchanged contract.",
+        "rationale": "Overlap only through shared files (src/CodexAcpServer.ts, src/CodexAcpClient.ts, docs/air-extensions.md). The CodexAcpClient change normalizes MCP servers before deduplication and switches auth and MCP transport errors to invalidParams; it does not touch systemPrompt handling, SessionInstructions or SessionFork. The upstream system-prompts integration test change only waits for the terminal idle update with a stop reason. The v2.3.0 commit febcd2b replays cleanly with an unchanged contract.",
         "tests": [
           "src/__tests__/SessionInstructions.test.ts",
           "src/__tests__/CodexACPAgent/session-instructions.test.ts",
@@ -100,24 +98,19 @@
     {
       "name": "neutral-session-index",
       "originalCommit": "bf6dd64df0bf990d6528ceaa62c5ba94c8ba9cb0",
-      "commit": "aff30ea39da255979e31bc18e8868ca9946b40ee",
-      "appliedCommit": "aff30ea39da255979e31bc18e8868ca9946b40ee",
+      "commit": "a1bfcc7e287a6eca4b52875336b720147b65ea5d",
+      "appliedCommit": "a1bfcc7e287a6eca4b52875336b720147b65ea5d",
       "disposition": "active",
-      "patchId": "0c7337b463988296cbd59eee2e37b2f5b17bbebc",
+      "patchId": "4ba89acdfd56691b571c7dbddc218c151e9f8dc1",
       "classification": "overlap",
       "overlappingFiles": [
         "docs/air-extensions.md",
-        "src/CodexAcpServer.ts",
-        "src/SessionIndex.ts",
-        "src/SessionIndexService.ts",
-        "src/SessionListSubscriptions.ts",
-        "src/__tests__/CodexACPAgent/session-index.test.ts"
+        "src/CodexAcpServer.ts"
       ],
       "resolution": {
-        "action": "adapt",
-        "commit": "a1bfcc7e287a6eca4b52875336b720147b65ea5d",
+        "action": "retain",
         "automatic": false,
-        "rationale": "Upstream v2.4.0 (#669) adds _session/batch_get and the agent capability sessionBatchGet to the AIR session index, and (#689) moves the subscription reads to listedThreadEntry/isInteractiveSource. The adaptation keeps the client-neutral index: batchGet builds rows in the client's namespace, so a neutral opt-in gets the same rows under _meta.sessionIndex, and its initialize answer lists sessionBatchGet like AIR's. Conflicts take upstream's lines next to the downstream ones. The new neutral batch_get test and the updated initialize test fail without the adaptation.",
+        "rationale": "Overlap only through the shared files src/CodexAcpServer.ts and docs/air-extensions.md. Upstream v2.5.0 does not change SessionIndex, SessionIndexService, SessionListSubscriptions or the session index capability. Its new session_info_update carries _meta.promptSuggestions for AIR only and does not reuse the _meta.sessionIndex key. The v2.4.0 adaptation a1bfcc7 replays cleanly with an unchanged contract.",
         "tests": [
           "src/__tests__/CodexACPAgent/session-index.test.ts",
           "src/__tests__/CodexACPAgent/initialize.test.ts",
@@ -128,22 +121,19 @@
     {
       "name": "neutral-codex-hook-review",
       "originalCommit": "4d4340534856c343cb68a295a9d48177cf079ee7",
-      "commit": "c07bc0f3a802bcbca5f2e17f228643bc873e7c37",
-      "appliedCommit": "c07bc0f3a802bcbca5f2e17f228643bc873e7c37",
+      "commit": "2341b05f7b74c45d21746f3ec7a617997a705b3a",
+      "appliedCommit": "2341b05f7b74c45d21746f3ec7a617997a705b3a",
       "disposition": "active",
-      "patchId": "ceb0df77c572ac26bfb39aaa4e1637db3cab37d8",
+      "patchId": "985b78cccb8dfb6e2d26d2a44e6db76fd29a6e38",
       "classification": "overlap",
       "overlappingFiles": [
         "docs/air-extensions.md",
-        "src/AcpAgentRouter.ts",
-        "src/CodexAcpServer.ts",
-        "src/CodexAppServerClient.ts"
+        "src/CodexAcpServer.ts"
       ],
       "resolution": {
-        "action": "adapt",
-        "commit": "2341b05f7b74c45d21746f3ec7a617997a705b3a",
+        "action": "retain",
         "automatic": false,
-        "rationale": "Context-only conflicts with upstream v2.4.0: the ACP v1 router now passes ctx.params to getAgent for session-scoped requests, and CodexAcpServer.ts imports the standard subagent modules next to the hook trust imports. The sorted +/- lines equal the original's. Reviewed: the execution gate fences by method, so upstream's new child thread/resume (restoreChild during a reviewed session/load) is fenced too, and a provider restart recreates the standard subagent router before a reviewed session skips the baseline tracker.",
+        "rationale": "Overlap only through the shared files src/CodexAcpServer.ts and docs/air-extensions.md. Upstream v2.5.0 adds promptSuggestions.rebindAppServer next to titleGen in both app-server replacement loops, without changing how the hook review is recreated on a provider restart or how the router fences reviewed methods. getSessionState now throws RequestError -32002, so a continueOperation for an unknown session gets the same error code as upstream methods. The v2.4.0 adaptation 2341b05 replays cleanly with an unchanged contract.",
         "tests": [
           "src/__tests__/CodexACPAgent/initialize.test.ts",
           "src/__tests__/app-server-recovery/recovery.test.ts",
@@ -154,22 +144,19 @@
     {
       "name": "neutral-codex-hook-review-execution",
       "originalCommit": "960f77945bf94d7cb5fa6ea7fcedb01d210f2ce6",
-      "commit": "c0e41b9a03a5847aa4ee01198bc9535224840edd",
-      "appliedCommit": "c0e41b9a03a5847aa4ee01198bc9535224840edd",
+      "commit": "78e7be64310b5894c9248ba5049566083b20a52f",
+      "appliedCommit": "78e7be64310b5894c9248ba5049566083b20a52f",
       "disposition": "active",
-      "patchId": "60be01de2d10680ba70206e3ce02375daf489380",
+      "patchId": "7c881b992690d8e8ba747d6b5b717f9bd5b6a063",
       "classification": "overlap",
       "overlappingFiles": [
-        "src/AcpExtensions.ts",
         "src/CodexAcpClient.ts",
-        "src/CodexAcpServer.ts",
-        "src/CodexAppServerClient.ts"
+        "src/CodexAcpServer.ts"
       ],
       "resolution": {
-        "action": "adapt",
-        "commit": "78e7be64310b5894c9248ba5049566083b20a52f",
+        "action": "retain",
         "automatic": false,
-        "rationale": "Upstream v2.4.0 (#593) validates steering _meta and keeps only {steering: {idleBehavior: \"promptRequired\"}}. The patch forwards the steering _meta so a steer-started turn continues its hook review; the adaptation forwards the whole validated _meta and types it as a record with upstream's steering shape, so the idle fallback still answers promptRequired without a turn. The existing reviewed-steering test fails with upstream's reduced _meta; the new idle-fallback test fails with it and when only codexHooks is forwarded.",
+        "rationale": "Overlap only through the shared files src/CodexAcpServer.ts and src/CodexAcpClient.ts. Upstream v2.5.0 validates prompt content with assertPromptContentSupported at the start of performSteeringRequest and of the prompt implementation, before the steering _meta that this patch forwards is read, and leaves the steering idle fallback unchanged. The prompt check runs in prompt() before promptAfterReservation continues the hook review, and an unknown session there now fails with upstream's -32002 like every other prompt path. The CodexAcpClient edits are MCP normalization and error codes. The v2.4.0 adaptation 78e7be6 replays cleanly with an unchanged contract.",
         "tests": [
           "src/__tests__/app-server-recovery/recovery.test.ts"
         ]
