@@ -161,7 +161,11 @@ candidate commit at the point where the patch is replayed (stacked adaptation).
 The candidate is rebuilt deterministically, so a stacked adaptation binds only
 when every earlier replay reproduces that same parent; any drift fails closed.
 Push adaptation commits where the workflow can fetch them before rerunning it;
-once bound, they are ancestors of the integration commit.
+once bound, they are ancestors of the integration commit. The advanced ledger
+records the adaptation as the patch's `appliedCommit` and retires the original;
+later syncs replay `appliedCommit` at the position of the first retired
+original, so fork commits that build on the patch still replay after it. An
+`appliedCommit` that is not in protected `alas` fails the build.
 
 A fork-only commit outside the ledger is normally replayed as is. When it
 conflicts with the new stable release, the review may name an adaptation in
