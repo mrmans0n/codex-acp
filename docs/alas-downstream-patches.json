@@ -265,6 +265,44 @@
         "replacementCommit": "78e7be64310b5894c9248ba5049566083b20a52f"
       },
       "appliedCommit": "78e7be64310b5894c9248ba5049566083b20a52f"
+    },
+    {
+      "name": "async-questions",
+      "commit": "e57bcd768c8cebd1d3d17b840ae0db2e11639615",
+      "upstreamPr": 707,
+      "files": [
+        "README.md",
+        "docs/async-questions.md",
+        "src/ACPSessionConnection.ts",
+        "src/CodexAcpServer.ts",
+        "src/CodexAsyncQuestions.ts",
+        "src/CodexElicitationHandler.ts",
+        "src/CodexEventHandler.ts",
+        "src/__tests__/CodexACPAgent/agent-message-events.test.ts",
+        "src/__tests__/CodexACPAgent/async-questions.test.ts",
+        "src/__tests__/CodexACPAgent/data/agent-message-without-deltas.json",
+        "src/__tests__/CodexACPAgent/data/async-questions-v1-answered.json",
+        "src/__tests__/CodexACPAgent/data/async-questions-v1-dropped.json",
+        "src/__tests__/CodexACPAgent/data/async-questions-v1-rejected.json",
+        "src/__tests__/CodexACPAgent/data/async-questions-v2-answered.json",
+        "src/__tests__/CodexACPAgent/data/async-questions-v2-dropped.json",
+        "src/__tests__/CodexACPAgent/data/async-questions-v2-rejected.json",
+        "src/__tests__/CodexACPAgent/data/tool-calls-and-messages-v2-without-deltas.json",
+        "src/__tests__/CodexACPAgent/data/v1-load-session-async-question-answers.json",
+        "src/__tests__/CodexACPAgent/data/v2-resume-replay-async-question-answers.json",
+        "src/__tests__/CodexACPAgent/tool-calls-and-messages-v2.test.ts",
+        "src/__tests__/CodexACPAgent/v2-resume-replay.test.ts",
+        "src/__tests__/CodexAsyncQuestions.test.ts"
+      ],
+      "tests": [
+        "src/__tests__/CodexAsyncQuestions.test.ts",
+        "src/__tests__/CodexACPAgent/async-questions.test.ts",
+        "src/__tests__/CodexACPAgent/agent-message-events.test.ts",
+        "src/__tests__/CodexACPAgent/tool-calls-and-messages-v2.test.ts",
+        "src/__tests__/CodexACPAgent/v2-resume-replay.test.ts"
+      ],
+      "disposition": "active",
+      "retiredCommits": []
     }
   ],
   "retiredCommits": [
