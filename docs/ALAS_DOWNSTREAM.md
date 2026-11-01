@@ -29,6 +29,10 @@ The current functional patches are `goal-opt-in` (upstream PR #583),
 plus acceptance of a repeated identical append on a thread the adapter process
 already loaded), and `neutral-session-index` (no upstream PR yet: the session
 index under `_meta.sessionIndex` for a client that does not declare AIR).
+`async-questions` carries upstream PR #707 ahead of the next stable release:
+`request_user_input_async` questions as non-blocking form elicitations whose
+answers are steered into the asking turn. The next stable sync that contains it
+classifies it as absorbed, and it is then dropped.
 Keep ledger entries and their file
 lists exact when a patch changes. `npm run test:maintenance` verifies the ledger
 against the recorded commits. A file list may extend the original commit's paths
