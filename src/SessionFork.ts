@@ -5,10 +5,59 @@ import type {SessionConfig} from "./CodexAcpClient";
 import type {CodexAppServerClient} from "./CodexAppServerClient";
 import type {ModeKind} from "./app-server/ModeKind";
 import type {ServiceTier} from "./app-server/ServiceTier";
-import type {Model} from "./app-server/v2";
+import type {Model, Turn} from "./app-server/v2";
 import type {SessionMetadata} from "./SessionMetadata";
 import type {AcpMcpServer, WithAcpMcpServers} from "./McpServerConfig";
 import type {SessionInstructions} from "./ClientSystemPrompt";
+import {renderFileCitations} from "./CodexFileCitations";
+
+/** The top-level `_meta` key of the client-neutral fork point, see `docs/air-extensions.md`. */
+export const NEUTRAL_FORK_POINT_META_KEY = "forkPoint";
+export const NEUTRAL_FORK_POINT_VERSION = 1;
+
+/** Where the history of a fork at a message ends: after the whole turn that holds the message. */
+export type ForkPointBoundary = "turn";
+
+/** The fork point that a client-neutral `session/fork` resolved, returned in the response `_meta.forkPoint`. */
+export type ForkPointResult = {
+    boundary: ForkPointBoundary;
+    /** The id of the matched Codex item. */
+    messageId: string;
+    /** The last turn that the fork keeps. */
+    turnId: string;
+    /** The last item of that turn, the last item that the fork keeps. */
+    lastItemId: string;
+    matchedBy: "id" | "fingerprint";
+};
+
+/** The initialize `_meta.forkPoint` advert for a client that opted in. */
+export function neutralForkPointCapability(): {version: number; boundary: ForkPointBoundary} {
+    return {version: NEUTRAL_FORK_POINT_VERSION, boundary: "turn"};
+}
+
+/**
+ * Whether the client opted into the client-neutral fork point with `clientCapabilities._meta.forkPoint: {version}`,
+ * an integer of at least 1.
+ */
+export function clientRequestsNeutralForkPoint(capabilities: acp.ClientCapabilities | null | undefined): boolean {
+    const declared = capabilities?._meta?.[NEUTRAL_FORK_POINT_META_KEY];
+    if (!isUnknownRecord(declared)) return false;
+    const version = declared["version"];
+    return typeof version === "number" && Number.isInteger(version) && version >= 1;
+}
+
+/** Whether a `session/fork` request carries the client-neutral fork point. */
+export function hasNeutralForkPoint(meta: Record<string, unknown> | null | undefined): boolean {
+    return meta != null && meta[NEUTRAL_FORK_POINT_META_KEY] !== undefined;
+}
+
+/** The error for a client-neutral fork point from a client that did not opt in. */
+export function forkPointNotNegotiatedError(): RequestError {
+    return RequestError.invalidParams(
+        {[NEUTRAL_FORK_POINT_META_KEY]: {reason: "notNegotiated"}},
+        "session/fork _meta.forkPoint needs initialize clientCapabilities._meta.forkPoint",
+    );
+}
 
 export type SessionForkDependencies = {
     codexClient: CodexAppServerClient;
@@ -34,8 +83,10 @@ export async function forkSession(
     dependencies: SessionForkDependencies,
     instructions?: SessionInstructions,
 ): Promise<SessionMetadata> {
+    const forkPoint = readForkPoint(request._meta);
     await dependencies.refreshSkills(request.cwd, additionalDirectories);
-    const lastTurnId = await resolveForkTurnId(request, dependencies.codexClient);
+    const match = forkPoint ? await resolveForkPoint(request, forkPoint, dependencies.codexClient) : undefined;
+    const lastTurnId = match?.turnId;
     const sessionConfig = await dependencies.createSessionConfig(
         request.cwd,
         additionalDirectories,
@@ -72,45 +123,120 @@ export async function forkSession(
         additionalDirectories,
         skippedMcpServers: sessionConfig.skippedMcpServers,
         ...(instructions ? {instructions} : {}),
+        ...(forkPoint?.kind === "neutral" && match ? {
+            forkPoint: {
+                boundary: "turn",
+                messageId: match.messageId,
+                turnId: match.turnId,
+                lastItemId: match.lastItemId,
+                matchedBy: match.matchedBy,
+            },
+        } : {}),
     };
 }
 
-async function resolveForkTurnId(
-    request: Pick<acp.ForkSessionRequest, "sessionId" | "_meta">,
-    codexClient: CodexAppServerClient,
-): Promise<string | undefined> {
-    const forkPoint = readAirForkPoint(request._meta);
-    if (!forkPoint) return undefined;
+type ForkPointRequest = {kind: "air" | "neutral"} & MessageForkPoint;
 
+type ForkPointMatch = Omit<ForkPointResult, "boundary">;
+
+/**
+ * The fork point of a request. The client-neutral `_meta.forkPoint` wins over the AIR one; the caller rejects it
+ * for a client that did not opt in.
+ */
+function readForkPoint(meta?: Record<string, unknown> | null): ForkPointRequest | undefined {
+    if (hasNeutralForkPoint(meta)) return {kind: "neutral", ...readNeutralForkPoint(meta![NEUTRAL_FORK_POINT_META_KEY])};
+    const air = readAirForkPoint(meta);
+    return air ? {kind: "air", ...air} : undefined;
+}
+
+async function resolveForkPoint(
+    request: Pick<acp.ForkSessionRequest, "sessionId" | "cwd">,
+    forkPoint: ForkPointRequest,
+    codexClient: CodexAppServerClient,
+): Promise<ForkPointMatch> {
     const history = await codexClient.threadReadWithHistory(request.sessionId);
-    const candidateIds = airForkMessageIdCandidates(forkPoint.messageId);
-    const itemTurnId = candidateIds
-        .map(candidateId => history.thread.turns.find(turn => turn.items.some(item => item.id === candidateId))?.id)
-        .find(turnId => turnId !== undefined);
-    if (itemTurnId) return itemTurnId;
+    const turns = history.thread.turns;
+    const matchById = (candidateId: string): ForkPointMatch | undefined => {
+        const turn = turns.find(turn => turn.items.some(item => item.id === candidateId));
+        return turn ? toMatch(turn, candidateId, "id") : undefined;
+    };
+    // The AIR form also accepts the visible segment id of older AIR builds; the neutral form takes the item id.
+    const candidateIds = forkPoint.kind === "air"
+        ? airForkMessageIdCandidates(forkPoint.messageId)
+        : [forkPoint.messageId];
+    const idMatch = candidateIds.map(matchById).find(match => match !== undefined);
+    if (idMatch) return idMatch;
 
     if (forkPoint.messageFingerprint) {
-        const matchingTurns = history.thread.turns.flatMap(turn => turn.items
+        // The client saw the text with file citations rendered, as the source session sent it.
+        const renderCwd = history.thread.cwd ?? request.cwd;
+        const clientText = forkPoint.kind === "neutral"
+            ? (text: string) => renderFileCitations(text, renderCwd)
+            : (text: string) => text;
+        const matches = turns.flatMap(turn => turn.items
             .filter(item => item.type === "agentMessage"
-                && fingerprintAgentMessage(item.text) === forkPoint.messageFingerprint)
-            .map(() => turn.id));
-        const fingerprintTurnId = matchingTurns[forkPoint.messageOccurrence - 1];
-        if (fingerprintTurnId) return fingerprintTurnId;
+                && fingerprintAgentMessage(clientText(item.text)) === forkPoint.messageFingerprint)
+            .map(item => toMatch(turn, item.id, "fingerprint")));
+        const fingerprintMatch = matches[forkPoint.messageOccurrence - 1];
+        if (fingerprintMatch) return fingerprintMatch;
     }
 
+    if (forkPoint.kind === "neutral") {
+        throw RequestError.invalidParams(
+            {[NEUTRAL_FORK_POINT_META_KEY]: {messageId: forkPoint.messageId, reason: "notFound"}},
+            `Fork point message ${forkPoint.messageId} was not found in session ${request.sessionId}`,
+        );
+    }
     throw RequestError.invalidParams(
         {messageId: forkPoint.messageId},
         `Fork point message ${forkPoint.messageId} was not found in session ${request.sessionId}`,
     );
 }
 
-type AirForkPoint = {
+function toMatch(turn: Turn, messageId: string, matchedBy: ForkPointMatch["matchedBy"]): ForkPointMatch {
+    return {messageId, turnId: turn.id, lastItemId: turn.items.at(-1)!.id, matchedBy};
+}
+
+/** Reads the client-neutral `_meta.forkPoint`. An invalid field fails with `{forkPoint: {field}}` as the error data. */
+function readNeutralForkPoint(forkPoint: unknown): MessageForkPoint {
+    const invalid = (field: string, message: string) => RequestError.invalidParams(
+        {[NEUTRAL_FORK_POINT_META_KEY]: {field}},
+        `session/fork _meta.forkPoint: ${message}`,
+    );
+    if (!isUnknownRecord(forkPoint)) throw invalid(NEUTRAL_FORK_POINT_META_KEY, "must be an object");
+    const version = forkPoint["version"];
+    if (version !== undefined && version !== NEUTRAL_FORK_POINT_VERSION) {
+        throw invalid("version", `version must be ${NEUTRAL_FORK_POINT_VERSION} when present`);
+    }
+    const messageId = forkPoint["messageId"];
+    if (typeof messageId !== "string" || messageId.trim().length === 0) {
+        throw invalid("messageId", "messageId must be a non-empty string");
+    }
+    const messageFingerprint = forkPoint["messageFingerprint"];
+    if (messageFingerprint !== undefined
+        && (typeof messageFingerprint !== "string" || !SHA256_FINGERPRINT.test(messageFingerprint))) {
+        throw invalid("messageFingerprint", "messageFingerprint must be sha256: and 64 lowercase hex digits");
+    }
+    const messageOccurrence = forkPoint["messageOccurrence"] ?? 1;
+    if (!Number.isSafeInteger(messageOccurrence) || (messageOccurrence as number) < 1) {
+        throw invalid("messageOccurrence", "messageOccurrence must be a positive integer");
+    }
+    return {
+        messageId: messageId.trim(),
+        ...(typeof messageFingerprint === "string" && {messageFingerprint}),
+        messageOccurrence: messageOccurrence as number,
+    };
+}
+
+const SHA256_FINGERPRINT = /^sha256:[0-9a-f]{64}$/;
+
+type MessageForkPoint = {
     messageId: string;
     messageFingerprint?: string;
     messageOccurrence: number;
 };
 
-function readAirForkPoint(meta?: Record<string, unknown> | null): AirForkPoint | undefined {
+function readAirForkPoint(meta?: Record<string, unknown> | null): MessageForkPoint | undefined {
     const jetbrains = meta?.["jetbrains"];
     if (!isUnknownRecord(jetbrains)) return undefined;
     const air = jetbrains["air"];
@@ -123,7 +249,7 @@ function readAirForkPoint(meta?: Record<string, unknown> | null): AirForkPoint |
     }
     const messageFingerprint = fork["messageFingerprint"];
     if (messageFingerprint !== undefined
-        && (typeof messageFingerprint !== "string" || !/^sha256:[0-9a-f]{64}$/.test(messageFingerprint))) {
+        && (typeof messageFingerprint !== "string" || !SHA256_FINGERPRINT.test(messageFingerprint))) {
         throw RequestError.invalidParams(undefined, "AIR fork messageFingerprint must be a SHA-256 fingerprint");
     }
     const messageOccurrence = fork["messageOccurrence"] ?? 1;

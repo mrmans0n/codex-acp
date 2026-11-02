@@ -1444,6 +1444,53 @@ It adds this object to the `session/fork` request:
 - When no message matches, the request fails with `invalidParams`.
 - The fork keeps the history up to the turn that holds the message.
 
+### Client-neutral fork point
+
+A client that is not AIR can fork at a message without the `_meta.jetbrains.air` namespace.
+It opts in with `initialize.clientCapabilities._meta`:
+
+```json
+{ "forkPoint": { "version": 1 } }
+```
+
+- Accepted only when `forkPoint` is an object whose `version` is an integer of at least 1. Anything else
+  enables nothing.
+- The opt-in works on ACP v1 and v2. The `initialize` answer of an opted-in client has the top-level
+  `_meta.forkPoint: {"version": 1, "boundary": "turn"}`. `boundary: "turn"` means that a fork keeps the whole
+  turn that holds the message, the items after the message included.
+
+The `session/fork` request carries the fork point in its top-level `_meta`:
+
+```json
+{ "_meta": { "forkPoint": { "messageId": "item-12", "messageFingerprint": "sha256:<64 hex>", "messageOccurrence": 1 } } }
+```
+
+- Without `_meta.forkPoint`, the fork copies the whole session, as before.
+- A client that did not opt in gets `invalidParams` with the data `{"forkPoint": {"reason": "notNegotiated"}}`.
+- `version` is optional; when present it must be `1`.
+- `messageId` must be a non-empty string. It matches the id of any Codex item, the `messageId` of the
+  session update chunks. The `:segment:<n>` suffix of the AIR form is not read.
+- `messageFingerprint` is optional: `sha256:` and 64 lowercase hex digits. It is the SHA-256 digest of the
+  agent message text as the client received it, so with file citations already rendered as Markdown links,
+  against the cwd of the source thread. The adapter uses it when no item has the id.
+- `messageOccurrence` is optional, a positive integer, and `1` by default.
+  It selects among the agent messages of the whole thread with the same fingerprint.
+- An invalid field fails the request with `invalidParams` and the data `{"forkPoint": {"field": "<name>"}}`,
+  where the name is `forkPoint` when the value is not an object.
+- When no message matches, the request fails with `invalidParams` and the data
+  `{"forkPoint": {"messageId": "<requested id>", "reason": "notFound"}}`.
+- When a request has both `_meta.forkPoint` and `_meta.jetbrains.air.fork`, only `_meta.forkPoint` is read.
+
+The `session/fork` answer, on ACP v1 and v2, then says where the fork ends:
+
+```json
+{ "_meta": { "forkPoint": { "boundary": "turn", "messageId": "item-12", "turnId": "turn-4", "lastItemId": "item-15", "matchedBy": "id" } } }
+```
+
+- `messageId` is the id of the matched Codex item, `turnId` the last turn the fork keeps, and `lastItemId`
+  the last item of that turn.
+- `matchedBy` is `id` or `fingerprint`.
+
 ## Presentation hints
 
 The adapter sends these keys only to AIR:
