@@ -182,6 +182,37 @@ describe('CodexACPAgent - initialize', () => {
         expect(other._meta).not.toHaveProperty("forkPoint");
     });
 
+    it('advertises the client-neutral diff patch only to a client that opts in', async () => {
+        const optedIn = await agent.initialize({
+            protocolVersion: acp.PROTOCOL_VERSION,
+            clientCapabilities: {_meta: {diffPatch: {version: 1}}},
+        });
+        const invalid = await agent.initialize({
+            protocolVersion: acp.PROTOCOL_VERSION,
+            clientCapabilities: {_meta: {diffPatch: {version: "1"}}},
+        });
+        const other = await agent.initialize({protocolVersion: acp.PROTOCOL_VERSION});
+
+        expect(optedIn._meta?.["diffPatch"]).toEqual({version: 1, format: "git_patch"});
+        expect(optedIn._meta).not.toHaveProperty("jetbrains");
+        expect(invalid._meta).not.toHaveProperty("diffPatch");
+        expect(other._meta).not.toHaveProperty("diffPatch");
+    });
+
+    it('keeps the AIR diffPatch advert for an AIR client and adds the client-neutral advert only when it opts in', async () => {
+        const air = {jetbrains: {air: {version: 1, capabilities: ["diffPatch"]}}};
+        const airOnly = await agent.initialize({protocolVersion: acp.PROTOCOL_VERSION, clientCapabilities: {_meta: air}});
+        const both = await agent.initialize({
+            protocolVersion: acp.PROTOCOL_VERSION,
+            clientCapabilities: {_meta: {...air, diffPatch: {version: 1}}},
+        });
+
+        expect(airOnly._meta).not.toHaveProperty("diffPatch");
+        expect((airOnly._meta as any).jetbrains.air.capabilities).toContain("diffPatch");
+        expect(both._meta?.["diffPatch"]).toEqual({version: 1, format: "git_patch"});
+        expect((both._meta as any).jetbrains).toEqual((airOnly._meta as any).jetbrains);
+    });
+
     it('answers an AIR client that also sends the client-neutral session index by the AIR rules alone', async () => {
         const result = await agent.initialize({
             protocolVersion: acp.PROTOCOL_VERSION,

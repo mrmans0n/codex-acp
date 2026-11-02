@@ -228,6 +228,7 @@ import {
     NEUTRAL_FORK_POINT_META_KEY,
     neutralForkPointCapability,
 } from "./SessionFork";
+import {NEUTRAL_DIFF_PATCH_META_KEY, neutralDiffPatchCapability} from "./GitPatch";
 import {SessionIndexService} from "./SessionIndexService";
 import type {SessionIndexTitleState} from "./SessionIndexTitles";
 import {ASYNC_TASK_STOP_METHOD, asyncTaskCapability} from "./async-tasks/AsyncTaskExtension";
@@ -955,6 +956,11 @@ export class CodexAcpServer {
             // The client-neutral fork point, see `docs/air-extensions.md`.
             ...(this.neutralForkPointSupported ? {
                 [NEUTRAL_FORK_POINT_META_KEY]: neutralForkPointCapability(),
+            } : {}),
+            // The client-neutral diff patch, see `docs/air-extensions.md`. ACP v2 has its own diff patch,
+            // so `ClientCapabilities.fromV2` never selects it.
+            ...(protocolVersion === 1 && this.capabilities.diffPatchFormat === "neutral" ? {
+                [NEUTRAL_DIFF_PATCH_META_KEY]: neutralDiffPatchCapability(),
             } : {}),
             // The session index for a client that opted in without AIR, see `docs/air-extensions.md`.
             ...(neutralSessionIndex ? {

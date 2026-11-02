@@ -219,6 +219,35 @@ describe("ClientCapabilities", () => {
             .toEqual({rawInputRendering: false, planContentDelta: false, diffPatch: false});
     });
 
+    it.each([
+        {name: "no declaration", meta: {}, expected: "none"},
+        {name: "the AIR capability", meta: {jetbrains: {air: {version: 1, capabilities: ["diffPatch"]}}}, expected: "air"},
+        {name: "the client-neutral opt-in", meta: {diffPatch: {version: 1}}, expected: "neutral"},
+        {name: "a later client-neutral version", meta: {diffPatch: {version: 2}}, expected: "neutral"},
+        {
+            name: "both the AIR capability and the client-neutral opt-in",
+            meta: {jetbrains: {air: {version: 1, capabilities: ["diffPatch"]}}, diffPatch: {version: 1}},
+            expected: "neutral",
+        },
+        {name: "version 0", meta: {diffPatch: {version: 0}}, expected: "none"},
+        {name: "a fractional version", meta: {diffPatch: {version: 1.5}}, expected: "none"},
+        {name: "a string version", meta: {diffPatch: {version: "1"}}, expected: "none"},
+        {name: "no version", meta: {diffPatch: {}}, expected: "none"},
+        {name: "literal true", meta: {diffPatch: true}, expected: "none"},
+        {name: "an array", meta: {diffPatch: [{version: 1}]}, expected: "none"},
+        {name: "null", meta: {diffPatch: null}, expected: "none"},
+    ])("selects the diff patch form from $name", ({meta, expected}) => {
+        expect(ClientCapabilities.from({_meta: meta} as never).diffPatchFormat).toBe(expected);
+    });
+
+    it("keeps the AIR diffPatch declaration of a client that also opts into the client-neutral form", () => {
+        const both = ClientCapabilities.from({
+            _meta: {jetbrains: {air: {version: 1, capabilities: ["diffPatch"]}}, diffPatch: {version: 1}},
+        });
+        expect(both.air.diffPatch).toBe(true);
+        expect(both.diffPatchFormat).toBe("neutral");
+    });
+
     it("selects the terminal channel that the client declares, and terminal_output_delta for any other client", () => {
         expect(AIR.terminalOutputKey(true)).toBe("terminal_output_delta");
         expect(AIR.terminalOutputKey(false)).toBe("terminal_output_delta");
