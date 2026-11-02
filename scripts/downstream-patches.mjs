@@ -38,6 +38,10 @@ export const KNOWN_PATCH_IDENTITIES = Object.freeze([
     name: "async-questions",
     commit: "e57bcd768c8cebd1d3d17b840ae0db2e11639615",
   }),
+  Object.freeze({
+    name: "neutral-fork-point",
+    commit: "fc9a61e080134d623df7e67e8fd8eb8729da875a",
+  }),
 ]);
 
 function git(cwd, args, options = {}) {
