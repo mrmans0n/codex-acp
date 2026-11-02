@@ -42,6 +42,10 @@ export const KNOWN_PATCH_IDENTITIES = Object.freeze([
     name: "neutral-fork-point",
     commit: "fc9a61e080134d623df7e67e8fd8eb8729da875a",
   }),
+  Object.freeze({
+    name: "neutral-diff-patch",
+    commit: "4ab2596b598e955944c2c1908a8765f24147c88d",
+  }),
 ]);
 
 function git(cwd, args, options = {}) {
