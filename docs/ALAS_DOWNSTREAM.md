@@ -33,6 +33,9 @@ index under `_meta.sessionIndex` for a client that does not declare AIR).
 `request_user_input_async` questions as non-blocking form elicitations whose
 answers are steered into the asking turn. The next stable sync that contains it
 classifies it as absorbed, and it is then dropped.
+`neutral-fork-point` (no upstream PR yet) lets a client that does not declare
+AIR negotiate `_meta.forkPoint` and fork a session at a message, with the kept
+turn boundary reported in the `session/fork` answer.
 Keep ledger entries and their file
 lists exact when a patch changes. `npm run test:maintenance` verifies the ledger
 against the recorded commits. A file list may extend the original commit's paths
