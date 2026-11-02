@@ -326,6 +326,32 @@
       ],
       "disposition": "active",
       "retiredCommits": []
+    },
+    {
+      "name": "neutral-diff-patch",
+      "commit": "4ab2596b598e955944c2c1908a8765f24147c88d",
+      "upstreamPr": null,
+      "files": [
+        "docs/air-extensions.md",
+        "src/CodexAcpServer.ts",
+        "src/GitPatch.ts",
+        "src/__tests__/CodexACPAgent/file-change-events.test.ts",
+        "src/__tests__/CodexACPAgent/initialize-v2.test.ts",
+        "src/__tests__/CodexACPAgent/initialize.test.ts",
+        "src/__tests__/CodexACPAgent/load-session.test.ts",
+        "src/__tests__/tool-calls/tool-call-contract.test.ts",
+        "src/tool-calls/ClientCapabilities.ts",
+        "src/tool-calls/reporters/FileChangeReporter.ts"
+      ],
+      "tests": [
+        "src/__tests__/CodexACPAgent/file-change-events.test.ts",
+        "src/__tests__/CodexACPAgent/initialize-v2.test.ts",
+        "src/__tests__/CodexACPAgent/initialize.test.ts",
+        "src/__tests__/CodexACPAgent/load-session.test.ts",
+        "src/__tests__/tool-calls/tool-call-contract.test.ts"
+      ],
+      "disposition": "active",
+      "retiredCommits": []
     }
   ],
   "retiredCommits": [
