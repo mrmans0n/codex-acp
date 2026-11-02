@@ -36,6 +36,9 @@ classifies it as absorbed, and it is then dropped.
 `neutral-fork-point` (no upstream PR yet) lets a client that does not declare
 AIR negotiate `_meta.forkPoint` and fork a session at a message, with the kept
 turn boundary reported in the `session/fork` answer.
+`neutral-diff-patch` (no upstream PR yet) lets a client that does not declare
+AIR negotiate `_meta.diffPatch` and get each file change as one Git patch in the
+diff block's top-level `_meta.diffPatch`, live and on history replay.
 Keep ledger entries and their file
 lists exact when a patch changes. `npm run test:maintenance` verifies the ledger
 against the recorded commits. A file list may extend the original commit's paths
