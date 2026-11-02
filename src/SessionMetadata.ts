@@ -2,6 +2,7 @@ import type {ModeKind} from "./app-server/ModeKind";
 import type {ServiceTier} from "./app-server/ServiceTier";
 import type {Model, Thread, ThreadItemEntry, ThreadStatus} from "./app-server/v2";
 import type {SessionInstructions} from "./ClientSystemPrompt";
+import type {ForkPointResult} from "./SessionFork";
 
 export type SessionMetadata = {
     sessionId: string,
@@ -14,6 +15,8 @@ export type SessionMetadata = {
     additionalDirectories: string[],
     skippedMcpServers?: string[],
     instructions?: SessionInstructions,
+    /** The fork point that a client-neutral `session/fork` resolved. */
+    forkPoint?: ForkPointResult,
 }
 
 export type SessionMetadataWithThread = SessionMetadata & {

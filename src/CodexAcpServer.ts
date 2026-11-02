@@ -221,6 +221,13 @@ import {
     JETBRAINS_META_KEY,
 } from "./AirExtension";
 import {NEUTRAL_SESSION_INDEX_META_KEY} from "./SessionIndex";
+import {
+    clientRequestsNeutralForkPoint,
+    forkPointNotNegotiatedError,
+    hasNeutralForkPoint,
+    NEUTRAL_FORK_POINT_META_KEY,
+    neutralForkPointCapability,
+} from "./SessionFork";
 import {SessionIndexService} from "./SessionIndexService";
 import type {SessionIndexTitleState} from "./SessionIndexTitles";
 import {ASYNC_TASK_STOP_METHOD, asyncTaskCapability} from "./async-tasks/AsyncTaskExtension";
@@ -510,6 +517,8 @@ export class CodexAcpServer {
     /** The capability choices of the client for tool call and plan reports. */
     private capabilities: ClientCapabilities;
     private booleanConfigOptionsSupported: boolean;
+    /** Whether the client opted into the client-neutral `session/fork` `_meta.forkPoint`. */
+    private neutralForkPointSupported = false;
     /** Last `authStatus` pushed to the client; used to suppress duplicates. */
     private currentAuthStatus: AuthStatus | null;
     /**
@@ -790,6 +799,7 @@ export class CodexAcpServer {
         if (appServer) await appServer;
         this.reportingConnection.reports.compareMeta = this.capabilities.airToolCallContract;
         this.booleanConfigOptionsSupported = clientSupportsBooleanConfigOptions(_params.clientCapabilities);
+        this.neutralForkPointSupported = clientRequestsNeutralForkPoint(_params.clientCapabilities);
         this.sessionIndex.configure(_params.clientCapabilities);
         this.hookReview.configure(_params.clientCapabilities?._meta?.["codexHooks"], this.capabilities.airClient);
         await this.runWithProcessCheck(() => this.codexAcpClient.initialize(_params));
@@ -854,6 +864,7 @@ export class CodexAcpServer {
         this.reportingConnection.reports.compareMeta = this.capabilities.airToolCallContract;
         // Boolean config options are baseline on v2, so there is nothing to probe.
         this.booleanConfigOptionsSupported = true;
+        this.neutralForkPointSupported = clientRequestsNeutralForkPoint(clientCapabilities);
         this.sessionIndex.configure(clientCapabilities, {neutral: false});
         await this.runWithProcessCheck(() => this.codexAcpClient.initialize({clientInfo: params.info}));
         this.sessionIndex.observe(this.codexAcpClient);
@@ -941,6 +952,10 @@ export class CodexAcpServer {
                 "async-tasks": asyncTaskCapability(),
             } : {}),
             ...(this.hookReview.enabled ? {codexHooks: {version: 1, reviewToken: true}} : {}),
+            // The client-neutral fork point, see `docs/air-extensions.md`.
+            ...(this.neutralForkPointSupported ? {
+                [NEUTRAL_FORK_POINT_META_KEY]: neutralForkPointCapability(),
+            } : {}),
             // The session index for a client that opted in without AIR, see `docs/air-extensions.md`.
             ...(neutralSessionIndex ? {
                 [NEUTRAL_SESSION_INDEX_META_KEY]: neutralSessionIndex,
@@ -1270,6 +1285,7 @@ export class CodexAcpServer {
             | WithAcpMcpServers<acp.ResumeSessionRequest>
             | WithAcpMcpServers<acp.ForkSessionRequest>,
         operation: "new" | "resume" | "fork" = "sessionId" in request ? "resume" : "new",
+        onForked?: (metadata: SessionMetadata) => void,
     ): Promise<[SessionId, LegacySessionModelState, SessionModeState]> {
         clientSystemPromptText(request.systemPrompt);
         const existingSessionRequest = request as WithAcpMcpServers<acp.ResumeSessionRequest> | WithAcpMcpServers<acp.ForkSessionRequest>;
@@ -1332,6 +1348,7 @@ export class CodexAcpServer {
                     previousInstructions,
                 );
             });
+            onForked?.(sessionMetadata);
         } else {
             logger.log(`Create new session...`);
             sessionMetadata = await this.runWithProcessCheck(() => {
@@ -1990,6 +2007,9 @@ export class CodexAcpServer {
     async forkSession(params: WithAcpMcpServers<acp.ForkSessionRequest>): Promise<acp.ForkSessionResponse> {
         params = this.withV1SessionInstructionAppend(params);
         clientSystemPromptText(params.systemPrompt);
+        if (hasNeutralForkPoint(params._meta) && !this.neutralForkPointSupported) {
+            throw forkPointNotNegotiatedError();
+        }
         this.assertInstructionsReady(params.sessionId);
         return this.hookReview.run(params.cwd, params._meta,
             () => this.sessionIndex.forking(params.sessionId, () => this.createFork(params)));
@@ -2003,12 +2023,16 @@ export class CodexAcpServer {
         if (appServer) await appServer;
         logger.log("Forking session...", {sessionId: params.sessionId});
         try {
-            const [sessionId, , modeState] = await this.tryCreateSession(params, "fork");
+            let forkPoint: SessionMetadata["forkPoint"];
+            const [sessionId, , modeState] = await this.tryCreateSession(params, "fork", metadata => {
+                forkPoint = metadata.forkPoint;
+            });
             logger.log("Session forked", {sourceSessionId: params.sessionId, sessionId});
             return {
                 sessionId,
                 modes: modeState,
                 ...this.createSessionConfigOptionsResponse(this.getSessionState(sessionId)),
+                ...(forkPoint ? {_meta: {[NEUTRAL_FORK_POINT_META_KEY]: forkPoint}} : {}),
             };
         } catch (e) {
             const error = e instanceof Error ? e : new Error(String(e));
@@ -2020,10 +2044,11 @@ export class CodexAcpServer {
     async forkSessionV2(params: acpV2.ForkSessionRequest): Promise<acpV2.ForkSessionResponse> {
         const {systemPrompt, ...rest} = params;
         const request = {...rest, systemPrompt: toV1SystemPrompt(systemPrompt)};
-        const {sessionId} = await this.forkSession(request);
+        const {sessionId, _meta} = await this.forkSession(request);
         return {
             sessionId,
             ...this.createSessionSetupResponseV2(this.getSessionState(sessionId)),
+            ...(_meta ? {_meta} : {}),
         };
     }
 
