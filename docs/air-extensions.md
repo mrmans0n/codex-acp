@@ -375,6 +375,7 @@ It applies to an ACP `diff` content block.
 The adapter uses patch mode only when the client declares `diffPatch`.
 The agent advertises `diffPatch` to AIR.
 Without the client declaration, the adapter sends the standard `oldText` and `newText` values.
+A client that is not AIR can opt in without the AIR namespace, see [Client-neutral diff patch](#client-neutral-diff-patch).
 
 ### Diff content
 
@@ -467,6 +468,46 @@ It drops the file headers that Codex supplied, so that all headers name the same
 It builds one full-file patch for an addition or a deletion from the content that Codex supplied.
 The adapter applies this mode to live file changes and to replayed session history.
 It does not read the current file when it can forward a provider patch.
+
+### Client-neutral diff patch
+
+A client that is not AIR can get the same patches without the `_meta.jetbrains.air` namespace.
+It opts in with `initialize.clientCapabilities._meta`:
+
+```json
+{ "diffPatch": { "version": 1 } }
+```
+
+- Accepted only when `diffPatch` is an object whose `version` is an integer of at least 1. Anything else
+  enables nothing.
+- The opt-in is an ACP v1 extension. The `initialize` answer of an opted-in client has the top-level
+  `_meta.diffPatch: {"version": 1, "format": "git_patch"}`.
+- ACP v2 ignores the opt-in: a v2 diff carries its own Git patch.
+
+Each patch block then carries the payload in its top-level `_meta.diffPatch`, next to `_meta.kind`:
+
+```json
+{
+  "type": "diff",
+  "path": "/workspace/src/App.ts",
+  "oldText": null,
+  "newText": "",
+  "_meta": {
+    "kind": "update",
+    "diffPatch": {
+      "version": 1,
+      "format": "git_patch",
+      "text": "diff --git a/workspace/src/App.ts b/workspace/src/App.ts\n--- a/workspace/src/App.ts\n+++ b/workspace/src/App.ts\n@@ -1 +1 @@\n-old\n+new\n"
+    }
+  }
+}
+```
+
+- The fields, the patch rules, the placeholders, the [fallback](#fallback) and the [Codex behavior](#codex-behavior)
+  are those of the AIR form. Only the location of the payload differs.
+- A client that declares both the AIR `diffPatch` capability and the client-neutral opt-in gets only the
+  client-neutral form. Its AIR capability list still names `diffPatch`.
+- AIR clients that do not send the client-neutral opt-in get the AIR form, unchanged.
 
 ## Permission presentation
 
