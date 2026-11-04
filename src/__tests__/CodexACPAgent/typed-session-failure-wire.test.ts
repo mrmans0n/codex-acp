@@ -14,6 +14,46 @@ const typedFailureCapabilities: acp.ClientCapabilities = {
     _meta: {jetbrains: {air: {version: 1, capabilities: ["sessionFailure"]}}},
 };
 
+const neutralFailureCapabilities: acp.ClientCapabilities = {_meta: {sessionFailure: {version: 1}}};
+
+const bothFailureCapabilities: acp.ClientCapabilities = {
+    _meta: {...typedFailureCapabilities._meta, ...neutralFailureCapabilities._meta},
+};
+
+const NEUTRAL_FORMS = [
+    {name: "the client-neutral opt-in", capabilities: neutralFailureCapabilities},
+    {name: "both the AIR capability and the client-neutral opt-in", capabilities: bothFailureCapabilities},
+];
+
+const FAILURE_FORMS = [
+    {
+        form: "air",
+        capabilities: typedFailureCapabilities,
+        record: (update: acp.SessionNotification) => (update.update._meta as {
+            jetbrains: {air: {sessionFailure: {id: string; revision: number}}};
+        }).jetbrains.air.sessionFailure,
+    },
+    {
+        form: "neutral",
+        capabilities: neutralFailureCapabilities,
+        record: (update: acp.SessionNotification) => (update.update._meta as {
+            sessionFailure: {id: string; revision: number};
+        }).sessionFailure,
+    },
+];
+
+function errorNotification(sessionId: string, turnId: string, message: string, willRetry = false) {
+    return {
+        method: "error",
+        params: {
+            threadId: sessionId,
+            turnId,
+            willRetry,
+            error: {message, codexErrorInfo: "serverOverloaded", additionalDetails: null},
+        },
+    };
+}
+
 describe("typed session failures over ACP transport", () => {
     it("negotiates native subagents through AIR metadata across the SDK boundary", async () => {
         const fixture = createWireFixture();
@@ -78,6 +118,8 @@ describe("typed session failures over ACP transport", () => {
         });
         expect(JSON.stringify(response)).not.toContain("secret process stderr");
         expect(JSON.stringify(response)).not.toContain("raw transport rejection");
+        expect((response._meta as {jetbrains: {air: {sessionFailure: object}}}).jetbrains.air.sessionFailure)
+            .not.toHaveProperty("kind");
         expect(fixture.updates).toEqual([]);
     });
 
@@ -162,6 +204,7 @@ describe("typed session failures over ACP transport", () => {
         }).jetbrains.air.sessionFailure;
         expect(wireFailure).not.toHaveProperty("turnId");
         expect(wireFailure).not.toHaveProperty("safeMessage");
+        expect(wireFailure).not.toHaveProperty("kind");
         expect(JSON.stringify(fixture.updates)).not.toContain("secret idle detail");
     });
 
@@ -413,6 +456,142 @@ describe("typed session failures over ACP transport", () => {
         }).jetbrains.air.sessionFailure;
         expect(next.id).toBe(records[0]!.id);
         expect(next.revision).toBe(4);
+    });
+});
+
+describe("client-neutral session failures over ACP transport", () => {
+    it.each(NEUTRAL_FORMS)("returns a process-exit failure in the prompt response for $name", async ({capabilities}) => {
+        const fixture = createWireFixture({exitCode: 1, stderr: "secret process stderr"});
+        await fixture.initialize(capabilities);
+        const sessionState = createTestSessionState({sessionId: "neutral-process-exit", account: {type: "apiKey"}});
+        vi.spyOn(fixture.server, "getSessionState").mockReturnValue(sessionState);
+        vi.spyOn(fixture.appServer, "turnStart").mockRejectedValue(new Error("raw transport rejection"));
+
+        const response = await fixture.client.request(acp.methods.agent.session.prompt, {
+            sessionId: sessionState.sessionId,
+            prompt: [{type: "text", text: "trigger process failure"}],
+        });
+
+        expect(response.stopReason).toBe("end_turn");
+        expect(Object.keys(response._meta!).sort()).toEqual(["quota", "sessionFailure"]);
+        expect(response._meta!["sessionFailure"]).toEqual({
+            version: 1,
+            id: expect.stringMatching(/^neutral-process-exit:error:[0-9a-f-]+:\d+$/),
+            revision: 1,
+            category: "connection",
+            severity: "error",
+            title: "Connection to Codex was lost.",
+            actions: ["retry", "new_session"],
+            kind: "transport_lost",
+        });
+        expect(fixture.updates).toEqual([]);
+    });
+
+    it.each(NEUTRAL_FORMS)("delivers a late idle error as a session update for $name", async ({capabilities}) => {
+        const fixture = await createIdleFixture("neutral-idle-error", capabilities);
+
+        fixture.sendServerNotification(errorNotification(fixture.sessionId, "turn-id", "Codex is temporarily overloaded."));
+        await fixture.codexClient.waitForSessionNotifications(fixture.sessionId);
+        await vi.waitFor(() => expect(fixture.updates).toHaveLength(1));
+
+        expect(fixture.updates[0]!.update).toEqual({
+            sessionUpdate: "session_info_update",
+            _meta: {
+                sessionFailure: {
+                    version: 1,
+                    id: "turn-id:error",
+                    revision: 1,
+                    category: "service",
+                    severity: "error",
+                    title: "Codex is temporarily overloaded.",
+                    actions: ["retry"],
+                    kind: "overloaded",
+                },
+            },
+        });
+    });
+
+    it("updates one late retry incident from warning attempts to terminal error", async () => {
+        const fixture = await createIdleFixture("neutral-retry-chain", neutralFailureCapabilities);
+
+        fixture.sendServerNotification(errorNotification(fixture.sessionId, "turn-id", "Retrying, attempt 1.", true));
+        fixture.sendServerNotification(errorNotification(fixture.sessionId, "turn-id", "Retrying, attempt 2.", true));
+        fixture.sendServerNotification(errorNotification(fixture.sessionId, "turn-id", "Gave up."));
+        await fixture.codexClient.waitForSessionNotifications(fixture.sessionId);
+        await vi.waitFor(() => expect(fixture.updates).toHaveLength(3));
+
+        expect(fixture.updates.map(update => update.update._meta!["sessionFailure"])).toEqual([
+            expect.objectContaining({id: "turn-id:error", revision: 1, severity: "warning", actions: [], kind: "overloaded"}),
+            expect.objectContaining({id: "turn-id:error", revision: 2, severity: "warning", actions: [], kind: "overloaded"}),
+            expect.objectContaining({id: "turn-id:error", revision: 3, severity: "error", actions: ["retry"], kind: "overloaded"}),
+        ]);
+    });
+
+    it.each([
+        {name: "version 0", declared: {version: 0}},
+        {name: "a fractional version", declared: {version: 1.5}},
+        {name: "a string version", declared: {version: "1"}},
+        {name: "no version", declared: {}},
+        {name: "literal true", declared: true},
+    ])("keeps the legacy lane for an invalid opt-in: $name", async ({declared}) => {
+        const fixture = await createIdleFixture("neutral-invalid-opt-in", {_meta: {sessionFailure: declared}});
+
+        fixture.sendServerNotification({method: "warning", params: {threadId: fixture.sessionId, message: "legacy advisory"}});
+        await fixture.codexClient.waitForSessionNotifications(fixture.sessionId);
+        await vi.waitFor(() => expect(fixture.updates).toHaveLength(1));
+
+        expect(fixture.updates[0]!.update).toMatchObject({
+            sessionUpdate: "agent_message_chunk",
+            content: {type: "text", text: "Warning: legacy advisory\n\n"},
+        });
+    });
+
+    // The handler of a later prompt knows only the failure that is still active. Once that one is cleared, it
+    // allocates `<turnId>:error` again, and the AIR form restarts at revision 1, which the client drops.
+    it.each([
+        {...FAILURE_FORMS[0]!, revisions: [1, 1]},
+        {...FAILURE_FORMS[1]!, revisions: [1, 2]},
+    ])("advances a late incident across prompt handlers as $revisions in the $form form", async ({capabilities, record, revisions}) => {
+        const fixture = await createIdleFixture(`handlers-${revisions.join("-")}`, capabilities);
+
+        fixture.sendServerNotification(errorNotification(fixture.sessionId, "old-turn", "First late error"));
+        await fixture.codexClient.waitForSessionNotifications(fixture.sessionId);
+        await vi.waitFor(() => expect(fixture.updates).toHaveLength(1));
+        for (const text of ["recover and clear the failure", "install a handler that does not know it"]) {
+            await fixture.client.request(acp.methods.agent.session.prompt, {
+                sessionId: fixture.sessionId,
+                prompt: [{type: "text", text}],
+            });
+        }
+        fixture.sendServerNotification(errorNotification(fixture.sessionId, "old-turn", "Second late error"));
+        await fixture.codexClient.waitForSessionNotifications(fixture.sessionId);
+        await vi.waitFor(() => expect(fixture.updates).toHaveLength(2));
+
+        const records = fixture.updates.map(record);
+        expect(records.map(failure => failure.id)).toEqual(["old-turn:error", "old-turn:error"]);
+        expect(records.map(failure => failure.revision)).toEqual(revisions);
+    });
+
+    // Each handler numbers its session-scoped incidents, so without a shared number the second incident of a
+    // session reuses the id of the first one and overwrites its transcript entry.
+    it("gives the session-scoped failure of a later prompt its own id", async () => {
+        const fixture = createWireFixture({exitCode: 1, stderr: "gone"});
+        await fixture.initialize(neutralFailureCapabilities);
+        const sessionState = createTestSessionState({sessionId: "neutral-session-scoped", account: {type: "apiKey"}});
+        vi.spyOn(fixture.server, "getSessionState").mockReturnValue(sessionState);
+        vi.spyOn(fixture.appServer, "turnStart").mockRejectedValue(new Error("transport closed"));
+
+        const responses = [];
+        for (const text of ["first", "second"]) {
+            responses.push(await fixture.client.request(acp.methods.agent.session.prompt, {
+                sessionId: sessionState.sessionId,
+                prompt: [{type: "text", text}],
+            }));
+        }
+
+        const [first, second] = responses.map(response => response._meta!["sessionFailure"] as {id: string; revision: number});
+        expect(second!.id).not.toBe(first!.id);
+        expect(second!.revision).toBe(1);
     });
 });
 

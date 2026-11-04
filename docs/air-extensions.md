@@ -953,6 +953,8 @@ A client can also declare the ACP `clientCapabilities.session.notices`.
 Then a `warning`, `configWarning`, or `deprecationNotice` notification goes out as an ACP `notice` session update.
 It does not go out as a `sessionFailure` record. Errors still use `sessionFailure`.
 
+A client that is not AIR can opt in without the AIR namespace, see [Client-neutral session failure](#client-neutral-session-failure).
+
 ### Record
 
 ```json
@@ -1039,6 +1041,68 @@ Recovery is internal adapter state and is not sent.
 A retry warning stops being active when Codex produces turn content again.
 A successful turn ends an active warning of that turn.
 Recovery never removes the transcript record.
+
+### Client-neutral session failure
+
+A client that is not AIR can get the same typed lane without the `_meta.jetbrains.air` namespace.
+It opts in with `initialize.clientCapabilities._meta`:
+
+```json
+{ "sessionFailure": { "version": 1 } }
+```
+
+- Accepted only when `sessionFailure` is an object whose `version` is an integer of at least 1. Anything else
+  enables nothing.
+- The opt-in is an ACP v1 extension. The `initialize` answer of an opted-in client has the top-level
+  `_meta.sessionFailure: {"version": 1}`.
+- ACP v2 ignores the opt-in: a v2 terminal failure is reported with `state_update.error`.
+
+The opt-in selects the whole lane, not just where the record goes. The [delivery](#delivery), the identity,
+the [categories and actions](#categories-and-actions), the [title and details](#title-and-details), the
+[recovery](#recovery) and the `session.notices` rule are those of the AIR form. In particular:
+
+- A terminal failure of the running turn ends the prompt with `stopReason: end_turn` and the record, not with agent
+  text or a JSON-RPC error. A prompt that failed because the Codex process exited or the adapter failed
+  unexpectedly does the same.
+- Records replace `_meta.codex.error`. Records or, with `session.notices`, ACP `notice` updates replace the
+  `Warning:` and `Config warning:` text chunks.
+- `unauthorized` and HTTP 401 still end the prompt with the ACP `authRequired` error and no record.
+
+The record goes in the top-level `_meta.sessionFailure` of a `session_info_update` or of the `PromptResponse`:
+
+```json
+{
+  "stopReason": "end_turn",
+  "_meta": {
+    "sessionFailure": {
+      "version": 1,
+      "id": "turn-7:error",
+      "revision": 1,
+      "category": "limit",
+      "severity": "error",
+      "title": "You've hit your usage limit.",
+      "actions": [],
+      "kind": "quota_exhausted"
+    }
+  }
+}
+```
+
+It has the fields of the [AIR record](#record), plus `version` and:
+
+| Field | Required | Type | Meaning |
+| --- | --- | --- | --- |
+| `kind` | yes | open string | The adapter's internal kind of the failure. Ignore a value that you do not know. |
+
+The current kinds are `transport_lost`, `rate_limited`, `quota_exhausted`, `overloaded`, `context_exhausted`,
+`budget_exhausted`, `policy_denied`, `bad_request`, `provider_error`, `internal_error`, and `notice` for a warning
+record that comes from a Codex notice. A retry warning has the kind of its failure.
+
+- Revisions of an id only increase for the whole connection, also across prompts and `session/load`, and a new
+  session-scoped incident always gets a new id. A new adapter process starts over.
+- A client that declares both the AIR `sessionFailure` capability and the client-neutral opt-in gets only the
+  client-neutral form. Its AIR capability list still names `sessionFailure`.
+- AIR clients that do not send the client-neutral opt-in get the AIR form, unchanged. The AIR record has no `kind`.
 
 ## Native subagent sessions
 

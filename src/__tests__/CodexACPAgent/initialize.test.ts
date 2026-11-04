@@ -213,6 +213,54 @@ describe('CodexACPAgent - initialize', () => {
         expect((both._meta as any).jetbrains).toEqual((airOnly._meta as any).jetbrains);
     });
 
+    it('advertises the client-neutral session failure only to a client that opts in', async () => {
+        const optedIn = await agent.initialize({
+            protocolVersion: acp.PROTOCOL_VERSION,
+            clientCapabilities: {_meta: {sessionFailure: {version: 1}}},
+        });
+        const later = await agent.initialize({
+            protocolVersion: acp.PROTOCOL_VERSION,
+            clientCapabilities: {_meta: {sessionFailure: {version: 2}}},
+        });
+        const other = await agent.initialize({protocolVersion: acp.PROTOCOL_VERSION});
+
+        expect(optedIn._meta?.["sessionFailure"]).toEqual({version: 1});
+        expect(optedIn._meta).not.toHaveProperty("jetbrains");
+        expect(later._meta?.["sessionFailure"]).toEqual({version: 1});
+        expect(other._meta).not.toHaveProperty("sessionFailure");
+    });
+
+    it.each([
+        {name: "version 0", declared: {version: 0}},
+        {name: "a fractional version", declared: {version: 1.5}},
+        {name: "a string version", declared: {version: "1"}},
+        {name: "no version", declared: {}},
+        {name: "literal true", declared: true},
+        {name: "an array", declared: [{version: 1}]},
+        {name: "null", declared: null},
+    ])('does not advertise the client-neutral session failure for $name', async ({declared}) => {
+        const response = await agent.initialize({
+            protocolVersion: acp.PROTOCOL_VERSION,
+            clientCapabilities: {_meta: {sessionFailure: declared}},
+        });
+
+        expect(response._meta).not.toHaveProperty("sessionFailure");
+    });
+
+    it('keeps the AIR sessionFailure advert for an AIR client and adds the client-neutral advert only when it opts in', async () => {
+        const air = {jetbrains: {air: {version: 1, capabilities: ["sessionFailure"]}}};
+        const airOnly = await agent.initialize({protocolVersion: acp.PROTOCOL_VERSION, clientCapabilities: {_meta: air}});
+        const both = await agent.initialize({
+            protocolVersion: acp.PROTOCOL_VERSION,
+            clientCapabilities: {_meta: {...air, sessionFailure: {version: 1}}},
+        });
+
+        expect(airOnly._meta).not.toHaveProperty("sessionFailure");
+        expect((airOnly._meta as any).jetbrains.air.capabilities).toContain("sessionFailure");
+        expect(both._meta?.["sessionFailure"]).toEqual({version: 1});
+        expect((both._meta as any).jetbrains).toEqual((airOnly._meta as any).jetbrains);
+    });
+
     it('answers an AIR client that also sends the client-neutral session index by the AIR rules alone', async () => {
         const result = await agent.initialize({
             protocolVersion: acp.PROTOCOL_VERSION,
