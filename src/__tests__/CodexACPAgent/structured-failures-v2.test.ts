@@ -122,6 +122,25 @@ describe("standard ACP v2 terminal failures", () => {
         await expect(dump(lastIdle(client))).toMatchFileSnapshot("data/structured-failure-v2-pre-insertion-auth.json");
     });
 
+    it.each([
+        {name: "plain", meta: {sessionFailure: {version: 1}}},
+        {name: "air", meta: {sessionFailure: {version: 1}, jetbrains: {air: {version: 1, capabilities: ["sessionFailure"]}}}},
+    ])("ignores the client-neutral opt-in: a provider failure stays the $name snapshot", async ({name, meta}) => {
+        client = await connectSession(2, {clientCapabilities: {_meta: meta}});
+        await insert(client);
+        client.emit(errorNotification(JSON.stringify({
+            type: "error", status: 429,
+            error: {type: "rate_limit_error", message: "Try again later.", code: "rate_limited", param: null},
+        }), "usageLimitExceeded"));
+        client.emit(turnFinished("failed"));
+        await client.promptRunFinished();
+        await settle();
+
+        const idle = lastIdle(client);
+        expect(idle._meta).not.toHaveProperty("sessionFailure");
+        await expect(dump(idle)).toMatchFileSnapshot(`data/structured-failure-v2-provider-${name}.json`);
+    });
+
     it("does not turn a retried model error or a failed tool into terminal session failure", async () => {
         client = await connectSession();
         await insert(client);

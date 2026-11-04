@@ -76,6 +76,12 @@ const typedFailureCapabilities: acp.ClientCapabilities = {
     _meta: {jetbrains: {air: {version: 1, capabilities: ["sessionFailure"]}}},
 };
 
+const neutralFailureCapabilities: acp.ClientCapabilities = {_meta: {sessionFailure: {version: 1}}};
+
+const bothFailureCapabilities: acp.ClientCapabilities = {
+    _meta: {...typedFailureCapabilities._meta, ...neutralFailureCapabilities._meta},
+};
+
 const modelRefusalMessage = "The 'gpt-6.1-sol' model is not supported when using Codex with a ChatGPT account.";
 const modelRefusalEnvelope = JSON.stringify({
     type: "error", status: 400, error: {type: "invalid_request_error", message: modelRefusalMessage},
@@ -230,6 +236,132 @@ describe("CodexEventHandler - auth error events", () => {
         expect(wire.result._meta.jetbrains.air.sessionFailure).toEqual(
             expect.objectContaining({id: "turn-id:error", category: "service"}),
         );
+    });
+
+    it.each([
+        {name: "the client-neutral opt-in", capabilities: neutralFailureCapabilities},
+        {name: "both forms", capabilities: bothFailureCapabilities},
+    ])("publishes a typed terminal failure instead of assistant text for $name", async ({capabilities}) => {
+        const {result, updates} = await runPromptWithError(createTestSessionState({
+            sessionId: "neutral-failure-session",
+            account: {type: "apiKey"},
+        }), {
+            message: "Codex is temporarily overloaded.",
+            codexErrorInfo: "serverOverloaded",
+            additionalDetails: "secret raw details",
+            misalignment: null,
+        }, false, capabilities);
+
+        expect(result).toMatchObject({stopReason: "end_turn"});
+        expect((result as acp.PromptResponse)._meta).not.toHaveProperty("jetbrains");
+        expect((result as acp.PromptResponse)._meta!["sessionFailure"]).toEqual({
+            version: 1,
+            id: "turn-id:error",
+            revision: 1,
+            category: "service",
+            severity: "error",
+            title: "Codex is temporarily overloaded.",
+            actions: ["retry"],
+            kind: "overloaded",
+        });
+        expect(JSON.stringify(result)).not.toContain("secret raw details");
+        expect(updates).toEqual([]);
+    });
+
+    it.each<{info: ErrorNotification["error"]["codexErrorInfo"]; kind: string; category: string; actions: string[]}>([
+        {info: "usageLimitExceeded", kind: "quota_exhausted", category: "limit", actions: []},
+        {info: "rateLimitExceeded", kind: "rate_limited", category: "limit", actions: ["retry"]},
+        {info: "contextWindowExceeded", kind: "context_exhausted", category: "limit", actions: ["new_session"]},
+        {info: "sessionBudgetExceeded", kind: "budget_exhausted", category: "limit", actions: ["new_session"]},
+        {info: "cyberPolicy", kind: "policy_denied", category: "request", actions: []},
+        {info: "badRequest", kind: "bad_request", category: "request", actions: []},
+        {info: "internalServerError", kind: "internal_error", category: "service", actions: ["retry", "new_session"]},
+        {info: "other", kind: "provider_error", category: "service", actions: ["retry"]},
+        {
+            info: {responseStreamDisconnected: {httpStatusCode: null}},
+            kind: "transport_lost",
+            category: "connection",
+            actions: ["retry", "new_session"],
+        },
+    ])("names the internal kind $kind in the client-neutral record", async ({info, kind, category, actions}) => {
+        const {result, updates} = await runPromptWithError(createTestSessionState({
+            sessionId: "neutral-kind-session",
+            account: {type: "apiKey"},
+        }), {message: "It failed.", codexErrorInfo: info, additionalDetails: null, misalignment: null}, false, neutralFailureCapabilities);
+
+        expect(result).toMatchObject({
+            stopReason: "end_turn",
+            _meta: {sessionFailure: {kind, category, actions, severity: "error"}},
+        });
+        expect(updates).toEqual([]);
+    });
+
+    it("publishes a client-neutral retry warning in place of the legacy Codex metadata", async () => {
+        const {result, updates} = await runPromptWithError(createTestSessionState({
+            sessionId: "neutral-retrying-session",
+            account: {type: "apiKey"},
+        }), {
+            message: "Reconnecting... 1/5",
+            codexErrorInfo: {responseStreamDisconnected: {httpStatusCode: null}},
+            additionalDetails: "secret retry details",
+            misalignment: null,
+        }, true, neutralFailureCapabilities);
+
+        expect(result).toMatchObject({stopReason: "end_turn"});
+        expect(updates).toEqual([{
+            sessionUpdate: "session_info_update",
+            _meta: {
+                sessionFailure: {
+                    version: 1,
+                    id: "turn-id:error",
+                    revision: 1,
+                    category: "connection",
+                    severity: "warning",
+                    title: "Reconnecting... 1/5",
+                    actions: [],
+                    kind: "transport_lost",
+                },
+            },
+        }]);
+    });
+
+    it("publishes a client-neutral failure of another turn as a session update", async () => {
+        const {result, updates} = await runPromptWithError(createTestSessionState({
+            sessionId: "neutral-foreign-turn-session",
+            account: {type: "apiKey"},
+        }), {
+            message: "Codex could not complete the previous turn.",
+            codexErrorInfo: "serverOverloaded",
+            additionalDetails: null,
+            misalignment: null,
+        }, false, neutralFailureCapabilities, "previous-turn");
+
+        expect((result as acp.PromptResponse)._meta).not.toHaveProperty("sessionFailure");
+        expect(updates).toEqual([expect.objectContaining({
+            _meta: {sessionFailure: expect.objectContaining({
+                id: "previous-turn:error", severity: "error", kind: "overloaded",
+            })},
+        })]);
+    });
+
+    it.each([
+        {name: "unauthorized", info: "unauthorized" as const},
+        {name: "HTTP 401", info: {responseStreamDisconnected: {httpStatusCode: 401}}},
+    ])("keeps the ACP login error for $name on every typed form", async ({info}) => {
+        for (const capabilities of [neutralFailureCapabilities, bothFailureCapabilities]) {
+            for (const willRetry of [false, true]) {
+                const {result, updates} = await runPromptWithError(createTestSessionState({
+                    sessionId: "neutral-auth-session",
+                    account: {type: "apiKey"},
+                }), {message: "Sign in to continue", codexErrorInfo: info, additionalDetails: null, misalignment: null},
+                willRetry, capabilities);
+
+                expect(updates).toEqual([]);
+                if (willRetry) expect(result).toMatchObject({stopReason: "end_turn"});
+                else expect(result).toMatchObject({code: -32000, message: "Authentication required"});
+                expect(JSON.stringify(result)).not.toContain("sessionFailure");
+            }
+        }
     });
 
     it("does not attach a foreign turn failure to the active prompt", async () => {
@@ -510,6 +642,7 @@ describe("CodexEventHandler - auth error events", () => {
                 severity: "error",
                 title: "Codex is temporarily overloaded.",
                 actions: ["retry"],
+                kind: "overloaded",
             },
         });
 

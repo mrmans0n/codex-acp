@@ -240,6 +240,24 @@ describe("ClientCapabilities", () => {
         expect(ClientCapabilities.from({_meta: meta} as never).diffPatchFormat).toBe(expected);
     });
 
+    it.each([
+        {name: "no declaration", meta: {}, expected: "none"},
+        {name: "the AIR capability", meta: {jetbrains: {air: {version: 1, capabilities: ["sessionFailure"]}}}, expected: "air"},
+        {name: "the client-neutral opt-in", meta: {sessionFailure: {version: 1}}, expected: "neutral"},
+        {
+            name: "both the AIR capability and the client-neutral opt-in",
+            meta: {jetbrains: {air: {version: 1, capabilities: ["sessionFailure"]}}, sessionFailure: {version: 1}},
+            expected: "neutral",
+        },
+        {
+            name: "the AIR capability and an invalid opt-in",
+            meta: {jetbrains: {air: {version: 1, capabilities: ["sessionFailure"]}}, sessionFailure: {version: 0}},
+            expected: "air",
+        },
+    ])("selects the session failure form from $name", ({meta, expected}) => {
+        expect(ClientCapabilities.from({_meta: meta} as never).sessionFailureFormat).toBe(expected);
+    });
+
     it("keeps the AIR diffPatch declaration of a client that also opts into the client-neutral form", () => {
         const both = ClientCapabilities.from({
             _meta: {jetbrains: {air: {version: 1, capabilities: ["diffPatch"]}}, diffPatch: {version: 1}},

@@ -16,12 +16,14 @@ const turnId = "notice-turn";
 const childSessionId = "notice-child";
 const noticeCapabilities: acp.ClientCapabilities = {session: {notices: {}}};
 const airCapabilities = {_meta: {jetbrains: {air: {version: 1, capabilities: ["sessionFailure"]}}}};
+const neutralFailureCapabilities = {_meta: {sessionFailure: {version: 1}}};
 
 describe("session notices", () => {
     it.each([
         ["empty notice capability", noticeCapabilities],
         ["extended notice capability", {session: {notices: {_meta: {future: true}}}}],
         ["AIR typed failures", {...noticeCapabilities, ...airCapabilities}],
+        ["client-neutral typed failures", {...noticeCapabilities, ...neutralFailureCapabilities}],
     ])("delivers independent advisory notices with %s", async (_label, capabilities) => {
         const fixture = await createFixture(capabilities);
         await sendNotifications(fixture, advisoryNotifications());
@@ -62,6 +64,33 @@ describe("session notices", () => {
 
         await expect(fixture.getAcpConnectionDump(["args.0.update._meta.jetbrains.air.sessionFailure.id"]))
             .toMatchFileSnapshot("data/session-notices-air-fallback.json");
+    });
+
+    it("sends advisories as client-neutral records without notice support", async () => {
+        const fixture = await createFixture(neutralFailureCapabilities);
+        await sendNotifications(fixture, advisoryNotifications());
+
+        const updates = fixture.getAcpConnectionEvents([])
+            .filter(event => event.method === "sessionUpdate")
+            .map(event => event.args[0].update)
+            .filter(update => update.sessionUpdate === "session_info_update");
+        expect(updates.length).toBeGreaterThan(0);
+        expect(JSON.stringify(fixture.getAcpConnectionEvents([]))).not.toContain("Warning: ");
+        for (const update of updates) {
+            expect(update).toEqual({
+                sessionUpdate: "session_info_update",
+                _meta: {
+                    sessionFailure: expect.objectContaining({
+                        version: 1,
+                        id: expect.stringMatching(new RegExp(`^${sessionId}:notice:[0-9a-f-]+:\\d+$`)),
+                        category: "unknown",
+                        severity: "warning",
+                        actions: [],
+                        kind: "notice",
+                    }),
+                },
+            });
+        }
     });
 
     it("preserves optional descriptions and supplies nonempty titles for empty upstream text", async () => {
