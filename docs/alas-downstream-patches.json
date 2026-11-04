@@ -352,6 +352,37 @@
       ],
       "disposition": "active",
       "retiredCommits": []
+    },
+    {
+      "name": "neutral-session-failure",
+      "commit": "2a1384e5b60358a0da0145c17e467d31485743c2",
+      "upstreamPr": null,
+      "files": [
+        "docs/air-extensions.md",
+        "src/CodexAcpServer.ts",
+        "src/CodexEventHandler.ts",
+        "src/SessionFailureExtension.ts",
+        "src/__tests__/CodexACPAgent/auth-error-events.test.ts",
+        "src/__tests__/CodexACPAgent/initialize-v2.test.ts",
+        "src/__tests__/CodexACPAgent/initialize.test.ts",
+        "src/__tests__/CodexACPAgent/session-notices.test.ts",
+        "src/__tests__/CodexACPAgent/structured-failures-v2.test.ts",
+        "src/__tests__/CodexACPAgent/typed-session-failure-wire.test.ts",
+        "src/__tests__/acp-test-utils.ts",
+        "src/__tests__/tool-calls/tool-call-contract.test.ts",
+        "src/tool-calls/ClientCapabilities.ts"
+      ],
+      "tests": [
+        "src/__tests__/CodexACPAgent/auth-error-events.test.ts",
+        "src/__tests__/CodexACPAgent/initialize-v2.test.ts",
+        "src/__tests__/CodexACPAgent/initialize.test.ts",
+        "src/__tests__/CodexACPAgent/session-notices.test.ts",
+        "src/__tests__/CodexACPAgent/structured-failures-v2.test.ts",
+        "src/__tests__/CodexACPAgent/typed-session-failure-wire.test.ts",
+        "src/__tests__/tool-calls/tool-call-contract.test.ts"
+      ],
+      "disposition": "active",
+      "retiredCommits": []
     }
   ],
   "retiredCommits": [
