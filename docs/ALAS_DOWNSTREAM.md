@@ -39,6 +39,10 @@ turn boundary reported in the `session/fork` answer.
 `neutral-diff-patch` (no upstream PR yet) lets a client that does not declare
 AIR negotiate `_meta.diffPatch` and get each file change as one Git patch in the
 diff block's top-level `_meta.diffPatch`, live and on history replay.
+`neutral-session-failure` (no upstream PR yet) lets a client that does not declare
+AIR negotiate `_meta.sessionFailure` and get the whole typed failure lane: warnings
+and errors as records with a machine-readable `kind`, on `session_info_update` and
+on the `PromptResponse`, instead of agent text and a plain `end_turn`.
 Keep ledger entries and their file
 lists exact when a patch changes. `npm run test:maintenance` verifies the ledger
 against the recorded commits. A file list may extend the original commit's paths
