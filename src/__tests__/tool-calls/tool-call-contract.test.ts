@@ -258,6 +258,24 @@ describe("ClientCapabilities", () => {
         expect(ClientCapabilities.from({_meta: meta} as never).sessionFailureFormat).toBe(expected);
     });
 
+    it.each([
+        {name: "no declaration", meta: {}, expected: "none"},
+        {name: "the AIR capability", meta: {jetbrains: {air: {version: 1, capabilities: ["agentFileChangeReport"]}}}, expected: "air"},
+        {name: "the client-neutral opt-in", meta: {agentFileChangeReport: {version: 1}}, expected: "neutral"},
+        {
+            name: "both the AIR capability and the client-neutral opt-in",
+            meta: {jetbrains: {air: {version: 1, capabilities: ["agentFileChangeReport"]}}, agentFileChangeReport: {version: 1}},
+            expected: "neutral",
+        },
+        {
+            name: "the AIR capability and an invalid opt-in",
+            meta: {jetbrains: {air: {version: 1, capabilities: ["agentFileChangeReport"]}}, agentFileChangeReport: {version: 0}},
+            expected: "air",
+        },
+    ])("selects the agent file-change report form from $name", ({meta, expected}) => {
+        expect(ClientCapabilities.from({_meta: meta} as never).agentFileChangeReportFormat).toBe(expected);
+    });
+
     it("keeps the AIR diffPatch declaration of a client that also opts into the client-neutral form", () => {
         const both = ClientCapabilities.from({
             _meta: {jetbrains: {air: {version: 1, capabilities: ["diffPatch"]}}, diffPatch: {version: 1}},
