@@ -864,6 +864,7 @@ It returns `{ "stopped": true }` after app-server accepts the termination.
 
 Standard ACP describes a change from one tool call. It has no complete file list for one prompt turn.
 The version 1 `agentFileChangeReport` extension adds that list.
+A client that is not AIR can opt in without the AIR namespace, see [Client-neutral agent file-change report](#client-neutral-agent-file-change-report).
 
 ### Request
 
@@ -936,6 +937,57 @@ A failure of the main turn still follows the normal prompt error behavior.
 The client must match the request id.
 It must ignore a duplicate, stale, malformed, or unavailable report.
 Rollback is outside this extension. The adapter advertises no `undo` or `rollback` command.
+
+### Client-neutral agent file-change report
+
+A client that is not AIR can get the same report without the `_meta.jetbrains.air` namespace.
+It opts in with `initialize.clientCapabilities._meta`:
+
+```json
+{ "agentFileChangeReport": { "version": 1 } }
+```
+
+- Accepted only when `agentFileChangeReport` is an object whose `version` is an integer of at least 1. Anything else
+  enables nothing.
+- The opt-in is an ACP v1 extension. The `initialize` answer of an opted-in client has the top-level
+  `_meta.agentFileChangeReport: {"version": 1}`.
+- ACP v2 ignores the opt-in.
+
+The client asks for a report with the top-level `_meta` of `session/prompt`:
+
+```json
+{ "_meta": { "agentFileChangeReportRequest": { "version": 1, "requestId": "a-unique-request-id" } } }
+```
+
+The [request](#request) rules apply: a malformed request is ignored.
+The adapter retains the turn diffs of a prompt only when it has a valid request.
+
+The report goes in the top-level `_meta.agentFileChangeReport` of the `session_info_update`:
+
+```json
+{
+  "sessionUpdate": "session_info_update",
+  "_meta": {
+    "agentFileChangeReport": {
+      "version": 1,
+      "requestId": "a-unique-request-id",
+      "status": "reported",
+      "paths": ["/workspace/src/App.ts"],
+      "declaredComplete": false,
+      "truncated": false,
+      "uncertainty": "Codex turn diffs may omit same-content renames and changes made outside apply_patch, including shell commands, version-control commands, generators, and child processes."
+    }
+  }
+}
+```
+
+The report object, its limits, its timing, the [Codex source](#codex-source) and the [unavailable reasons](#unavailable-report) are those of the AIR form.
+
+- A client that declares both the AIR `agentFileChangeReport` capability and the client-neutral opt-in gets only the
+  client-neutral form: the adapter reads only the top-level request and ignores one in the AIR namespace.
+  Its AIR capability list still names `agentFileChangeReport`.
+- AIR clients that do not send the client-neutral opt-in use the AIR form, unchanged. They get no report for a
+  top-level request.
 
 ## Session failure
 

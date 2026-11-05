@@ -143,6 +143,25 @@ describe('CodexACPAgent - initialize over ACP v2', () => {
             .toBe("air");
     });
 
+    it('ignores the client-neutral agent file-change report opt-in', async () => {
+        const {clientStream} = connectRouter();
+        const connection = acpV2.client({name: "test-client"}).connect(clientStream);
+        closeClient = () => connection.close();
+        const optIn = {agentFileChangeReport: {version: 1}};
+        const air = {jetbrains: {air: {version: 1, capabilities: ["agentFileChangeReport"]}}};
+
+        const response = await connection.agent.request(acpV2.methods.agent.initialize, {
+            protocolVersion: 2,
+            info: {name: "test-client", version: "1.0.0"},
+            capabilities: {_meta: optIn},
+        });
+
+        expect(response._meta).not.toHaveProperty("agentFileChangeReport");
+        expect(ClientCapabilities.fromV2(toV1ClientCapabilitiesView({_meta: optIn})).agentFileChangeReportFormat).toBe("none");
+        expect(ClientCapabilities.fromV2(toV1ClientCapabilitiesView({_meta: {...optIn, ...air}})).agentFileChangeReportFormat)
+            .toBe("air");
+    });
+
     it('still routes a v1 initialize to the unchanged v1 chain', async () => {
         const {clientStream} = connectRouter();
         const connection = acp.client({name: "test-client"}).connect(clientStream);
