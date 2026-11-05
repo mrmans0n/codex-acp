@@ -383,6 +383,31 @@
       ],
       "disposition": "active",
       "retiredCommits": []
+    },
+    {
+      "name": "neutral-agent-file-change-report",
+      "commit": "a68042507683ef2eb4a6d15eff864300e77d897f",
+      "upstreamPr": null,
+      "files": [
+        "docs/air-extensions.md",
+        "src/AgentFileChangeReport.ts",
+        "src/CodexAcpServer.ts",
+        "src/__tests__/AgentFileChangeReport.test.ts",
+        "src/__tests__/CodexACPAgent/agent-file-change-report.test.ts",
+        "src/__tests__/CodexACPAgent/initialize-v2.test.ts",
+        "src/__tests__/CodexACPAgent/initialize.test.ts",
+        "src/__tests__/tool-calls/tool-call-contract.test.ts",
+        "src/tool-calls/ClientCapabilities.ts"
+      ],
+      "tests": [
+        "src/__tests__/AgentFileChangeReport.test.ts",
+        "src/__tests__/CodexACPAgent/agent-file-change-report.test.ts",
+        "src/__tests__/CodexACPAgent/initialize-v2.test.ts",
+        "src/__tests__/CodexACPAgent/initialize.test.ts",
+        "src/__tests__/tool-calls/tool-call-contract.test.ts"
+      ],
+      "disposition": "active",
+      "retiredCommits": []
     }
   ],
   "retiredCommits": [
