@@ -50,6 +50,10 @@ export const KNOWN_PATCH_IDENTITIES = Object.freeze([
     name: "neutral-session-failure",
     commit: "2a1384e5b60358a0da0145c17e467d31485743c2",
   }),
+  Object.freeze({
+    name: "neutral-agent-file-change-report",
+    commit: "a68042507683ef2eb4a6d15eff864300e77d897f",
+  }),
 ]);
 
 function git(cwd, args, options = {}) {
