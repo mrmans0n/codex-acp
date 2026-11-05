@@ -43,6 +43,10 @@ diff block's top-level `_meta.diffPatch`, live and on history replay.
 AIR negotiate `_meta.sessionFailure` and get the whole typed failure lane: warnings
 and errors as records with a machine-readable `kind`, on `session_info_update` and
 on the `PromptResponse`, instead of agent text and a plain `end_turn`.
+`neutral-agent-file-change-report` (no upstream PR yet) lets a client that does not
+declare AIR negotiate `_meta.agentFileChangeReport` and request a prompt's changed
+file list with `session/prompt._meta.agentFileChangeReportRequest`, reported in
+`session_info_update._meta.agentFileChangeReport` before the `PromptResponse`.
 Keep ledger entries and their file
 lists exact when a patch changes. `npm run test:maintenance` verifies the ledger
 against the recorded commits. A file list may extend the original commit's paths
