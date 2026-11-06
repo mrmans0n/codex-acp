@@ -14,6 +14,9 @@ import {
 import type {SessionState} from "../../CodexAcpServer";
 import {AgentMode} from "../../AgentMode";
 import {ApprovalOptionId} from "../../permissions/option-ids";
+import {ClientCapabilities} from "../../tool-calls/ClientCapabilities";
+import {requestPermissionMeta} from "../../permissions/metadata";
+import {buildMcpPermissionOptions} from "../../permissions/mcp";
 
 type CommandParams = CommandExecutionRequestApprovalParams & {
     additionalPermissions?: AdditionalPermissionProfile | null;
@@ -242,6 +245,26 @@ describe("Approval Events", () => {
             expect(JSON.stringify(permissionRequest())).not.toContain("exact_command");
             expect(JSON.stringify(permissionRequest())).not.toContain("codex");
             await finish(prompt);
+        });
+
+        it.each([
+            {name: "AIR", meta: {jetbrains: {air: {version: 1, capabilities: []}}}, air: true, neutral: false},
+            {name: "the neutral opt-in", meta: {permissionPresentation: {version: 1}}, air: false, neutral: true},
+            {name: "both", meta: {jetbrains: {air: {version: 1, capabilities: []}}, permissionPresentation: {version: 1}}, air: true, neutral: true},
+            {name: "a malformed opt-in", meta: {permissionPresentation: true}, air: false, neutral: false},
+        ])("sends the presentation records for $name without changing what can be decided", ({meta, air, neutral}) => {
+            const capabilities = ClientCapabilities.from({_meta: meta});
+            const request = requestPermissionMeta(capabilities, "Run command?", "Needed.")._meta;
+            const record = {version: 1, title: "Run command?", description: "Needed."};
+            expect(request?.["permissionPresentation"]).toEqual(neutral ? record : undefined);
+            expect((request?.["jetbrains"] as {air?: {permission?: unknown}} | undefined)?.air?.permission).toEqual(air ? record : undefined);
+
+            const [allow] = buildMcpPermissionOptions(false, new Set(), capabilities);
+            expect(allow?.optionId).toBe("accept");
+            expect(allow?.kind).toBe("allow_once");
+            expect(allow?._meta?.["permissionPresentation"]).toEqual(
+                neutral ? {version: 1, description: "Allow this request and continue."} : undefined,
+            );
         });
 
         it("maps ACP cancellation to cancel, not decline", async () => {
