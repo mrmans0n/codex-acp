@@ -258,6 +258,11 @@ import {
     createReportedAgentFileChangeReport,
     createUnavailableAgentFileChangeReport,
 } from "./AgentFileChangeReport";
+import {
+    NEUTRAL_PERMISSION_PRESENTATION_META_KEY,
+    NEUTRAL_QUESTION_CUSTOM_ANSWER_META_KEY,
+    neutralPresentationCapability,
+} from "./permissions/metadata";
 
 
 export interface SessionState extends SessionIndexTitleState {
@@ -1016,6 +1021,14 @@ export class CodexAcpServer {
             // so `ClientCapabilities.fromV2` never selects it.
             ...(protocolVersion === 1 && this.capabilities.agentFileChangeReportFormat === "neutral" ? {
                 [NEUTRAL_AGENT_FILE_CHANGE_REPORT_META_KEY]: neutralAgentFileChangeReportCapability(),
+            } : {}),
+            // The client-neutral presentation contracts, see `docs/air-extensions.md`. `ClientCapabilities.fromV2`
+            // never selects them.
+            ...(this.capabilities.neutralPermissionPresentation ? {
+                [NEUTRAL_PERMISSION_PRESENTATION_META_KEY]: neutralPresentationCapability(),
+            } : {}),
+            ...(this.capabilities.neutralQuestionCustomAnswer ? {
+                [NEUTRAL_QUESTION_CUSTOM_ANSWER_META_KEY]: neutralPresentationCapability(),
             } : {}),
             // The session index for a client that opted in without AIR, see `docs/air-extensions.md`.
             ...(neutralSessionIndex ? {
@@ -5817,7 +5830,7 @@ export class CodexAcpServer {
         if (questions === undefined) {
             questions = new AsyncQuestionElicitations(sessionId, this.clientCapabilities, new AsyncQuestionClient(
                 sessionId, this.connection, this.clientCapabilities, () => this.codexAcpClient,
-            ));
+            ), this.capabilities.neutralQuestionCustomAnswer);
             this.asyncQuestions.set(sessionId, questions);
         }
         return questions;
