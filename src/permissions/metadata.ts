@@ -24,8 +24,30 @@ type OptionPermissionMetadata = {
  */
 export const PERMISSION_PROMPT_META_KEY = "permission_prompt";
 
+/** The top-level `_meta` key of the client-neutral permission presentation. */
+export const NEUTRAL_PERMISSION_PRESENTATION_META_KEY = "permissionPresentation";
+/** The top-level `_meta` key of the client-neutral question custom answer. */
+export const NEUTRAL_QUESTION_CUSTOM_ANSWER_META_KEY = "questionCustomAnswer";
+
+/** The `initialize` answer for a client that opted into a client-neutral presentation contract. */
+export function neutralPresentationCapability(): {version: number} {
+    return {version: 1};
+}
+
+/** Whether the client opted in with `clientCapabilities._meta[key]: {version}`, an integer of at least 1. */
+export function clientRequestsNeutralPresentation(
+    capabilities: acp.ClientCapabilities | null | undefined,
+    key: string,
+): boolean {
+    const declared: unknown = capabilities?._meta?.[key];
+    if (declared === null || typeof declared !== "object" || Array.isArray(declared)) return false;
+    const version = (declared as Record<string, unknown>)["version"];
+    return typeof version === "number" && Number.isInteger(version) && version >= 1;
+}
+
 /**
- * Only AIR gets the permission presentation, in `_meta.jetbrains.air.permission`.
+ * AIR gets the permission presentation in `_meta.jetbrains.air.permission`, and a client that opted into
+ * the neutral form gets it in `_meta.permissionPresentation`.
  * On ACP v2, every client gets it as the request title and description.
  */
 export function requestPermissionMeta(
@@ -41,6 +63,7 @@ export function requestPermissionMeta(
     };
     const meta = {
         ...airOnlyMeta(capabilities.airClient, AIR_PERMISSION_KEY, permission),
+        ...(capabilities.neutralPermissionPresentation ? {[NEUTRAL_PERMISSION_PRESENTATION_META_KEY]: permission} : {}),
         ...(capabilities.permissionPromptFields ? {[PERMISSION_PROMPT_META_KEY]: permission} : {}),
     };
     return Object.keys(meta).length > 0 ? {_meta: meta} : {};
@@ -58,13 +81,17 @@ export function readPermissionMeta(
 }
 
 export function optionPermissionMeta(
-    airClient: boolean,
+    capabilities: ClientCapabilities,
     description?: string | null,
 ): acp.PermissionOption["_meta"] | undefined {
     const normalized = nonBlank(description);
     if (!normalized) return undefined;
     const permission: OptionPermissionMetadata = {version: 1, description: normalized};
-    return airOnlyMeta(airClient, AIR_PERMISSION_KEY, permission);
+    const meta = {
+        ...airOnlyMeta(capabilities.airClient, AIR_PERMISSION_KEY, permission),
+        ...(capabilities.neutralPermissionPresentation ? {[NEUTRAL_PERMISSION_PRESENTATION_META_KEY]: permission} : {}),
+    };
+    return Object.keys(meta).length > 0 ? meta : undefined;
 }
 
 function nonBlank(value?: string | null): string | undefined {
