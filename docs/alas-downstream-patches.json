@@ -408,6 +408,32 @@
       ],
       "disposition": "active",
       "retiredCommits": []
+    },
+    {
+      "name": "neutral-permission-presentation",
+      "commit": "295ebe128a39c2c54be3619106799693f22dd0e5",
+      "upstreamPr": null,
+      "files": [
+        "docs/air-extensions.md",
+        "src/CodexAcpServer.ts",
+        "src/CodexAsyncQuestions.ts",
+        "src/CodexElicitationHandler.ts",
+        "src/__tests__/CodexACPAgent/approval-events.test.ts",
+        "src/__tests__/CodexACPAgent/elicitation-events.test.ts",
+        "src/__tests__/CodexACPAgent/initialize-v2.test.ts",
+        "src/__tests__/CodexACPAgent/initialize.test.ts",
+        "src/permissions/mcp.ts",
+        "src/permissions/metadata.ts",
+        "src/tool-calls/ClientCapabilities.ts"
+      ],
+      "tests": [
+        "src/__tests__/CodexACPAgent/approval-events.test.ts",
+        "src/__tests__/CodexACPAgent/elicitation-events.test.ts",
+        "src/__tests__/CodexACPAgent/initialize-v2.test.ts",
+        "src/__tests__/CodexACPAgent/initialize.test.ts"
+      ],
+      "disposition": "active",
+      "retiredCommits": []
     }
   ],
   "retiredCommits": [
