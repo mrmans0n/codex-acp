@@ -261,6 +261,22 @@ describe('CodexACPAgent - initialize', () => {
         expect((both._meta as any).jetbrains).toEqual((airOnly._meta as any).jetbrains);
     });
 
+    it.each(['permissionPresentation', 'questionCustomAnswer'])('advertises the client-neutral %s only to a client that opts in', async (key) => {
+        const optedIn = await agent.initialize({
+            protocolVersion: acp.PROTOCOL_VERSION,
+            clientCapabilities: {_meta: {[key]: {version: 2}}},
+        });
+        expect(optedIn._meta?.[key]).toEqual({version: 1});
+        expect(optedIn._meta).not.toHaveProperty('jetbrains');
+        for (const declared of [true, {}, {version: 0}, {version: 1.5}, {version: '1'}]) {
+            const other = await agent.initialize({
+                protocolVersion: acp.PROTOCOL_VERSION,
+                clientCapabilities: {_meta: {[key]: declared}},
+            });
+            expect(other._meta).not.toHaveProperty(key);
+        }
+    });
+
     it('advertises the client-neutral agent file-change report only to a client that opts in', async () => {
         const optedIn = await agent.initialize({
             protocolVersion: acp.PROTOCOL_VERSION,

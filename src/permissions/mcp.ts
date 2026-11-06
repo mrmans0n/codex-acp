@@ -5,6 +5,7 @@ import type {
     McpServerElicitationRequestResponse,
 } from "../app-server/v2";
 import {optionPermissionMeta} from "./metadata";
+import type {ClientCapabilities} from "../tool-calls/ClientCapabilities";
 import {McpApprovalOptionId} from "./option-ids";
 import {isRecord} from "./json";
 import type {AcpToolCallRenderer} from "../tool-calls/AcpToolCallRenderer";
@@ -38,7 +39,7 @@ export function isMcpToolCallApproval(meta: unknown): boolean {
 export function buildMcpPermissionOptions(
     isToolApproval: boolean,
     persistOptions: Set<PersistValue>,
-    airClient: boolean,
+    capabilities: ClientCapabilities,
 ): acp.PermissionOption[] {
     const permissionOption = (
         optionId: string,
@@ -46,7 +47,7 @@ export function buildMcpPermissionOptions(
         kind: acp.PermissionOptionKind,
         description: string,
     ): acp.PermissionOption => {
-        const meta = optionPermissionMeta(airClient, description);
+        const meta = optionPermissionMeta(capabilities, description);
         return {optionId, name, kind, ...(meta ? {_meta: meta} : {})};
     };
     const options: acp.PermissionOption[] = [permissionOption(
@@ -121,7 +122,7 @@ export function buildMcpPermissionRequest(
             options: buildMcpPermissionOptions(
                 context.isToolApproval,
                 context.persistOptions,
-                renderer.capabilities.airClient,
+                renderer.capabilities,
             ),
         },
         correlatedCallId,

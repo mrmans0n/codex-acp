@@ -690,6 +690,34 @@ The active permission surface is the app-server v2 request methods:
 
 The deprecated `execCommandApproval` and `applyPatchApproval` methods are not a second permission pipeline.
 
+### Client-neutral permission presentation
+
+Any client can get the same records at top-level `_meta.permissionPresentation` in place of `_meta.jetbrains.air.permission`, on the request and on an MCP elicitation option.
+It opts in at `initialize` with `clientCapabilities._meta.permissionPresentation: { "version": 1 }`.
+Only an object whose `version` is an integer of at least 1 opts in; `true`, a string, an array, `null`, a missing `version`, `0` or a fraction enables nothing.
+The `initialize` response of an opted-in client carries `_meta.permissionPresentation: { "version": 1 }`, under ACP v1 only.
+
+- The fields and the safety rules are those of the AIR record. The record is a display hint, and the option ids and decisions do not change.
+- The client keeps the request tool call of a client that is not AIR.
+- A client that declares AIR too gets both forms.
+- ACP v2 ignores the opt-in: a v2 request has its own `title` and `description`.
+
+### Client-neutral question custom answer
+
+Any client can get an explicit link from a `request_user_input` note field to its question.
+It opts in at `initialize` with `clientCapabilities._meta.questionCustomAnswer: { "version": 1 }`, under the same rule.
+The `initialize` response of an opted-in client carries `_meta.questionCustomAnswer: { "version": 1 }`, under ACP v1 only.
+The note field of a question then also carries, in the blocking and the async form:
+
+```json
+{ "version": 1, "questionId": "<question field key>" }
+```
+
+- `questionId` names the field of the question. A note id can gain a suffix on a collision, so a client must never derive the link from the field key or the label.
+- The rest of the form and the reading of the response stay as they are for a client that is not AIR, including the `None of the above` option. The AIR typed answer stays AIR only.
+- An MCP form elicitation gets no marker from the adapter.
+- ACP v2 ignores the opt-in.
+
 ## Plan content delta and plan review
 
 ### Plan stream
