@@ -28,6 +28,7 @@ import {subagentInteractionSignal, subagentToolCallId, withSubagentUserAction} f
 import {ElicitationReporter} from "./tool-calls/reporters/ElicitationReporter";
 import {isRecord, normalizeJsonObject, normalizeJsonValue, recordOrNull} from "./permissions/json";
 import {AIR_CUSTOM_ANSWER_KEY, LEGACY_AIR_CUSTOM_ANSWER_KEY, isAirClient, withAirMeta} from "./AirExtension";
+import {NEUTRAL_QUESTION_CUSTOM_ANSWER_META_KEY} from "./permissions/metadata";
 type AcpBackedMcpElicitationParams = Extract<
     McpServerElicitationRequestParams,
     { mode: "form" } | { mode: "url" }
@@ -160,6 +161,7 @@ export function buildUserInputSchema(
     questions: readonly UserInputQuestion[],
     clientCapabilities: acp.ClientCapabilities | null,
     answersRequired: boolean,
+    neutralCustomAnswer = false,
 ): acp.ElicitationSchema {
     const properties: Record<string, acp.ElicitationPropertySchema> = {};
     const required: string[] = [];
@@ -215,9 +217,14 @@ export function buildUserInputSchema(
             properties[userInputNoteFieldId(question.id, questionIds)] = {
                 type: "string",
                 title: "Additional answer or note",
-                _meta: airClient
-                    ? withAirMeta({...noteMeta, [LEGACY_AIR_CUSTOM_ANSWER_KEY]: true}, AIR_CUSTOM_ANSWER_KEY, true)
-                    : noteMeta,
+                _meta: {
+                    ...(airClient
+                        ? withAirMeta({...noteMeta, [LEGACY_AIR_CUSTOM_ANSWER_KEY]: true}, AIR_CUSTOM_ANSWER_KEY, true)
+                        : noteMeta),
+                    ...(neutralCustomAnswer
+                        ? {[NEUTRAL_QUESTION_CUSTOM_ANSWER_META_KEY]: {version: 1, questionId: question.id}}
+                        : {}),
+                },
             };
         }
     }
@@ -232,13 +239,14 @@ export function buildUserInputSchema(
 function buildUserInputRequest(
     params: ToolRequestUserInputParams,
     clientCapabilities: acp.ClientCapabilities | null,
+    neutralCustomAnswer: boolean,
 ): acp.CreateElicitationRequest {
     return {
         sessionId: params.threadId,
         toolCallId: params.itemId,
         mode: "form",
         message: "Codex needs your input to continue.",
-        requestedSchema: buildUserInputSchema(params.questions, clientCapabilities, true),
+        requestedSchema: buildUserInputSchema(params.questions, clientCapabilities, true, neutralCustomAnswer),
         _meta: {
             codex: {
                 autoResolutionMs: params.autoResolutionMs,
@@ -439,7 +447,7 @@ export class CodexElicitationHandler implements ElicitationHandler {
     private async requestUserInputElicitation(
         params: ToolRequestUserInputParams
     ): Promise<acp.CreateElicitationResponse | null> {
-        const request = buildUserInputRequest(params, this.clientCapabilities);
+        const request = buildUserInputRequest(params, this.clientCapabilities, this.renderer.capabilities.neutralQuestionCustomAnswer);
         const signal = subagentInteractionSignal(params.threadId, this.cancellationSignal);
         if (params.autoResolutionMs === null) {
             return await withSubagentUserAction(params.threadId, () => this.connection.request(

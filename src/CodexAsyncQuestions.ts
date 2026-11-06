@@ -146,6 +146,7 @@ export class AsyncQuestionElicitations {
         private readonly sessionId: string,
         private readonly clientCapabilities: acp.ClientCapabilities | null,
         private readonly client: AsyncQuestionClient,
+        private readonly neutralCustomAnswer = false,
     ) {}
 
     /** Asks the questions of a completed async message and cancels them when their turn ends; never waits. */
@@ -194,7 +195,7 @@ export class AsyncQuestionElicitations {
             mode: "form",
             message: "Codex keeps working while you answer. An answer sent after it finishes is not delivered.",
             // Questions are answered independently, as in Codex.
-            requestedSchema: buildUserInputSchema(questions, this.clientCapabilities, false),
+            requestedSchema: buildUserInputSchema(questions, this.clientCapabilities, false, this.neutralCustomAnswer),
             _meta: {codex: {delivery: "async"}},
         };
         void this.client.createElicitation(request, turn.signal).then(
