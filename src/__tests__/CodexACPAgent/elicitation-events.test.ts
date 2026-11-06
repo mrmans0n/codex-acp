@@ -5,6 +5,7 @@ import { createCodexMockTestFixture, createTestSessionState, type CodexMockTestF
 import type { SessionState } from '../../CodexAcpServer';
 import { AgentMode } from "../../AgentMode";
 import { McpApprovalOptionId } from "../../permissions/option-ids";
+import { buildUserInputSchema } from "../../CodexElicitationHandler";
 import type { ServerNotification } from "../../app-server";
 
 describe('Elicitation Events', () => {
@@ -855,6 +856,27 @@ describe('Elicitation Events', () => {
     });
 
     describe('Codex request_user_input', () => {
+        it('links a note to its question through the neutral marker, for a blocking and an async form alike', () => {
+            const questions = [
+                {id: 'scope', header: 'Scope', question: 'Which?', isOther: true, isSecret: false, options: [{label: 'A', description: ''}, {label: 'A', description: ''}]},
+                {id: 'scope_note', header: 'Note', question: 'And?', isOther: true, isSecret: false, options: [{label: 'B', description: ''}]},
+            ] as ToolRequestUserInputParams['questions'];
+            for (const answersRequired of [true, false]) {
+                const schema = buildUserInputSchema(questions, {}, answersRequired, true);
+                const notes = Object.entries(schema.properties ?? {}).filter(([, property]) => {
+                    return (property._meta as {codex?: {role?: string}} | undefined)?.codex?.role === 'user_note';
+                });
+                expect(notes.map(([, property]) => (property._meta as Record<string, unknown>)['questionCustomAnswer'])).toEqual([
+                    {version: 1, questionId: 'scope'},
+                    {version: 1, questionId: 'scope_note'},
+                ]);
+                expect(schema.properties?.['scope']?._meta).not.toHaveProperty('questionCustomAnswer');
+                expect(JSON.stringify(schema.properties?.['scope'])).toContain('None of the above');
+            }
+            const plain = buildUserInputSchema(questions, {}, true);
+            expect(JSON.stringify(plain)).not.toContain('questionCustomAnswer');
+        });
+
         it('should use ACP form elicitation for request_user_input when supported', async () => {
             const { promptPromise, completeTurn } = await setupSessionWithPendingPromptAndCapabilities({
                 elicitation: { form: {} },
