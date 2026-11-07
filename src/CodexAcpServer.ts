@@ -258,6 +258,7 @@ import {
 import {
     NEUTRAL_PERMISSION_PRESENTATION_META_KEY,
     NEUTRAL_QUESTION_CUSTOM_ANSWER_META_KEY,
+    NEUTRAL_RECOMMENDED_CONFIG_VALUE_META_KEY,
     neutralPresentationCapability,
 } from "./permissions/metadata";
 
@@ -991,6 +992,9 @@ export class CodexAcpServer {
             } : {}),
             ...(this.capabilities.neutralQuestionCustomAnswer ? {
                 [NEUTRAL_QUESTION_CUSTOM_ANSWER_META_KEY]: neutralPresentationCapability(),
+            } : {}),
+            ...(this.capabilities.neutralRecommendedConfigValue ? {
+                [NEUTRAL_RECOMMENDED_CONFIG_VALUE_META_KEY]: neutralPresentationCapability(),
             } : {}),
             // The session index for a client that opted in without AIR, see `docs/air-extensions.md`.
             ...(neutralSessionIndex ? {
@@ -3389,10 +3393,11 @@ export class CodexAcpServer {
 
     private createSessionConfigOptions(sessionState: SessionState): Array<acp.SessionConfigOption> {
         const currentModelId = ModelId.fromString(sessionState.currentModelId);
-        const useRecommendedValue = clientSupportsAirCapability(
-            this.clientCapabilities,
-            AIR_RECOMMENDED_CONFIG_VALUE_KEY,
-        );
+        const records = {
+            air: clientSupportsAirCapability(this.clientCapabilities, AIR_RECOMMENDED_CONFIG_VALUE_KEY),
+            neutral: this.capabilities.neutralRecommendedConfigValue,
+        };
+        const useRecommendedValue = records.air || records.neutral;
         const currentModel = this.findCurrentModel(sessionState.availableModels, sessionState.currentModelId);
         const recommendedModelId = useRecommendedValue
             ? sessionState.availableModels.find(model => model.isDefault)?.id
@@ -3403,7 +3408,7 @@ export class CodexAcpServer {
         ];
         // A gateway that lists none of the Codex models leaves no model to offer, so there is no model option at all.
         if (sessionState.availableModels.length > 0) {
-            configOptions.push(createModelConfigOption(sessionState.availableModels, currentModelId.model, recommendedModelId));
+            configOptions.push(createModelConfigOption(sessionState.availableModels, currentModelId.model, recommendedModelId, records));
         }
         if (sessionState.supportedReasoningEfforts.length > 0) {
             configOptions.push(
@@ -3411,6 +3416,7 @@ export class CodexAcpServer {
                     sessionState.supportedReasoningEfforts,
                     currentModelId.effort,
                     useRecommendedValue ? currentModel?.defaultReasoningEffort : undefined,
+                    records,
                 ),
             );
         }
