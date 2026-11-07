@@ -434,6 +434,28 @@
       ],
       "disposition": "active",
       "retiredCommits": []
+    },
+    {
+      "name": "neutral-recommended-config-value",
+      "commit": "9181cce81f8c737dc1bbe921f964aa31d3ef11b3",
+      "upstreamPr": null,
+      "files": [
+        "docs/air-extensions.md",
+        "src/CodexAcpServer.ts",
+        "src/ModelConfigOption.ts",
+        "src/__tests__/CodexACPAgent/initialize-v2.test.ts",
+        "src/__tests__/CodexACPAgent/initialize.test.ts",
+        "src/__tests__/CodexACPAgent/session-config-options.test.ts",
+        "src/permissions/metadata.ts",
+        "src/tool-calls/ClientCapabilities.ts"
+      ],
+      "tests": [
+        "src/__tests__/CodexACPAgent/initialize-v2.test.ts",
+        "src/__tests__/CodexACPAgent/initialize.test.ts",
+        "src/__tests__/CodexACPAgent/session-config-options.test.ts"
+      ],
+      "disposition": "active",
+      "retiredCommits": []
     }
   ],
   "retiredCommits": [
