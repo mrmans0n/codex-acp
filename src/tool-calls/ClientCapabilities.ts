@@ -17,6 +17,7 @@ import {
     NEUTRAL_PERMISSION_PRESENTATION_META_KEY,
     NEUTRAL_QUESTION_CUSTOM_ANSWER_META_KEY,
     NEUTRAL_RECOMMENDED_CONFIG_VALUE_META_KEY,
+    NEUTRAL_COMMAND_PRESENTATION_META_KEY,
 } from "../permissions/metadata";
 
 /** The `_meta` key of a command output chunk. */
@@ -54,6 +55,7 @@ type ClientCapabilityValues = {
     readonly neutralPermissionPresentation: boolean;
     readonly neutralQuestionCustomAnswer: boolean;
     readonly neutralRecommendedConfigValue: boolean;
+    readonly neutralCommandPresentation: boolean;
 };
 
 /**
@@ -80,6 +82,7 @@ export class ClientCapabilities {
         neutralPermissionPresentation: false,
         neutralQuestionCustomAnswer: false,
         neutralRecommendedConfigValue: false,
+        neutralCommandPresentation: false,
     });
 
     /** The client declares `_meta.jetbrains.air`. */
@@ -108,6 +111,8 @@ export class ClientCapabilities {
     readonly neutralQuestionCustomAnswer: boolean;
     /** Model and effort selectors carry `_meta.recommendedConfigValue`. Only ACP v1 reads the opt-in. */
     readonly neutralRecommendedConfigValue: boolean;
+    /** Available commands carry `_meta.commandPresentation`. Only ACP v1 reads the opt-in. */
+    readonly neutralCommandPresentation: boolean;
 
     private constructor(values: ClientCapabilityValues) {
         this.airClient = values.airClient;
@@ -125,6 +130,7 @@ export class ClientCapabilities {
         this.neutralPermissionPresentation = values.neutralPermissionPresentation;
         this.neutralQuestionCustomAnswer = values.neutralQuestionCustomAnswer;
         this.neutralRecommendedConfigValue = values.neutralRecommendedConfigValue;
+        this.neutralCommandPresentation = values.neutralCommandPresentation;
     }
 
     static from(capabilities: acp.ClientCapabilities | null | undefined): ClientCapabilities {
@@ -160,6 +166,7 @@ export class ClientCapabilities {
             neutralPermissionPresentation: clientRequestsNeutralPresentation(capabilities, NEUTRAL_PERMISSION_PRESENTATION_META_KEY),
             neutralQuestionCustomAnswer: clientRequestsNeutralPresentation(capabilities, NEUTRAL_QUESTION_CUSTOM_ANSWER_META_KEY),
             neutralRecommendedConfigValue: clientRequestsNeutralPresentation(capabilities, NEUTRAL_RECOMMENDED_CONFIG_VALUE_META_KEY),
+            neutralCommandPresentation: clientRequestsNeutralPresentation(capabilities, NEUTRAL_COMMAND_PRESENTATION_META_KEY),
         });
     }
 
@@ -193,6 +200,7 @@ export class ClientCapabilities {
             neutralPermissionPresentation: false,
             neutralQuestionCustomAnswer: false,
             neutralRecommendedConfigValue: false,
+            neutralCommandPresentation: false,
         });
     }
 
