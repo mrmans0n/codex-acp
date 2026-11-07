@@ -54,6 +54,9 @@ records, and `_meta.questionCustomAnswer`, for the explicit link from a
 `neutral-recommended-config-value` (no upstream PR yet) lets a client that does not
 declare AIR negotiate `_meta.recommendedConfigValue`, for the recommended value of the
 model and reasoning effort selectors.
+`neutral-command-presentation` (no upstream PR yet) lets a client that does not
+declare AIR negotiate `_meta.commandPresentation`, for the kind and `SKILL.md` path of
+skill commands and the command actions of `/plan` and `/goal`.
 Keep ledger entries and their file
 lists exact when a patch changes. `npm run test:maintenance` verifies the ledger
 against the recorded commits. A file list may extend the original commit's paths

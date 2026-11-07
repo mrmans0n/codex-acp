@@ -145,11 +145,12 @@ describe('CodexACPAgent - initialize over ACP v2', () => {
 
     it("ignores the client-neutral presentation opt-ins", () => {
         const capabilities = ClientCapabilities.fromV2(toV1ClientCapabilitiesView({
-            _meta: {permissionPresentation: {version: 1}, questionCustomAnswer: {version: 1}, recommendedConfigValue: {version: 1}},
+            _meta: {permissionPresentation: {version: 1}, questionCustomAnswer: {version: 1}, recommendedConfigValue: {version: 1}, commandPresentation: {version: 1}},
         }));
         expect(capabilities.neutralPermissionPresentation).toBe(false);
         expect(capabilities.neutralQuestionCustomAnswer).toBe(false);
         expect(capabilities.neutralRecommendedConfigValue).toBe(false);
+        expect(capabilities.neutralCommandPresentation).toBe(false);
     });
 
     it('ignores the client-neutral agent file-change report opt-in', async () => {
