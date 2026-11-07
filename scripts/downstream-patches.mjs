@@ -62,6 +62,10 @@ export const KNOWN_PATCH_IDENTITIES = Object.freeze([
     name: "neutral-recommended-config-value",
     commit: "9181cce81f8c737dc1bbe921f964aa31d3ef11b3",
   }),
+  Object.freeze({
+    name: "neutral-command-presentation",
+    commit: "ab965a0e99d047da935fed6bc107f8564e3df250",
+  }),
 ]);
 
 function git(cwd, args, options = {}) {
