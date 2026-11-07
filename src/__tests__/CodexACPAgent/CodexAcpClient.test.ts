@@ -2101,6 +2101,55 @@ describe('ACP server test', { timeout: 40_000 }, () => {
         expect(airSkill?._meta).toEqual({jetbrains: {air: {version: 1, skillPath: "/workspace/.agents/skills/build/SKILL.md"}}});
     });
 
+    it('sends the client-neutral command presentation only to a client that opts in', async () => {
+        const mockFixture = createCodexMockTestFixture();
+        const codexAcpAgent = mockFixture.getCodexAcpAgent();
+        const skillPath = "/workspace/.agents/skills/build/SKILL.md";
+        vi.spyOn(mockFixture.getCodexAcpClient(), "listSkills").mockResolvedValue({
+            data: [{
+                cwd: "/workspace",
+                skills: [{name: "build", description: "Build", path: skillPath, scope: "repo", enabled: true, pluginId: null}],
+                errors: []
+            }]
+        });
+        const commands = async (sessionId: string, _meta: Record<string, unknown>) => {
+            // @ts-expect-error - exercising private helper
+            await codexAcpAgent.availableCommands.publish(createTestSessionState({
+                sessionId,
+                cwd: "/workspace",
+                clientCapabilities: ClientCapabilities.from({_meta}),
+            }));
+            const update = mockFixture.getAcpConnectionEvents([])
+                .filter(event => event.method === "sessionUpdate" && event.args[0].update.sessionUpdate === "available_commands_update")
+                .at(-1);
+            const byName = (name: string) => update?.args[0].update.availableCommands
+                .find((command: acp.AvailableCommand) => command.name === name);
+            return {skill: byName("$build"), plan: byName("plan"), goal: byName("goal"), compact: byName("compact")};
+        };
+
+        const neutral = await commands("neutral", {commandPresentation: {version: 1}});
+        expect(neutral.skill?._meta).toEqual({commandPresentation: {version: 1, kind: "skill", skillPath}});
+        expect(neutral.plan?._meta).toEqual({commandPresentation: {version: 1, action: {
+            kind: "setConfigOption",
+            configId: "collaboration_mode",
+            value: "plan",
+            resetValue: "default",
+            presentation: "state",
+        }}});
+        expect(neutral.goal?._meta).toEqual({commandPresentation: {version: 1, action: {kind: "prefixPrompt", presentation: "state"}}});
+        expect(neutral.compact?._meta).toBeUndefined();
+
+        const plain = await commands("plain", {commandPresentation: {version: 0}});
+        expect(plain.skill?._meta).toBeUndefined();
+        expect(plain.plan?._meta).toBeUndefined();
+
+        const both = await commands("both", {commandPresentation: {version: 1}, jetbrains: {air: {version: 1}}});
+        expect(both.skill?._meta).toEqual({
+            jetbrains: {air: {version: 1, skillPath}},
+            commandPresentation: {version: 1, kind: "skill", skillPath},
+        });
+    });
+
     it('does not offer the Visualize skill, whose output ACP clients cannot render', async () => {
         const mockFixture = createCodexMockTestFixture();
         const codexAcpAgent = mockFixture.getCodexAcpAgent();
