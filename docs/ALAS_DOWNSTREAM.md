@@ -51,6 +51,9 @@ file list with `session/prompt._meta.agentFileChangeReportRequest`, reported in
 declare AIR negotiate `_meta.permissionPresentation`, for the permission presentation
 records, and `_meta.questionCustomAnswer`, for the explicit link from a
 `request_user_input` note field to its question.
+`neutral-recommended-config-value` (no upstream PR yet) lets a client that does not
+declare AIR negotiate `_meta.recommendedConfigValue`, for the recommended value of the
+model and reasoning effort selectors.
 Keep ledger entries and their file
 lists exact when a patch changes. `npm run test:maintenance` verifies the ledger
 against the recorded commits. A file list may extend the original commit's paths
