@@ -2,6 +2,8 @@ import type * as acp from "@agentclientprotocol/sdk/unstable";
 import type {AvailableCommand} from "@agentclientprotocol/sdk/unstable";
 import {ACPSessionConnection, type AcpClientConnection} from "./ACPSessionConnection";
 import {AIR_COMMAND_ACTION_KEY, AIR_SKILL_PATH_KEY, airOnlyMeta} from "./AirExtension";
+import {NEUTRAL_COMMAND_PRESENTATION_META_KEY} from "./permissions/metadata";
+import type {ClientCapabilities} from "./tool-calls/ClientCapabilities";
 import type {CodexAcpClient} from "./CodexAcpClient";
 import type {RateLimitSnapshot, ReviewTarget, SkillsListEntry, SkillsListParams, TurnCompletedNotification} from "./app-server/v2";
 import type {SessionState} from "./CodexAcpServer";
@@ -143,7 +145,7 @@ export class CodexCommands {
         const skillsResponse = await this.runWithProcessCheck(() => this.codexAcpClient.listSkills(this.createSkillsListParams(sessionState)));
         const commands = this.buildAvailableCommands(
             skillsResponse?.data ?? [],
-            sessionState.clientCapabilities.airClient,
+            sessionState.clientCapabilities,
         );
         // A slower initial read must not replace a newer list published during setup or replay.
         if ((this.snapshots.get(sessionState)?.revision ?? 0) < revision) {
@@ -194,10 +196,10 @@ export class CodexCommands {
         };
     }
 
-    private buildAvailableCommands(skillsEntries: SkillsListEntry[], airClient: boolean): AvailableCommand[] {
+    private buildAvailableCommands(skillsEntries: SkillsListEntry[], capabilities: ClientCapabilities): AvailableCommand[] {
         const commands = new Map<string, AvailableCommand>();
 
-        for (const builtin of this.getBuiltinCommands(airClient)) {
+        for (const builtin of this.getBuiltinCommands(capabilities)) {
             commands.set(builtin.name, builtin);
         }
 
@@ -206,13 +208,18 @@ export class CodexCommands {
                 const name = `$${skill.name}`;
                 if (commands.has(name)) continue;
                 const description = skill.shortDescription ?? skill.description ?? skill.name;
-                // Only AIR gets the SKILL.md path, in `_meta.jetbrains.air.skillPath`. A click on the skill chip opens it.
-                const meta = airOnlyMeta(airClient, AIR_SKILL_PATH_KEY, skill.path);
+                // AIR gets the SKILL.md path in `_meta.jetbrains.air.skillPath`, and a client that opted into the
+                // client-neutral form gets the kind and the path in `_meta.commandPresentation`. A click on the skill
+                // chip opens the file.
+                const meta = {
+                    ...airOnlyMeta(capabilities.airClient, AIR_SKILL_PATH_KEY, skill.path),
+                    ...neutralCommandPresentation(capabilities, {kind: "skill", skillPath: skill.path}),
+                };
                 commands.set(name, {
                     name,
                     description,
                     input: null,
-                    ...(meta ? {_meta: meta} : {}),
+                    ...(Object.keys(meta).length > 0 ? {_meta: meta} : {}),
                 });
             }
         }
@@ -221,12 +228,16 @@ export class CodexCommands {
 
     /**
      * See the original cli commands documentation here: https://developers.openai.com/codex/cli/slash-commands/
-     * Only AIR gets a command action, in `_meta.jetbrains.air.commandAction`.
+     * AIR gets a command action in `_meta.jetbrains.air.commandAction`, and a client that opted into the
+     * client-neutral form gets it in `_meta.commandPresentation.action`.
      */
-    private getBuiltinCommands(airClient: boolean): AvailableCommand[] {
+    private getBuiltinCommands(capabilities: ClientCapabilities): AvailableCommand[] {
         const commandAction = (action: Record<string, unknown>) => {
-            const meta = airOnlyMeta(airClient, AIR_COMMAND_ACTION_KEY, action);
-            return meta ? {_meta: meta} : {};
+            const meta = {
+                ...airOnlyMeta(capabilities.airClient, AIR_COMMAND_ACTION_KEY, action),
+                ...neutralCommandPresentation(capabilities, {action}),
+            };
+            return Object.keys(meta).length > 0 ? {_meta: meta} : {};
         };
         return [
             {
@@ -772,3 +783,12 @@ export class CodexCommands {
 }
 
 type ParsedCommand = { name: string; };
+
+/** The client-neutral `_meta.commandPresentation` record, for a client that opted in. */
+function neutralCommandPresentation(
+    capabilities: ClientCapabilities,
+    presentation: {kind?: "skill"; skillPath?: string; action?: Record<string, unknown>},
+): Record<string, unknown> {
+    if (!capabilities.neutralCommandPresentation) return {};
+    return {[NEUTRAL_COMMAND_PRESENTATION_META_KEY]: {version: 1, ...presentation}};
+}
