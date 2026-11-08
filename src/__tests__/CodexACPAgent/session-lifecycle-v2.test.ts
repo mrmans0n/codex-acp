@@ -115,6 +115,8 @@ async function connectV2Client(options?: {
     permissionProfiles?: PermissionProfileSummary[];
     activePermissionProfileId?: string;
     defaultPermissionProfileId?: string;
+    /** The client capabilities `_meta`, for a client that is not AIR. */
+    capabilitiesMeta?: Record<string, unknown>;
 }) {
     const mocks = createMockConnections();
     const codexRequests: Array<{method: string, params: unknown}> = [];
@@ -162,12 +164,20 @@ async function connectV2Client(options?: {
             updates.push(ctx.params);
         })
         .connect(acp.ndJsonStream(clientToAgent.writable, agentToClient.readable));
-    await connection.agent.request(acpV2.methods.agent.initialize, {
+    const initializeResponse = await connection.agent.request(acpV2.methods.agent.initialize, {
         protocolVersion: 2,
         info: {name: "test-client", version: "1.0.0"},
         ...(options?.air ? {capabilities: {_meta: {jetbrains: {air: {version: 1}}}}} : {}),
+        ...(options?.capabilitiesMeta ? {capabilities: {_meta: options.capabilitiesMeta}} : {}),
     });
-    return {connection, agent: () => agent!, codexRequests, updates, emit: mocks.getUnhandledNotificationHandler()!};
+    return {
+        connection,
+        agent: () => agent!,
+        initializeResponse,
+        codexRequests,
+        updates,
+        emit: mocks.getUnhandledNotificationHandler()!,
+    };
 }
 
 /**
@@ -695,6 +705,45 @@ describe('Session lifecycle over ACP v2', () => {
         }).then(() => null, (err) => ({code: err.code, message: err.message}));
 
         await expect(dump(error)).toMatchFileSnapshot('data/session-lifecycle-v2-fork-invalid-params.json');
+    });
+
+    it('negotiates the client-neutral fork point and reports the turn boundary of a fork at a message', async () => {
+        const {connection, initializeResponse} = await connectV2Client({
+            capabilitiesMeta: {forkPoint: {version: 1}},
+            replayTurns: [
+                {id: "turn-1", items: [{type: "agentMessage", id: "msg-1", text: "First"}, {type: "reasoning", id: "r-1"}]},
+                {id: "turn-2", items: [{type: "agentMessage", id: "msg-2", text: "Second"}]},
+            ] as any,
+        });
+        closeClient = () => connection.close();
+
+        expect(initializeResponse._meta?.["forkPoint"]).toEqual({version: 1, boundary: "turn"});
+        const response = await connection.agent.request(acpV2.methods.agent.session.fork, {
+            sessionId,
+            cwd,
+            mcpServers: [],
+            _meta: {forkPoint: {messageId: "msg-1"}},
+        });
+
+        expect(response._meta).toEqual({
+            forkPoint: {boundary: "turn", messageId: "msg-1", turnId: "turn-1", lastItemId: "r-1", matchedBy: "id"},
+        });
+    });
+
+    it('rejects the client-neutral fork point from a client that did not opt in', async () => {
+        const {connection, initializeResponse, codexRequests} = await connectV2Client();
+        closeClient = () => connection.close();
+
+        expect(initializeResponse._meta).not.toHaveProperty("forkPoint");
+        const error = await connection.agent.request(acpV2.methods.agent.session.fork, {
+            sessionId,
+            cwd,
+            mcpServers: [],
+            _meta: {forkPoint: {messageId: "msg-1"}},
+        }).then(() => null, (err) => ({code: err.code, data: err.data}));
+
+        expect(error).toEqual({code: -32602, data: {forkPoint: {reason: "notNegotiated"}}});
+        expect(codexRequests.some(({method}) => method === "thread/fork")).toBe(false);
     });
 
     it('rejects fork of an unknown session, same as v1', async () => {

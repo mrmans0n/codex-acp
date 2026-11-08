@@ -1,6 +1,7 @@
 // noinspection ES6RedundantAwait
 
 import {afterEach, beforeEach, describe, expect, it, vi} from 'vitest';
+import {createHash} from "node:crypto";
 import {CODEX_API_KEY_ENV_VAR, OPENAI_API_KEY_ENV_VAR, type CodexAuthRequest} from "../../CodexAuthMethod";
 import type * as acp from "@agentclientprotocol/sdk/unstable";
 import {
@@ -890,6 +891,101 @@ describe('ACP server test', { timeout: 40_000 }, () => {
             threadId: "source-id",
             lastTurnId: "turn-2",
         }));
+    });
+
+    describe('client-neutral fork point', () => {
+        // The text the client received, with the file citation rendered against the source thread's cwd.
+        const renderedFingerprint = "sha256:6413116434470d1c1ba30bb2b513ac8fef5f965cc20100a6ba9eb972ba343c54";
+        const citingTurns = [
+            {id: "turn-1", items: [
+                {type: "userMessage", id: "user-1"},
+                {type: "agentMessage", id: "item-1", text: 'Read :codex-file-citation{path="src/a.ts"} now'},
+                {type: "reasoning", id: "reasoning-1"},
+            ]},
+            {id: "turn-2", items: [
+                {type: "agentMessage", id: "item-2", text: 'Read :codex-file-citation{path="src/a.ts"} now'},
+            ]},
+        ];
+
+        async function forkAt(forkPoint: unknown, turns: unknown[] = citingTurns) {
+            const mockFixture = createCodexMockTestFixture();
+            const codexAcpClient = mockFixture.getCodexAcpClient();
+            const codexAppServerClient = mockFixture.getCodexAppServerClient();
+            vi.spyOn(codexAppServerClient, "skillsExtraRootsSet").mockResolvedValue(undefined);
+            vi.spyOn(codexAppServerClient, "listSkills").mockResolvedValue({data: []});
+            // The fork asks for another cwd: rendering follows the source thread, as the client saw it.
+            vi.spyOn(codexAppServerClient, "threadReadWithHistory").mockResolvedValue({
+                thread: {id: "source-id", cwd: "/repo", turns},
+            } as any);
+            const threadForkSpy = vi.spyOn(codexAppServerClient, "threadFork").mockResolvedValue({
+                thread: {id: "fork-id"},
+                model: "gpt-5",
+                modelProvider: "openai",
+                reasoningEffort: "medium",
+                serviceTier: null,
+            } as any);
+            vi.spyOn(codexAppServerClient, "listModels").mockResolvedValue({
+                data: [createTestModel({id: "gpt-5"})],
+                nextCursor: null,
+            });
+            const forked = codexAcpClient.forkSession({
+                sessionId: "source-id",
+                cwd: "/elsewhere",
+                _meta: {forkPoint},
+            });
+            return {forked, threadForkSpy};
+        }
+
+        it('forks after the turn that holds the message id and reports the boundary', async () => {
+            const {forked, threadForkSpy} = await forkAt({version: 1, messageId: "item-1"});
+
+            await expect(forked).resolves.toMatchObject({
+                forkPoint: {boundary: "turn", messageId: "item-1", turnId: "turn-1", lastItemId: "reasoning-1", matchedBy: "id"},
+            });
+            expect(threadForkSpy).toHaveBeenCalledWith(expect.objectContaining({threadId: "source-id", lastTurnId: "turn-1"}));
+        });
+
+        it('matches the fingerprint of the text the client saw, with file citations rendered', async () => {
+            const {forked, threadForkSpy} = await forkAt({
+                messageId: "stale-id",
+                messageFingerprint: renderedFingerprint,
+                messageOccurrence: 2,
+            });
+
+            await expect(forked).resolves.toMatchObject({
+                forkPoint: {boundary: "turn", messageId: "item-2", turnId: "turn-2", lastItemId: "item-2", matchedBy: "fingerprint"},
+            });
+            expect(threadForkSpy).toHaveBeenCalledWith(expect.objectContaining({lastTurnId: "turn-2"}));
+        });
+
+        it('does not match the fingerprint of the raw Codex text', async () => {
+            const rawText = 'Read :codex-file-citation{path="src/a.ts"} now';
+            const rawFingerprint = `sha256:${createHash("sha256").update(rawText, "utf8").digest("hex")}`;
+            const {forked, threadForkSpy} = await forkAt({messageId: "stale-id", messageFingerprint: rawFingerprint});
+
+            await expect(forked).rejects.toMatchObject({
+                code: -32602,
+                data: {forkPoint: {messageId: "stale-id", reason: "notFound"}},
+            });
+            expect(threadForkSpy).not.toHaveBeenCalled();
+        });
+
+        it.each([
+            ["forkPoint", "item-1"],
+            ["forkPoint", null],
+            ["version", {version: 2, messageId: "item-1"}],
+            ["messageId", {messageId: "  "}],
+            ["messageId", {messageId: 7}],
+            ["messageFingerprint", {messageId: "item-1", messageFingerprint: `sha256:${"A".repeat(64)}`}],
+            ["messageFingerprint", {messageId: "item-1", messageFingerprint: "abc"}],
+            ["messageOccurrence", {messageId: "item-1", messageOccurrence: 0}],
+            ["messageOccurrence", {messageId: "item-1", messageOccurrence: 1.5}],
+        ])('rejects an invalid %s with the field in the error data', async (field, forkPoint) => {
+            const {forked, threadForkSpy} = await forkAt(forkPoint);
+
+            await expect(forked).rejects.toMatchObject({code: -32602, data: {forkPoint: {field}}});
+            expect(threadForkSpy).not.toHaveBeenCalled();
+        });
     });
 
     it('restores collaboration mode for resumed and loaded sessions', async () => {
