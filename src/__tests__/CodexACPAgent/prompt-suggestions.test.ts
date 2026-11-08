@@ -29,9 +29,16 @@ function suggestionUpdates(client: PromptSession): unknown[] {
 }
 
 /** Runs turn number `index` (from 0) to completion; its id is `turn-${index + 1}`. */
-async function runTurn(client: PromptSession, protocolVersion: 1 | 2, index: number, text: string, answer: string) {
+async function runTurn(
+    client: PromptSession,
+    protocolVersion: 1 | 2,
+    index: number,
+    text: string,
+    answer: string,
+    meta?: Record<string, unknown>,
+) {
     const turnId = `turn-${index + 1}`;
-    const response = client.sendPrompt([{type: "text", text}]);
+    const response = client.sendPrompt([{type: "text", text}], undefined, meta);
     await vi.waitFor(() => expect(client.turnStartParams).toHaveLength(index + 1));
     const params = client.turnStartParams[index]!;
     client.emit(turnStarted(turnId));
@@ -56,10 +63,12 @@ describe.each([1, 2] as const)("predicted follow-up prompt over ACP v%i", (proto
 
     let sampleParams: Array<Record<string, unknown>> = [];
 
-    function connect(air: boolean) {
+    function connect(air: boolean, extraMeta: Record<string, unknown> = {}) {
         sampleParams = [];
+        const capabilities = {_meta: {...(air ? airCapabilities._meta : {}), ...extraMeta}};
+        const declared = air || Object.keys(extraMeta).length > 0;
         return connectSession(protocolVersion, {
-            ...(air ? {clientCapabilities: airCapabilities, v1ClientCapabilities: airCapabilities} : {}),
+            ...(declared ? {clientCapabilities: capabilities, v1ClientCapabilities: capabilities} : {}),
             codexResponses: {
                 "thread/sample": async params => {
                     sampleParams.push(params as Record<string, unknown>);
@@ -161,5 +170,25 @@ describe.each([1, 2] as const)("predicted follow-up prompt over ACP v%i", (proto
 
         expect(suggestionUpdates(client)).toEqual([]);
         expect(sampleParams).toEqual([]);
+    });
+
+    /** A client-neutral client asks per prompt; v2 ignores the opt-in, so it gets nothing there. */
+    it("answers a client-neutral prompt that asks, with its id, and samples nothing for one that does not", async () => {
+        const client = await connect(false, {promptSuggestions: {version: 1}});
+        closeClient = () => client.connection.close();
+
+        await runTurn(client, protocolVersion, 0, "Fix the bug", "Fixed the bug.");
+        await runTurn(client, protocolVersion, 1, "Explain it", "Here is why.", {promptSuggestions: {id: "prompt-2"}});
+        if (protocolVersion === 1) {
+            await vi.waitFor(() => expect(suggestionUpdates(client)).toHaveLength(1));
+        }
+        await settle();
+
+        expect(suggestionUpdates(client)).toEqual(
+            protocolVersion === 1 ? [{suggestions: [{text: "Run the tests"}], id: "prompt-2"}] : [],
+        );
+        expect(sampleParams).toEqual(
+            protocolVersion === 1 ? [expect.objectContaining({expectedTurnId: "turn-2"})] : [],
+        );
     });
 });

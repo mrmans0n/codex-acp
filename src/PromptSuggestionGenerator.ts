@@ -26,13 +26,36 @@ export function promptSuggestionsEnabled(env: NodeJS.ProcessEnv = process.env): 
     return env["CODEX_ACP_PROMPT_SUGGESTIONS"]?.trim().toLowerCase() !== "false";
 }
 
-/** The `_meta` of the session info update that publishes `text`. `null` sends an empty list, which clears it. */
-export function promptSuggestionsMeta(text: string | null): Record<string, unknown> {
-    return {[PROMPT_SUGGESTIONS_META_KEY]: {suggestions: text === null ? [] : [{text}]}};
+/**
+ * The `_meta` of the session info update that publishes `text`. `null` sends an empty list, which clears it.
+ * `requestId` is the `_meta.promptSuggestions.id` of the client-neutral prompt the prediction answers.
+ */
+export function promptSuggestionsMeta(text: string | null, requestId?: string): Record<string, unknown> {
+    return {
+        [PROMPT_SUGGESTIONS_META_KEY]: {
+            suggestions: text === null ? [] : [{text}],
+            ...(requestId !== undefined ? {id: requestId} : {}),
+        },
+    };
 }
 
-/** Publishes `text` to the client; `null` clears the suggestion the client holds. */
-export type PublishPromptSuggestion = (text: string | null) => Promise<void>;
+/**
+ * The id that a `session/prompt` names in `_meta.promptSuggestions.id` to ask for the prediction of its turn.
+ * Undefined when the request names none or a value that is not a non-empty string of at most 256 characters.
+ */
+export function promptSuggestionsRequestId(meta: unknown): string | undefined {
+    if (meta === null || typeof meta !== "object") return undefined;
+    const value = (meta as Record<string, unknown>)[PROMPT_SUGGESTIONS_META_KEY];
+    if (value === null || typeof value !== "object") return undefined;
+    const id = (value as Record<string, unknown>)["id"];
+    return typeof id === "string" && id.length > 0 && id.length <= 256 ? id : undefined;
+}
+
+/**
+ * Publishes `text` to the client; `null` clears the suggestion the client holds.
+ * `requestId` names the client-neutral prompt it answers.
+ */
+export type PublishPromptSuggestion = (text: string | null, requestId?: string) => Promise<void>;
 
 /**
  * Predicts the follow-up prompt of a finished turn with `thread/sample`: one model response on an ephemeral fork
@@ -47,11 +70,17 @@ export class PromptSuggestionGenerator {
         private readonly publish: PublishPromptSuggestion,
     ) {}
 
-    /** Fire-and-forget hook, called after a turn ends normally. A newer turn or {@link invalidate} drops its result. */
-    onTurnCompleted(threadId: string, turnId: string): void {
+    /**
+     * Fire-and-forget hook, called after a turn ends normally. A newer turn or {@link invalidate} drops its result.
+     * With a `requestId` the result always goes out with it, an empty list when the sample gives nothing or fails,
+     * so a client-neutral client waiting for that id can stop.
+     */
+    onTurnCompleted(threadId: string, turnId: string, requestId?: string): void {
         const generation = ++this.generation;
-        this.generateAndPublish(generation, threadId, turnId).catch(() => {
+        this.generateAndPublish(generation, threadId, turnId, requestId).catch(async () => {
             // best-effort; never surface errors to the user
+            if (requestId === undefined || generation !== this.generation) return;
+            await this.publishAnswer(null, requestId).catch(() => {});
         });
     }
 
@@ -77,7 +106,12 @@ export class PromptSuggestionGenerator {
         this.client = client;
     }
 
-    private async generateAndPublish(generation: number, threadId: string, turnId: string): Promise<void> {
+    private async generateAndPublish(
+        generation: number,
+        threadId: string,
+        turnId: string,
+        requestId: string | undefined,
+    ): Promise<void> {
         // The app-server a generation starts on ends it, see `rebindAppServer`.
         const client = this.client;
         // The app-server rejects the sample when `turnId` is no longer the thread's latest turn.
@@ -89,7 +123,15 @@ export class PromptSuggestionGenerator {
         });
 
         if (generation !== this.generation) return;
-        await this.publishIfChanged(parseSuggestion(response.text));
+        const text = parseSuggestion(response.text);
+        if (requestId !== undefined) await this.publishAnswer(text, requestId);
+        else await this.publishIfChanged(text);
+    }
+
+    /** Answers a client-neutral request: it goes out even when it repeats the text the client holds. */
+    private async publishAnswer(text: string | null, requestId: string): Promise<void> {
+        this.lastPublished = text;
+        await this.publish(text, requestId);
     }
 
     private async publishIfChanged(text: string | null): Promise<void> {
