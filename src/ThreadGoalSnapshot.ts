@@ -2,6 +2,7 @@ import type {ACPSessionConnection, UpdateSessionEvent} from "./ACPSessionConnect
 import {AIR_GOAL_KEY, publishAirSessionMetadata, withAirMeta} from "./AirExtension";
 import {GOAL_CONTROL_METHOD, type GoalSnapshot, type GoalStatus} from "./GoalExtension";
 import type {ThreadGoal} from "./app-server/v2";
+import type {ClientCapabilities} from "./tool-calls/ClientCapabilities";
 
 export type ThreadGoalSnapshot = GoalSnapshot;
 
@@ -47,15 +48,26 @@ export function sameThreadGoalSnapshot(
         && left.createdAt === right.createdAt;
 }
 
-/** Only AIR gets the goal. The update carries nothing else, so another client gets no update. */
-export function goalSessionInfoUpdate(goal: ThreadGoalSnapshot | null, airClient: boolean): UpdateSessionEvent | null {
-    if (!airClient) return null;
+export function goalSessionInfoUpdate(
+    goal: ThreadGoalSnapshot | null,
+    capabilities: ClientCapabilities,
+): UpdateSessionEvent | null {
+    if (!capabilities.goal) return null;
     return {
         sessionUpdate: "session_info_update",
-        _meta: withAirMeta(undefined, AIR_GOAL_KEY, goal),
+        _meta: capabilities.airClient
+            ? withAirMeta(undefined, AIR_GOAL_KEY, goal)
+            : {[AIR_GOAL_KEY]: goal},
     };
 }
 
-export function publishGoalSessionInfo(session: ACPSessionConnection, goal: ThreadGoalSnapshot | null, airClient: boolean): Promise<void> {
-    return airClient ? publishAirSessionMetadata(session, AIR_GOAL_KEY, goal) : Promise.resolve();
+/** AIR composes its namespace; a client that opts in to `_meta.goal` (ACP v1 only) gets a plain update. */
+export function publishGoalSessionInfo(
+    session: ACPSessionConnection,
+    goal: ThreadGoalSnapshot | null,
+    capabilities: ClientCapabilities,
+): Promise<void> {
+    if (capabilities.airClient) return publishAirSessionMetadata(session, AIR_GOAL_KEY, goal);
+    const update = goalSessionInfoUpdate(goal, capabilities);
+    return update === null ? Promise.resolve() : session.update(update);
 }

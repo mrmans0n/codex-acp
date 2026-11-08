@@ -950,10 +950,18 @@ export class CodexAcpServer {
                 AIR_RECOMMENDED_CONFIG_VALUE_KEY,
                 ...this.sessionIndex.agentCapabilities(),
             ];
+        const goalCapability = {
+            version: GOAL_EXTENSION_VERSION,
+            controlMethod: GOAL_CONTROL_METHOD,
+            actions: [...GOAL_CONTROL_ACTIONS],
+        };
         return {
             steering: {
                 supported: true,
             },
+            ...(this.capabilities.goal && !this.capabilities.airClient ? {
+                [AIR_GOAL_KEY]: goalCapability,
+            } : {}),
             ...(this.capabilities.airClient ? {
                 [JETBRAINS_META_KEY]: {
                     [AIR_META_KEY]: {
@@ -3483,7 +3491,7 @@ export class CodexAcpServer {
         }
         sessionState.currentGoal = snapshot;
         await publishGoalSessionInfo(new ACPSessionConnection(this.connection, sessionState.sessionId),
-            snapshot, sessionState.clientCapabilities.airClient);
+            snapshot, sessionState.clientCapabilities);
     }
 
     /** The models of a root session, for the configuration of its native subagent sessions. */

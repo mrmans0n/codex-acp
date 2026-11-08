@@ -29,6 +29,7 @@ export type AirCapabilities = {
 type ClientCapabilityValues = {
     readonly airClient: boolean;
     readonly airToolCallContract: boolean;
+    readonly goal: boolean;
     readonly terminalOutput: boolean;
     readonly terminalOutputDelta: boolean;
     readonly planUpdates: boolean;
@@ -48,6 +49,7 @@ export class ClientCapabilities {
     static readonly DEFAULT = new ClientCapabilities({
         airClient: false,
         airToolCallContract: false,
+        goal: false,
         terminalOutput: false,
         terminalOutputDelta: false,
         planUpdates: false,
@@ -60,6 +62,8 @@ export class ClientCapabilities {
     readonly airClient: boolean;
     /** The client gets the tool call reports of the AIR tool call contract. Only AIR on ACP v1 does. */
     readonly airToolCallContract: boolean;
+    /** The client is AIR or declares `_meta.goal`. */
+    readonly goal: boolean;
     /** The client declares `_meta.terminal_output`, the Zed convention for command output chunks. */
     readonly terminalOutput: boolean;
     /** The client declares `_meta.terminal_output_delta` and appends the output chunks. */
@@ -74,6 +78,7 @@ export class ClientCapabilities {
     private constructor(values: ClientCapabilityValues) {
         this.airClient = values.airClient;
         this.airToolCallContract = values.airToolCallContract;
+        this.goal = values.goal;
         this.terminalOutput = values.terminalOutput;
         this.terminalOutputDelta = values.terminalOutputDelta;
         this.planUpdates = values.planUpdates;
@@ -85,9 +90,11 @@ export class ClientCapabilities {
     static from(capabilities: acp.ClientCapabilities | null | undefined): ClientCapabilities {
         const airClient = isAirClient(capabilities);
         const diffPatch = clientSupportsAirCapability(capabilities, AIR_DIFF_PATCH_KEY);
+        const goal = capabilities?._meta?.["goal"];
         return new ClientCapabilities({
             airClient,
             airToolCallContract: airClient,
+            goal: airClient || (goal !== null && typeof goal === "object" && !Array.isArray(goal)),
             terminalOutput: capabilities?._meta?.["terminal_output"] === true,
             terminalOutputDelta: capabilities?._meta?.["terminal_output_delta"] === true,
             planUpdates: capabilities?.plan != null,
@@ -113,6 +120,7 @@ export class ClientCapabilities {
         return new ClientCapabilities({
             airClient: isAirClient(capabilities),
             airToolCallContract: false,
+            goal: isAirClient(capabilities),
             terminalOutput: true,
             terminalOutputDelta: false,
             planUpdates: true,
@@ -137,4 +145,3 @@ export class ClientCapabilities {
         return this.airToolCallContract ? null : "terminal_output_delta";
     }
 }
-
