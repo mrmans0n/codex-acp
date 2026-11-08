@@ -245,14 +245,18 @@ import {clientSupportsCompaction, CodexSessionCompactions, createCompactionUpdat
 import {CodexSessionToolCalls} from "./CodexSessionToolCalls";
 import {
     type AgentFileChangeReport,
+    type AgentFileChangeReportFormat,
     type AgentFileChangeReportRequest,
     type AgentFileChangeReportUnavailableReason,
     type AgentFileChangeWorkspace,
     AgentFileChangeReportError,
+    agentFileChangeReportMeta,
+    agentFileChangeReportRequestFor,
+    NEUTRAL_AGENT_FILE_CHANGE_REPORT_META_KEY,
+    neutralAgentFileChangeReportCapability,
     captureAgentFileChangeWorkspace,
     createReportedAgentFileChangeReport,
     createUnavailableAgentFileChangeReport,
-    parseAgentFileChangeReportRequest,
 } from "./AgentFileChangeReport";
 
 
@@ -429,10 +433,6 @@ const DENY_ALL_ELICITATIONS: ElicitationHandler = {
     handleElicitation: async () => ({action: "cancel", content: null, _meta: null}),
     handleUserInput: async () => ({answers: {}}),
 };
-
-function clientSupportsAgentFileChangeReports(capabilities: acp.ClientCapabilities | null): boolean {
-    return clientSupportsAirCapability(capabilities, AIR_AGENT_FILE_CHANGE_REPORT_KEY);
-}
 
 interface ActiveAuthState {
     account: Account | null;
@@ -1011,6 +1011,11 @@ export class CodexAcpServer {
             // failure state, so `ClientCapabilities.fromV2` never selects it.
             ...(protocolVersion === 1 && this.capabilities.sessionFailureFormat === "neutral" ? {
                 [NEUTRAL_SESSION_FAILURE_META_KEY]: neutralSessionFailureCapability(),
+            } : {}),
+            // The client-neutral agent file-change report, see `docs/air-extensions.md`. It is an ACP v1 extension,
+            // so `ClientCapabilities.fromV2` never selects it.
+            ...(protocolVersion === 1 && this.capabilities.agentFileChangeReportFormat === "neutral" ? {
+                [NEUTRAL_AGENT_FILE_CHANGE_REPORT_META_KEY]: neutralAgentFileChangeReportCapability(),
             } : {}),
             // The session index for a client that opted in without AIR, see `docs/air-extensions.md`.
             ...(neutralSessionIndex ? {
@@ -4263,6 +4268,7 @@ export class CodexAcpServer {
 
     private async publishAgentFileChangeReport(
         sessionState: SessionState,
+        format: Exclude<AgentFileChangeReportFormat, "none">,
         turnId: string | null,
         request: AgentFileChangeReportRequest,
         unavailableReason: AgentFileChangeReportUnavailableReason,
@@ -4288,7 +4294,9 @@ export class CodexAcpServer {
         }
         try {
             const session = new ACPSessionConnection(this.connection, sessionState.sessionId);
-            await publishAirSessionMetadata(session, AIR_AGENT_FILE_CHANGE_REPORT_KEY, report);
+            // AIR composes its namespace on ACP v2; the client-neutral opt-in (ACP v1 only) gets its own key.
+            if (format === "air") await publishAirSessionMetadata(session, AIR_AGENT_FILE_CHANGE_REPORT_KEY, report);
+            else await session.update({sessionUpdate: "session_info_update", _meta: agentFileChangeReportMeta(format, report)});
         } catch (error) {
             logger.error("Failed to publish agent file-change report", error);
         }
@@ -5116,9 +5124,8 @@ export class CodexAcpServer {
         // Awaited only when a clear is sent, so a prompt with no held suggestion starts in the same tick.
         const clearing = sessionState.promptSuggestions?.clear();
         if (clearing) await clearing;
-        const agentFileChangeReportRequest = clientSupportsAgentFileChangeReports(this.clientCapabilities)
-            ? parseAgentFileChangeReportRequest(params._meta)
-            : null;
+        const agentFileChangeReportFormat = this.capabilities.agentFileChangeReportFormat;
+        const agentFileChangeReportRequest = agentFileChangeReportRequestFor(agentFileChangeReportFormat, params._meta);
         const agentFileChangeWorkspace = agentFileChangeReportRequest === null
             ? null
             : captureAgentFileChangeWorkspace(sessionState.cwd, sessionState.additionalDirectories);
@@ -5729,7 +5736,9 @@ export class CodexAcpServer {
             } catch (error) {
                 logger.error("Failed to publish terminal compaction or subagent state during prompt cleanup", error);
             }
-            if (agentFileChangeReportRequest !== null && agentFileChangeWorkspace !== null) {
+            if (agentFileChangeReportFormat !== "none"
+                && agentFileChangeReportRequest !== null
+                && agentFileChangeWorkspace !== null) {
                 if (promptWasCancelled || activePrompt.signal.aborted || this.sessionIsClosing(params.sessionId)) {
                     agentFileChangeReportTurnId = null;
                     agentFileChangeReportUnavailableReason = "cancelled";
@@ -5740,6 +5749,7 @@ export class CodexAcpServer {
                 }
                 await this.publishAgentFileChangeReport(
                     sessionState,
+                    agentFileChangeReportFormat,
                     agentFileChangeReportTurnId,
                     agentFileChangeReportRequest,
                     agentFileChangeReportUnavailableReason,
