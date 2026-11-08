@@ -2,6 +2,7 @@ import type {SessionConfigOption} from "@agentclientprotocol/sdk/unstable";
 import type {ReasoningEffort} from "./app-server";
 import type {Model, ReasoningEffortOption} from "./app-server/v2";
 import {AIR_RECOMMENDED_CONFIG_VALUE_KEY, withAirMeta} from "./AirExtension";
+import {NEUTRAL_RECOMMENDED_CONFIG_VALUE_META_KEY} from "./permissions/metadata";
 
 export const MODEL_CONFIG_ID = "model";
 export const REASONING_EFFORT_CONFIG_ID = "reasoning_effort";
@@ -52,10 +53,21 @@ function modelOptions(availableModels: ReadonlyArray<Model>, currentBaseModelId:
     return options;
 }
 
+/** Which `_meta` records carry a recommendation. The client can opt into either, or both. */
+export type RecommendationRecords = {readonly air: boolean; readonly neutral: boolean};
+
+function recommendationMeta(value: string, records: RecommendationRecords): Record<string, unknown> {
+    return {
+        ...(records.air ? withAirMeta(undefined, AIR_RECOMMENDED_CONFIG_VALUE_KEY, value) : {}),
+        ...(records.neutral ? {[NEUTRAL_RECOMMENDED_CONFIG_VALUE_META_KEY]: {version: 1, value}} : {}),
+    };
+}
+
 export function createModelConfigOption(
     availableModels: Array<Model>,
     currentBaseModelId: string,
     recommendedModelId?: string,
+    records: RecommendationRecords = {air: true, neutral: false},
 ): SessionConfigOption {
     const options = modelOptions(availableModels, currentBaseModelId);
 
@@ -71,7 +83,7 @@ export function createModelConfigOption(
         currentValue: currentBaseModelId,
         options,
         ...(recommendation
-            ? {_meta: withAirMeta(undefined, AIR_RECOMMENDED_CONFIG_VALUE_KEY, recommendation)}
+            ? {_meta: recommendationMeta(recommendation, records)}
             : {}),
     };
 }
@@ -80,6 +92,7 @@ export function createReasoningEffortConfigOption(
     supportedReasoningEfforts: Array<ReasoningEffortOption>,
     currentEffort: string,
     recommendedEffort?: string,
+    records: RecommendationRecords = {air: true, neutral: false},
 ): SessionConfigOption {
     const recommendation = findSupportedEffort(supportedReasoningEfforts, recommendedEffort);
     return {
@@ -95,7 +108,7 @@ export function createReasoningEffortConfigOption(
             description: option.description,
         })),
         ...(recommendation
-            ? {_meta: withAirMeta(undefined, AIR_RECOMMENDED_CONFIG_VALUE_KEY, recommendation)}
+            ? {_meta: recommendationMeta(recommendation, records)}
             : {}),
     };
 }
