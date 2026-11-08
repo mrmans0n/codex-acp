@@ -229,6 +229,7 @@ import {
     JETBRAINS_META_KEY,
     publishAirSessionMetadata,
 } from "./AirExtension";
+import {NEUTRAL_SESSION_INDEX_META_KEY} from "./SessionIndex";
 import {SessionIndexService} from "./SessionIndexService";
 import type {SessionIndexTitleState} from "./SessionIndexTitles";
 import {ASYNC_TASK_STOP_METHOD, asyncTaskCapability} from "./async-tasks/AsyncTaskExtension";
@@ -582,7 +583,7 @@ export class CodexAcpServer {
      */
     private providerRequests = 0;
     private appliedProviderRequest = 0;
-    /** The AIR `sessionIndex` extension, see `SessionIndexService.ts`. */
+    /** The `sessionIndex` extension, for AIR or a client-neutral opt-in, see `SessionIndexService.ts`. */
     readonly sessionIndex = new SessionIndexService({
         connection: () => this.connection,
         client: () => this.codexAcpClient,
@@ -915,7 +916,7 @@ export class CodexAcpServer {
         this.clientDelivery.reports.compareMeta = this.capabilities.airToolCallContract;
         // Boolean config options are baseline on v2, so there is nothing to probe.
         this.booleanConfigOptionsSupported = true;
-        this.sessionIndex.configure(clientCapabilities);
+        this.sessionIndex.configure(clientCapabilities, {neutral: false});
         this.sessionIndex.observe(this.codexAcpClient);
         this.publishFirstAuthStatusAfterResponse();
         return {
@@ -984,6 +985,7 @@ export class CodexAcpServer {
                 AIR_RECOMMENDED_CONFIG_VALUE_KEY,
                 ...this.sessionIndex.agentCapabilities(),
             ];
+        const neutralSessionIndex = this.sessionIndex.neutralCapability();
         const goalCapability = {
             version: GOAL_EXTENSION_VERSION,
             controlMethod: GOAL_CONTROL_METHOD,
@@ -1000,6 +1002,10 @@ export class CodexAcpServer {
             } : {}),
             ...(this.capabilities.asyncTasks && !this.capabilities.airClient ? {
                 "async-tasks": asyncTaskCapability(),
+            } : {}),
+            // The session index for a client that opted in without AIR, see `docs/air-extensions.md`.
+            ...(neutralSessionIndex ? {
+                [NEUTRAL_SESSION_INDEX_META_KEY]: neutralSessionIndex,
             } : {}),
             ...(this.capabilities.airClient ? {
                 [JETBRAINS_META_KEY]: {
