@@ -9,6 +9,7 @@ import {
     deferred,
 } from "../acp-test-utils";
 import {logger} from "../../Logger";
+import {CodexEventHandler} from "../../CodexEventHandler";
 import type {AcpClientConnection} from "../../ACPSessionConnection";
 import {CodexCommands, type CommandHandleResult} from "../../CodexCommands";
 
@@ -124,6 +125,28 @@ describe("CodexEventHandler - auth error events", () => {
         expect(JSON.stringify({result, updates})).not.toContain(modelRefusalEnvelope);
     });
 
+    // Upstream constructs the handler with its own boolean typed-failure flag; it keeps that meaning.
+    it.each([true, false])("keeps upstream's boolean typed-failure flag of the event handler (%s)", async typed => {
+        const state = createTestSessionState({sessionId: "boolean-failure-flag", account: {type: "apiKey"}});
+        const updates: unknown[] = [];
+        const connection = {
+            notify: vi.fn(async (_method: unknown, params: {update: unknown}) => updates.push(params.update)),
+        } as unknown as AcpClientConnection;
+        const handler = new CodexEventHandler(connection, state, typed, "epoch", state.subagents, undefined, false, false, false);
+        await handler.handleSessionScopedNotification({
+            method: "error",
+            params: {
+                threadId: state.sessionId, turnId: "completed-turn", willRetry: true,
+                error: {message: "Reconnecting", codexErrorInfo: null, additionalDetails: null, misalignment: null},
+            },
+        });
+        const failures = updates.map(update => (update as {_meta?: any})._meta?.jetbrains?.air?.sessionFailure)
+            .filter(failure => failure !== undefined);
+        expect(failures).toEqual(typed ? [expect.objectContaining({severity: "warning"})] : []);
+        expect(failures.some(failure => "kind" in failure)).toBe(false);
+        expect(JSON.stringify(updates)).not.toContain("\"sessionFailure\":{\"version\"");
+    });
+
     it.each([false, true])("reads a known service message after a turn ends (retry=%s)", async willRetry => {
         const state = createTestSessionState({sessionId: "late-service-envelope", account: {type: "apiKey"}});
         const updates: unknown[] = [];
@@ -180,7 +203,7 @@ describe("CodexEventHandler - auth error events", () => {
         {name: "typed failure", capabilities: typedFailureCapabilities},
     ])("explains an unreachable ChatGPT backend as a connection failure in the $name", async ({capabilities}) => {
         const {result, updates} = await runPromptWithError(createTestSessionState({
-            sessionId: "workspace-routing-session", account: {type: "chatgpt", email: "user@example.com", planType: "plus"},
+            sessionId: "workspace-routing-session", account: {type: "chatgpt", email: "user@example.com", planType: "plus", workspaceName: null},
         }), {
             message: "workspace routing discovery failed", codexErrorInfo: "other", additionalDetails: null, misalignment: null,
         }, false, capabilities);

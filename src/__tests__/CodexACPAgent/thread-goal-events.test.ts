@@ -10,6 +10,7 @@ import {
     setupPromptAndSendNotifications,
     type CodexMockTestFixture,
 } from "../acp-test-utils";
+import {connectSession, sessionId as harnessSessionId} from "./v2-prompt-harness";
 
 describe("CodexEventHandler - thread goal events", () => {
     let mockFixture: CodexMockTestFixture;
@@ -320,6 +321,28 @@ describe("CodexEventHandler - thread goal events", () => {
                 goal: null,
             }}},
         });
+    });
+
+    it.each([
+        ["opts in", {_meta: {goal: {}}}, [{goal: expect.objectContaining({objective: "Resume the goal", status: "paused"})}]],
+        ["does not opt in", undefined, []],
+    ] as const)("publishes the current goal on session/load only to a non-AIR v1 client that %s", async (_label, v1ClientCapabilities, expected) => {
+        const goal = {...goalUpdated("Resume the goal").params.goal, status: "paused" as const};
+        const h = await connectSession(1, {
+            ...(v1ClientCapabilities ? {v1ClientCapabilities} : {}),
+            codexResponses: {"thread/goal/get": async () => ({goal})},
+        });
+        try {
+            await h.request("session/load", {sessionId: harnessSessionId, cwd: "/workspace", mcpServers: []});
+            await h.waitForNotifications();
+            const goalMeta = h.scopedUpdates
+                .filter(({sessionId: id, update}) => id === harnessSessionId && update.sessionUpdate === "session_info_update")
+                .map(({update}) => update._meta)
+                .filter((meta) => meta && typeof meta === "object" && ("goal" in meta || "jetbrains" in meta));
+            expect(goalMeta).toEqual(expected);
+        } finally {
+            h.connection.close();
+        }
     });
 
     function goalUpdated(objective: string): Extract<ServerNotification, {method: "thread/goal/updated"}> {

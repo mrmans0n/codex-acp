@@ -2,6 +2,7 @@
  * The `sessionIndex` extension as `CodexAcpServer` serves it: the session list, `_session/rename`,
  * `_session/archive`, `_session/unarchive`, `session/delete` and `_session/list/subscribe`. Nothing here runs
  * for a client that does not declare `sessionIndex`, as AIR or as a client-neutral opt-in.
+ * `session/set_title` shares its title writer without requiring AIR capabilities.
  * See `SessionIndex.ts` and `docs/air-extensions.md`.
  */
 
@@ -9,6 +10,7 @@ import path from "node:path";
 import type * as acp from "@agentclientprotocol/sdk/unstable";
 import {RequestError} from "@agentclientprotocol/sdk/unstable";
 import {ACPSessionConnection, type AcpClientConnection} from "./ACPSessionConnection";
+import {publishAirSessionMetadata} from "./AirExtension";
 import type {ServerNotification} from "./app-server";
 import type {CodexAcpClient} from "./CodexAcpClient";
 import type {SessionState} from "./CodexAcpServer";
@@ -261,9 +263,14 @@ export class SessionIndexService {
     /** `_session/rename`. */
     async rename({sessionId, title}: SessionRenameRequest): Promise<Record<string, never>> {
         this.require(SESSION_RENAME_METHOD);
-        await this.host.ensureAppServer();
-        await this.titles.rename(sessionId, title);
+        await this.setTitle({sessionId, title});
         return {};
+    }
+
+    /** Standard title requests share persistence, normalization and automatic-title suppression with AIR. */
+    async setTitle({sessionId, title}: acp.SetSessionTitleRequest): Promise<acp.SetSessionTitleResponse> {
+        await this.host.ensureAppServer();
+        return {title: await this.titles.rename(sessionId, title)};
     }
 
     /**
@@ -297,17 +304,25 @@ export class SessionIndexService {
                     throw sessionNotFoundRequestError(sessionId);
                 }
             });
+            // Tell the client why it closed before ending this operation's delivery fence.
+            if (archived ? open : this.host.session(sessionId) !== undefined) {
+                await this.publishArchived(sessionId, archived);
+            }
         } finally {
             if (archived) this.host.endSessionCloseFence(sessionId);
         }
-        // An archived session was closed above: the update still goes to its client, to tell it why.
-        if (archived ? open : this.host.session(sessionId) !== undefined) {
-            await new ACPSessionConnection(this.host.connection(), sessionId).update({
-                sessionUpdate: "session_info_update",
-                _meta: this.requireMeta().write(undefined, AIR_ARCHIVED_KEY, archived),
-            });
-        }
         return {};
+    }
+
+    /**
+     * The archive state of an open session: AIR composes its namespace, a client-neutral opt-in (ACP v1 only)
+     * gets `_meta.sessionIndex.archived`.
+     */
+    private publishArchived(sessionId: string, archived: boolean): Promise<void> {
+        const session = new ACPSessionConnection(this.host.connection(), sessionId);
+        const meta = this.requireMeta();
+        if (meta === AIR_SESSION_INDEX_META) return publishAirSessionMetadata(session, AIR_ARCHIVED_KEY, archived);
+        return session.update({sessionUpdate: "session_info_update", _meta: meta.write(undefined, AIR_ARCHIVED_KEY, archived)});
     }
 
     /**

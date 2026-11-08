@@ -1,5 +1,5 @@
-import type {UpdateSessionEvent} from "./ACPSessionConnection";
-import {AIR_GOAL_KEY, withAirMeta} from "./AirExtension";
+import type {ACPSessionConnection, UpdateSessionEvent} from "./ACPSessionConnection";
+import {AIR_GOAL_KEY, publishAirSessionMetadata, withAirMeta} from "./AirExtension";
 import {GOAL_CONTROL_METHOD, type GoalSnapshot, type GoalStatus} from "./GoalExtension";
 import type {ThreadGoal} from "./app-server/v2";
 import type {ClientCapabilities} from "./tool-calls/ClientCapabilities";
@@ -59,4 +59,15 @@ export function goalSessionInfoUpdate(
             ? withAirMeta(undefined, AIR_GOAL_KEY, goal)
             : {[AIR_GOAL_KEY]: goal},
     };
+}
+
+/** AIR composes its namespace; a client that opts in to `_meta.goal` (ACP v1 only) gets a plain update. */
+export function publishGoalSessionInfo(
+    session: ACPSessionConnection,
+    goal: ThreadGoalSnapshot | null,
+    capabilities: ClientCapabilities,
+): Promise<void> {
+    if (capabilities.airClient) return publishAirSessionMetadata(session, AIR_GOAL_KEY, goal);
+    const update = goalSessionInfoUpdate(goal, capabilities);
+    return update === null ? Promise.resolve() : session.update(update);
 }

@@ -262,7 +262,12 @@ describe("app-server recovery", () => {
         await expect(fixture.agent.prompt({sessionId, prompt: [], _meta: reviewedMeta(token)})).rejects.toMatchObject({code: -32044});
     });
 
-    it("rechecks the review after async session configuration before dispatch", async () => {
+    // Upstream v2.6.0 restarts the app-server for a new provider routing even before a session is open, which
+    // ends the request on the old process; disabling OpenAI changes no startup configuration and keeps the process.
+    it.each([
+        ["disabling OpenAI", {code: -32044}],
+        ["a new provider routing", {code: 1001}],
+    ] as const)("rechecks the review after async session configuration before dispatch: %s", async (change, rejection) => {
         const fixture = createRecoveryFixture();
         await initializeHookReview(fixture);
         const token = await reviewHooks(fixture);
@@ -270,10 +275,15 @@ describe("app-server recovery", () => {
         const opening = fixture.agent.newSession({cwd: "/work", additionalDirectories: ["/work/extra"], mcpServers: [], _meta: reviewedMeta(token)});
         opening.catch(() => {});
         await vi.waitFor(() => expect(fixture.current().rpc.hasPending("skills/extraRoots/set")).toBe(true));
-        await fixture.agent.setProvider({providerId: "openai", apiType: "openai", baseUrl: "https://example.com/v1", headers: {}});
-        fixture.current().rpc.resolve("skills/extraRoots/set", {});
-        await expect(opening).rejects.toMatchObject({code: -32044});
-        expect(requestsOf(fixture.current(), "thread/start")).toEqual([]);
+        const reviewed = fixture.current();
+        if (change === "disabling OpenAI") {
+            await fixture.agent.disableProvider({providerId: "openai"});
+            reviewed.rpc.resolve("skills/extraRoots/set", {});
+        } else {
+            await fixture.agent.setProvider({providerId: "openai", apiType: "openai", baseUrl: "https://example.com/v1", headers: {}});
+        }
+        await expect(opening).rejects.toMatchObject(rejection);
+        expect(fixture.servers.flatMap(server => requestsOf(server, "thread/start"))).toEqual([]);
     });
 
     it.each(["stale token", "changed hash", "duplicate identity", "selected hash mismatch", "missing selection", "ambiguous key", "write failure", "unverified readback"])("never approves selected hooks after %s", async failure => {
@@ -313,7 +323,12 @@ describe("app-server recovery", () => {
         expect(requestsOf(fixture.current(), "thread/start")).toHaveLength(1);
     });
 
-    it.each(["list", "trust"])("rejects a provider change while %s reads hooks", async operation => {
+    it.each([
+        ["list", "disabling OpenAI", {code: -32044}],
+        ["trust", "disabling OpenAI", {code: -32044}],
+        ["list", "a new provider routing", {code: 1001}],
+        ["trust", "a new provider routing", {code: 1001}],
+    ] as const)("rejects a provider change while %s reads hooks: %s", async (operation, change, rejection) => {
         const fixture = createRecoveryFixture();
         await initializeHookReview(fixture);
         const token = await reviewHooks(fixture);
@@ -322,10 +337,15 @@ describe("app-server recovery", () => {
             : fixture.agent.trustHooks("/work", [{key: "startup", currentHash: "hash"}], token);
         request.catch(() => {});
         await vi.waitFor(() => expect(fixture.current().rpc.hasPending("hooks/list")).toBe(true));
-        await fixture.agent.setProvider({providerId: "openai", apiType: "openai", baseUrl: "https://example.com/v1", headers: {}});
-        fixture.current().rpc.resolve("hooks/list", {data: [{cwd: "/work", hooks: [], warnings: [], errors: []}]});
-        await expect(request).rejects.toMatchObject({code: -32044});
-        expect(requestsOf(fixture.current(), "config/batchWrite")).toEqual([]);
+        const reviewed = fixture.current();
+        if (change === "disabling OpenAI") {
+            await fixture.agent.disableProvider({providerId: "openai"});
+            reviewed.rpc.resolve("hooks/list", {data: [{cwd: "/work", hooks: [], warnings: [], errors: []}]});
+        } else {
+            await fixture.agent.setProvider({providerId: "openai", apiType: "openai", baseUrl: "https://example.com/v1", headers: {}});
+        }
+        await expect(request).rejects.toMatchObject(rejection);
+        expect(fixture.servers.flatMap(server => requestsOf(server, "config/batchWrite"))).toEqual([]);
     });
 
     it("revalidates a queued thread load at dispatch", async () => {
@@ -877,6 +897,85 @@ describe("app-server recovery", () => {
         await expect(prompt).resolves.toMatchObject({stopReason: "end_turn"});
     });
 
+    it("keeps a session without messages when providers/set repeats the applied routing", async () => {
+        const fixture = createRecoveryFixture();
+        await initialize(fixture);
+        const provider = {providerId: "openai", apiType: "openai" as const, baseUrl: "https://gateway.example/v1", headers: {"X-Key": "k"}};
+        await fixture.agent.setProvider(provider);
+        const {sessionId} = await fixture.agent.newSession({cwd: "/work", mcpServers: []});
+
+        await fixture.agent.setProvider({...provider, headers: {...provider.headers}});
+
+        // The first providers/set started the app-server with the gateway; the repeat started none.
+        expect(fixture.servers).toHaveLength(2);
+        const {prompt} = await startTurn(fixture, sessionId);
+        completeTurn(fixture, sessionId);
+        await expect(prompt).resolves.toMatchObject({stopReason: "end_turn"});
+        await fixture.agent.setProvider({...provider, headers: {"X-Key": "rotated"}});
+        expect(fixture.servers).toHaveLength(3);
+        expect(fixture.launches.at(-1)!.env).toEqual({CODEX_ACP_PROVIDER_HEADER_0: "codex", CODEX_ACP_PROVIDER_HEADER_1: "rotated"});
+    });
+
+    it("starts the app-server with the provider of the gateway routing, also without sessions", async () => {
+        const fixture = createRecoveryFixture();
+        await initialize(fixture);
+        const provider = {providerId: "openai", apiType: "openai" as const, baseUrl: "https://gateway.example/v1", headers: {"X-Key": "secret"}};
+
+        await fixture.agent.setProvider(provider);
+        await fixture.agent.newSession({cwd: "/work", mcpServers: []});
+        await fixture.agent.disableProvider({providerId: "openai"});
+        await fixture.agent.disableProvider({providerId: "openai"});
+
+        // The thread starts on the app-server that runs with its provider.
+        expect(requestsOf(fixture.servers[1]!, "thread/start")).toEqual([expect.objectContaining({modelProvider: "custom-gateway"})]);
+        expect(fixture.launches.some(launch => launch.args.some(arg => arg.includes("secret")))).toBe(false);
+        await expect(`${JSON.stringify(fixture.launches, null, 2)}\n`)
+            .toMatchFileSnapshot("data/provider-launches.json");
+    });
+
+    it("restarts the app-server once with the provider of the gateway auth method", async () => {
+        const fixture = createRecoveryFixture();
+        await initialize(fixture);
+        const gateway = {
+            methodId: "gateway",
+            _meta: {gateway: {baseUrl: "https://gateway.internal/openai", headers: {Authorization: "Bearer k"}, providerName: "Corp"}},
+        } as acp.AuthenticateRequest;
+
+        await fixture.agent.authenticate(gateway);
+        await fixture.agent.authenticate(gateway);
+        expect(fixture.launches).toHaveLength(1);
+        expect(fixture.launches[0]!.args).toContain('model_provider="custom-gateway"');
+        await fixture.agent.newSession({cwd: "/work", mcpServers: []});
+        expect(requestsOf(fixture.current(), "thread/start")).toEqual([expect.objectContaining({modelProvider: "custom-gateway"})]);
+
+        fixture.answers.set("account/login/start", (_params, server) => {
+            setImmediate(() => server.rpc.notify({method: "account/login/completed", params: {loginId: null, success: true, error: null}}));
+            return {type: "apiKey"};
+        });
+        await fixture.agent.authenticate({methodId: "api-key", _meta: {"api-key": {apiKey: "sk-test"}}} as acp.AuthenticateRequest);
+        expect(fixture.launches.at(-1)).toEqual({args: ["app-server"], env: {}});
+    });
+
+    it("answers a repeated providers/set only after the provider update in flight for it", async () => {
+        const fixture = createRecoveryFixture();
+        const sessionId = await openSession(fixture);
+        fixture.answers.set("thread/resume", () => undefined);
+        const provider = {providerId: "openai", apiType: "openai" as const, baseUrl: "https://gateway.example/v1"};
+        const first = fixture.agent.setProvider(provider);
+        await vi.waitFor(() => expect(fixture.servers.length === 2 && fixture.current().rpc.hasPending("thread/resume")).toBe(true));
+
+        let repeatedDone = false;
+        const repeated = fixture.agent.setProvider(provider).then(() => {
+            repeatedDone = true;
+        });
+        await new Promise(resolve => setTimeout(resolve, 10));
+        expect(repeatedDone).toBe(false);
+
+        fixture.current().rpc.resolve("thread/resume", resumed(sessionId));
+        await Promise.all([first, repeated]);
+        expect(fixture.servers).toHaveLength(2);
+    });
+
     it("keeps the provider routing of the agent across a crash restart", async () => {
         const fixture = createRecoveryFixture();
         await initialize(fixture);
@@ -887,6 +986,8 @@ describe("app-server recovery", () => {
 
         expect(fixture.agent.listProviders({}).providers[0]!.current).toEqual({apiType: "openai", baseUrl: "https://gateway.example/v1"});
         expect(requestsOf(fixture.current(), "thread/start")).toEqual([expect.objectContaining({modelProvider: "custom-gateway"})]);
+        expect(fixture.launches.at(-1)).toEqual(fixture.launches.at(-2));
+        expect(fixture.launches.at(-1)!.args).toContain('model_provider="custom-gateway"');
     });
 
     it("joins the resume in flight when a second use comes after the restart", async () => {
@@ -1406,6 +1507,10 @@ describe("codex hook review over the ACP router", () => {
         const trustHooks = vi.fn(async () => ({trusted: true}));
         const agent = {
             initialize: vi.fn(async () => ({protocolVersion: acp.PROTOCOL_VERSION, agentCapabilities: {}, authMethods: []})),
+            // The router hooks of upstream v2.6.0's deferred startup publication.
+            observeInitializeResponse: () => {},
+            observeSessionSetupResponses: () => () => {},
+            afterInitializeResponse: () => {},
             trustHooks,
             sessionIndex: {dispose: () => {}},
         } as unknown as CodexAcpServer;
