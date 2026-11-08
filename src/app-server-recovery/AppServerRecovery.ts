@@ -1,3 +1,4 @@
+import {CodexHookReviewError} from "../CodexHookReview";
 import {ConnectionError, ConnectionErrors, ErrorCodes, ResponseError} from "vscode-jsonrpc/node";
 import type {CodexAcpClient} from "../CodexAcpClient";
 import type {CodexConnection} from "../CodexJsonRpcConnection";
@@ -672,7 +673,7 @@ export class AppServerRecovery<S extends RecoverableSession> {
     }
 
     private resumeError(sessionId: string, error: unknown, client: CodexAcpClient): unknown {
-        if (isAppServerUnavailableError(error)) return error;
+        if (isAppServerUnavailableError(error) || error instanceof CodexHookReviewError) return error;
         const mapped = this.mapError(error, client);
         if (mapped !== error) return mapped;
         if (isMissingRolloutError(error)) {

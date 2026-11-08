@@ -64,6 +64,16 @@ beforeAll(async () => {
     }
 }, 120_000);
 
+describe("client-neutral hook review output", () => {
+    it.each(["command-output-stdin", "collab-agent", "native-subagent-session"])("keeps ordinary non-AIR messages for %s", async name => {
+        const reviewed = normalize(await runScenario(scenario(name), {_meta: {codexHooks: {version: 1}}}));
+        const initialized = reviewed.find(message => message.method === "initialize")!.params as any;
+        expect(initialized._meta.codexHooks).toEqual({version: 1, reviewToken: true});
+        delete initialized._meta.codexHooks;
+        expect(reviewed).toEqual(recording("plain", name));
+    });
+});
+
 describe("AIR golden snapshots", () => {
     for (const each of SCENARIOS) {
         it(each.name, async () => {

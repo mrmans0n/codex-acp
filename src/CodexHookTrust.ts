@@ -19,11 +19,15 @@ export async function trustCodexHooks(
     client: CodexAppServerClient,
     cwd: string,
     requested: CodexHookIdentity[],
+    beforeWrite?: (entry: HooksListEntry) => void,
+    afterReadback?: () => void,
 ): Promise<boolean> {
     const isListed = (hooks: HookMetadata[], request: CodexHookIdentity) =>
         hooks.find(hook => hook.key === request.key && hook.currentHash === request.currentHash);
 
-    const current = (await listCodexHooks(client, cwd)).hooks;
+    const entry = await listCodexHooks(client, cwd);
+    beforeWrite?.(entry);
+    const current = entry.hooks;
     const edits = requested.map(request => {
         const hook = isListed(current, request);
         if (hook === undefined) throw new Error("A Codex hook changed before trust was recorded");
@@ -37,5 +41,6 @@ export async function trustCodexHooks(
         await client.configBatchWrite({edits, reloadUserConfig: true});
     }
     const verified = (await listCodexHooks(client, cwd)).hooks;
+    afterReadback?.();
     return requested.every(request => isListed(verified, request)?.trustStatus === "trusted");
 }
