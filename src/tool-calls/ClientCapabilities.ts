@@ -7,15 +7,16 @@ import {
     clientSupportsAirCapability,
     isAirClient,
 } from "../AirExtension";
+import {clientRequestsNeutralDiffPatch} from "../GitPatch";
 
 /** The `_meta` key of a command output chunk. */
 type TerminalOutputKey = "terminal_output" | "terminal_output_delta";
 
 /**
  * How a file change diff carries a Git patch: not at all, in the AIR `diffPatch` extension,
- * or as the patch of an ACP v2 diff.
+ * in the client-neutral top-level `_meta.diffPatch`, or as the patch of an ACP v2 diff.
  */
-export type DiffPatchFormat = "none" | "air" | "acpV2";
+export type DiffPatchFormat = "none" | "air" | "neutral" | "acpV2";
 
 /** The AIR capabilities that change the tool call and plan reports. */
 export type AirCapabilities = {
@@ -112,7 +113,8 @@ export class ClientCapabilities {
                 planContentDelta: clientSupportsAirCapability(capabilities, AIR_PLAN_CONTENT_DELTA_KEY),
                 diffPatch,
             },
-            diffPatchFormat: diffPatch ? "air" : "none",
+            // A client that declares both forms gets only the client-neutral one.
+            diffPatchFormat: clientRequestsNeutralDiffPatch(capabilities) ? "neutral" : diffPatch ? "air" : "none",
             permissionPromptFields: false,
         });
     }

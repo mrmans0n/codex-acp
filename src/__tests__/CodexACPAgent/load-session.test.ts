@@ -53,6 +53,60 @@ describe("CodexACPAgent - loadSession", () => {
         );
     });
 
+    it.each([
+        {name: "the client-neutral opt-in", meta: {diffPatch: {version: 1}}},
+        {name: "both the AIR capability and the client-neutral opt-in", meta: {
+            diffPatch: {version: 1},
+            jetbrains: {air: {version: 1, capabilities: ["diffPatch"]}},
+        }},
+    ])("replays a file change as a client-neutral Git patch for $name", async ({meta}) => {
+        const fixture = createCodexMockTestFixture();
+        const agent = fixture.getCodexAcpAgent();
+        const client = fixture.getCodexAcpClient();
+        const appServer = fixture.getCodexAppServerClient();
+        client.readAuthRequirement = vi.fn().mockResolvedValue({required: false, account: null});
+        client.getAccount = vi.fn().mockResolvedValue({account: null, requiresOpenaiAuth: false});
+        client.listSkills = vi.fn().mockResolvedValue({data: []});
+        const model = createTestModel();
+        appServer.listModels = vi.fn().mockResolvedValue({data: [model], nextCursor: null});
+        const thread = {
+            id: "diff-patch-history", historyMode: "legacy", turns: [{
+                id: "turn-1", itemsView: "full", status: "completed", items: [{
+                    type: "fileChange", id: "item-file-1", status: "completed", changes: [
+                        {path: "/workspace/src/app.ts", kind: {type: "update", move_path: null}, diff: "@@ -1 +1 @@\n-a\n+b\n"},
+                    ],
+                }],
+            }],
+        } as unknown as Thread;
+        appServer.threadResume = vi.fn().mockResolvedValue({
+            thread, model: model.id, modelProvider: "openai", cwd: "/workspace",
+            approvalPolicy: "never", sandbox: {type: "dangerFullAccess"}, reasoningEffort: model.defaultReasoningEffort,
+        });
+        appServer.threadReadWithHistory = vi.fn().mockResolvedValue({thread});
+        await agent.initialize({protocolVersion: 1, clientCapabilities: {_meta: meta}});
+        await agent.loadSession({sessionId: thread.id, cwd: "/workspace", mcpServers: []});
+        const toolCall = fixture.getAcpConnectionEvents([])
+            .filter(event => event.method === "sessionUpdate")
+            .map(event => event.args[0].update)
+            .find(update => update.sessionUpdate === "tool_call" && update.toolCallId === "item-file-1");
+
+        expect(toolCall?.content).toEqual([{
+            type: "diff",
+            oldText: null,
+            newText: "",
+            path: "/workspace/src/app.ts",
+            _meta: {
+                kind: "update",
+                diffPatch: {
+                    version: 1,
+                    format: "git_patch",
+                    text: "diff --git a/workspace/src/app.ts b/workspace/src/app.ts\n"
+                        + "--- a/workspace/src/app.ts\n+++ b/workspace/src/app.ts\n@@ -1 +1 @@\n-a\n+b\n",
+                },
+            },
+        }]);
+    });
+
     it("replays Desktop attachments as resources in the original user message", async () => {
         const fixture = createCodexMockTestFixture();
         const agent = fixture.getCodexAcpAgent();

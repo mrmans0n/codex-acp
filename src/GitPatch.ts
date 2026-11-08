@@ -1,13 +1,36 @@
 /**
  * Builds unified Git patches from the diffs that Codex reports.
  *
- * The ACP v2 diff and the AIR diff patch extension carry these patches.
+ * The ACP v2 diff, the AIR diff patch extension and the client-neutral diff patch carry these patches.
  * Each builder returns `null` when it cannot build a patch with at least one valid hunk.
- * For AIR, the caller then sends the standard ACP diff.
+ * On ACP v1, the caller then sends the standard ACP diff.
  */
+
+import type * as acp from "@agentclientprotocol/sdk/unstable";
 
 /** The largest diff or patch text that the adapter sends. The adapter sends no diff for a larger Codex diff. */
 export const DIFF_PATCH_MAX_BYTES = 1024 * 1024;
+
+/** The top-level `_meta` key of the client-neutral diff patch, see `docs/air-extensions.md`. */
+export const NEUTRAL_DIFF_PATCH_META_KEY = "diffPatch";
+export const DIFF_PATCH_VERSION = 1;
+export const DIFF_PATCH_FORMAT = "git_patch";
+
+/** The `initialize` answer `_meta.diffPatch` for a client that opted into the client-neutral diff patch. */
+export function neutralDiffPatchCapability(): {version: number; format: string} {
+    return {version: DIFF_PATCH_VERSION, format: DIFF_PATCH_FORMAT};
+}
+
+/**
+ * Whether the client opted into the client-neutral diff patch with `clientCapabilities._meta.diffPatch: {version}`,
+ * an integer of at least 1.
+ */
+export function clientRequestsNeutralDiffPatch(capabilities: acp.ClientCapabilities | null | undefined): boolean {
+    const declared: unknown = capabilities?._meta?.[NEUTRAL_DIFF_PATCH_META_KEY];
+    if (declared === null || typeof declared !== "object" || Array.isArray(declared)) return false;
+    const version = (declared as Record<string, unknown>)["version"];
+    return typeof version === "number" && Number.isInteger(version) && version >= 1;
+}
 
 /** Git reads a file as binary when its first 8000 bytes contain a NUL byte. */
 const BINARY_PROBE_LENGTH = 8000;
