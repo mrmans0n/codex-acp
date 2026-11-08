@@ -1,5 +1,6 @@
 import type * as acp from "@agentclientprotocol/sdk/unstable";
 import {
+    AIR_AGENT_FILE_CHANGE_REPORT_KEY,
     AIR_ASYNC_TASKS_KEY,
     AIR_DIFF_PATCH_KEY,
     AIR_PLAN_CONTENT_DELTA_KEY,
@@ -8,6 +9,7 @@ import {
     clientSupportsAirCapability,
     isAirClient,
 } from "../AirExtension";
+import {type AgentFileChangeReportFormat, clientRequestsNeutralAgentFileChangeReport} from "../AgentFileChangeReport";
 import {clientRequestsNeutralDiffPatch} from "../GitPatch";
 import {clientRequestsNeutralSessionFailure, type SessionFailureFormat} from "../SessionFailureExtension";
 
@@ -41,6 +43,7 @@ type ClientCapabilityValues = {
     readonly air: AirCapabilities;
     readonly diffPatchFormat: DiffPatchFormat;
     readonly sessionFailureFormat: SessionFailureFormat;
+    readonly agentFileChangeReportFormat: AgentFileChangeReportFormat;
     readonly permissionPromptFields: boolean;
 };
 
@@ -63,6 +66,7 @@ export class ClientCapabilities {
         air: {rawInputRendering: false, planContentDelta: false, diffPatch: false},
         diffPatchFormat: "none",
         sessionFailureFormat: "none",
+        agentFileChangeReportFormat: "none",
         permissionPromptFields: false,
     });
 
@@ -83,6 +87,7 @@ export class ClientCapabilities {
     readonly air: AirCapabilities;
     readonly diffPatchFormat: DiffPatchFormat;
     readonly sessionFailureFormat: SessionFailureFormat;
+    readonly agentFileChangeReportFormat: AgentFileChangeReportFormat;
     /** A permission request has its own `title` and `description` (ACP v2). */
     readonly permissionPromptFields: boolean;
 
@@ -97,6 +102,7 @@ export class ClientCapabilities {
         this.air = values.air;
         this.diffPatchFormat = values.diffPatchFormat;
         this.sessionFailureFormat = values.sessionFailureFormat;
+        this.agentFileChangeReportFormat = values.agentFileChangeReportFormat;
         this.permissionPromptFields = values.permissionPromptFields;
     }
 
@@ -125,6 +131,10 @@ export class ClientCapabilities {
             sessionFailureFormat: clientRequestsNeutralSessionFailure(capabilities)
                 ? "neutral"
                 : clientSupportsAirCapability(capabilities, AIR_SESSION_FAILURE_KEY) ? "air" : "none",
+            // Likewise. The request and the report use the selected form.
+            agentFileChangeReportFormat: clientRequestsNeutralAgentFileChangeReport(capabilities)
+                ? "neutral"
+                : clientSupportsAirCapability(capabilities, AIR_AGENT_FILE_CHANGE_REPORT_KEY) ? "air" : "none",
             permissionPromptFields: false,
         });
     }
@@ -150,6 +160,10 @@ export class ClientCapabilities {
             diffPatchFormat: "acpV2",
             // ACP v2 has its own terminal failure state, so it ignores the client-neutral opt-in.
             sessionFailureFormat: clientSupportsAirCapability(capabilities, AIR_SESSION_FAILURE_KEY) ? "air" : "none",
+            // The client-neutral report is an ACP v1 extension, so v2 ignores its opt-in.
+            agentFileChangeReportFormat: clientSupportsAirCapability(capabilities, AIR_AGENT_FILE_CHANGE_REPORT_KEY)
+                ? "air"
+                : "none",
             permissionPromptFields: true,
         });
     }
