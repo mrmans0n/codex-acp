@@ -172,6 +172,17 @@ describe('CodexACPAgent - initialize', () => {
         });
     });
 
+    it('advertises the turn-boundary fork point only to a client that opts in', async () => {
+        const optedIn = await agent.initialize({
+            protocolVersion: acp.PROTOCOL_VERSION,
+            clientCapabilities: {_meta: {forkPoint: {version: 1}}},
+        });
+        const other = await agent.initialize({protocolVersion: acp.PROTOCOL_VERSION});
+
+        expect(optedIn._meta?.["forkPoint"]).toEqual({version: 1, boundary: "turn"});
+        expect(other._meta).not.toHaveProperty("forkPoint");
+    });
+
     it('answers an AIR client that also sends the client-neutral session index by the AIR rules alone', async () => {
         const result = await agent.initialize({
             protocolVersion: acp.PROTOCOL_VERSION,

@@ -47,6 +47,36 @@ describe("ACP session fork", () => {
         expect(response.modes).toBeDefined();
     });
 
+    it("returns the resolved fork point of an opted-in client in the response _meta", async () => {
+        const fixture = createCodexMockTestFixture();
+        const agent = fixture.getCodexAcpAgent();
+        const client = fixture.getCodexAcpClient();
+        const forkPoint = {boundary: "turn", messageId: "item-1", turnId: "turn-1", lastItemId: "item-3", matchedBy: "id"} as const;
+
+        vi.spyOn(client, "readAuthRequirement").mockResolvedValue({required: false, account: null});
+        vi.spyOn(client, "getAccount").mockResolvedValue({account: null, requiresOpenaiAuth: false});
+        vi.spyOn(client, "listSkills").mockResolvedValue({data: []});
+        vi.spyOn(client, "forkSession").mockResolvedValue({
+            sessionId: "fork-id",
+            currentModelId: "gpt-5[medium]",
+            models: [createTestModel({id: "gpt-5"})],
+            collaborationMode: "default",
+            currentServiceTier: null,
+            additionalDirectories: [],
+            forkPoint,
+        });
+        await agent.initialize({protocolVersion: 1, clientCapabilities: {_meta: {forkPoint: {version: 1}}}});
+
+        const response = await agent.forkSession({
+            sessionId: "source-id",
+            cwd: "/workspace",
+            mcpServers: [],
+            _meta: {forkPoint: {messageId: "item-1"}},
+        });
+
+        expect(response._meta).toEqual({forkPoint});
+    });
+
     it("waits for MCP startup before completing session fork", async () => {
         const fixture = createCodexMockTestFixture();
         const agent = fixture.getCodexAcpAgent();

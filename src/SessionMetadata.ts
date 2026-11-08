@@ -10,6 +10,7 @@ import type {
     ThreadStatus,
 } from "./app-server/v2";
 import type {SessionInstructions} from "./ClientSystemPrompt";
+import type {ForkPointResult} from "./SessionFork";
 
 export type SessionMetadata = {
     sessionId: string,
@@ -27,6 +28,8 @@ export type SessionMetadata = {
     approvalPolicy?: AskForApproval,
     approvalsReviewer?: ApprovalsReviewer,
     permissionProfiles?: PermissionProfileSummary[],
+    /** The fork point that a client-neutral `session/fork` resolved. */
+    forkPoint?: ForkPointResult,
 }
 
 export type SessionMetadataWithThread = SessionMetadata & {
