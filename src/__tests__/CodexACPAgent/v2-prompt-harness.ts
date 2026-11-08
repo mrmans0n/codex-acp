@@ -121,7 +121,7 @@ export type PromptSession = {
     appServer: CodexAppServerClient;
     emit(notification: ServerNotification): void;
     /** `signal`, if given, sends `$/cancel_request` for this specific `session/prompt` on abort. */
-    sendPrompt(prompt: acpV2.ContentBlock[], signal?: AbortSignal): Promise<any>;
+    sendPrompt(prompt: acpV2.ContentBlock[], signal?: AbortSignal, meta?: Record<string, unknown>): Promise<any>;
     /** Sends any other agent-bound request (e.g. `session/set_config_option`) on the same connection. */
     request(method: string, params: unknown, signal?: AbortSignal): Promise<any>;
     /** Sends `session/cancel` (a notification, not a request) for this session. */
@@ -334,8 +334,8 @@ export async function connectSession(protocolVersion: 1 | 2 = 2, options: {
         else mocks.getUnhandledNotificationHandler()!(notification);
     };
 
-    const sendPrompt = (prompt: acpV2.ContentBlock[], signal?: AbortSignal) => {
-        const response = request("session/prompt", {sessionId, prompt}, signal).then(
+    const sendPrompt = (prompt: acpV2.ContentBlock[], signal?: AbortSignal, meta?: Record<string, unknown>) => {
+        const response = request("session/prompt", {sessionId, prompt, ...(meta ? {_meta: meta} : {})}, signal).then(
             (result) => {
                 transcript.push({promptResponse: result});
                 return result;
