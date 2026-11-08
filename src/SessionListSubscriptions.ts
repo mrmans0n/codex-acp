@@ -27,7 +27,7 @@ import type {ServerNotification} from "./app-server";
 import type {Thread, ThreadListParams, ThreadListResponse, ThreadReadParams, ThreadReadResponse} from "./app-server/v2";
 import {CodexHomeWatcher, type CodexHomeWatcherListener} from "./CodexHomeWatcher";
 import {logger} from "./Logger";
-import {isInteractiveSource, listedThreadEntry, sessionIndexRowForkedFrom, sessionIndexRowSignature} from "./SessionIndex";
+import {AIR_STATE_KEY, isInteractiveSource, listedThreadEntry, sessionIndexRowFields, sessionIndexRowForkedFrom, sessionIndexRowSignature} from "./SessionIndex";
 import {isMissingThreadError} from "./SessionIndexMutations";
 import {SessionNameLog} from "./SessionNameLog";
 
@@ -332,10 +332,7 @@ export class SessionListSubscriptions {
         this.appServerGeneration++;
         if (this.subscriptions.size === 0) return;
         const loaded = [...this.groups.values()].flatMap(group => [...group.rows]
-            .filter(([, {row}]) => {
-                const meta = row._meta as Record<string, any> | undefined;
-                return meta?.["jetbrains"]?.["air"]?.["state"] !== undefined;
-            })
+            .filter(([, {row}]) => sessionIndexRowFields(row)[AIR_STATE_KEY] !== undefined)
             .map(([threadId]) => threadId));
         for (const threadId of new Set([...threadIds, ...loaded])) this.threadChanged(threadId);
         // Threads whose reads failed with the old app-server, or waited for a new one, are read now.
