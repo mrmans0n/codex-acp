@@ -28,6 +28,8 @@ export const PERMISSION_PROMPT_META_KEY = "permission_prompt";
 export const NEUTRAL_PERMISSION_PRESENTATION_META_KEY = "permissionPresentation";
 /** The top-level `_meta` key of the client-neutral question custom answer. */
 export const NEUTRAL_QUESTION_CUSTOM_ANSWER_META_KEY = "questionCustomAnswer";
+/** The top-level `_meta` key of the client-neutral recommended config value. */
+export const NEUTRAL_RECOMMENDED_CONFIG_VALUE_META_KEY = "recommendedConfigValue";
 
 /** The `initialize` answer for a client that opted into a client-neutral presentation contract. */
 export function neutralPresentationCapability(): {version: number} {
