@@ -162,6 +162,45 @@ describe("PromptSuggestionGenerator", () => {
     });
 });
 
+describe("PromptSuggestionGenerator for a client-neutral request", () => {
+    /** Every answer to a request carries its id, even an empty one or a repeat, so the client can stop waiting. */
+    it.each([
+        ["a suggestion", () => Promise.resolve(suggestionSample("Run the tests")), "Run the tests"],
+        ["a blank suggestion", () => Promise.resolve(suggestionSample("  ")), null],
+        ["a failed sample", () => Promise.reject(new Error("boom")), null],
+    ])("answers the request for %s", async (_name, result, expected) => {
+        const {generator, publish} = createGenerator(vi.fn().mockImplementation(result));
+
+        generator.onTurnCompleted("thread", "turn", "prompt-1");
+        await vi.waitFor(() => expect(publish).toHaveBeenCalledTimes(1));
+
+        expect(publish).toHaveBeenCalledWith(expected, "prompt-1");
+    });
+
+    it("answers a repeated suggestion again", async () => {
+        const {generator, publish} = createGenerator(vi.fn().mockResolvedValue(suggestionSample("Run the tests")));
+
+        generator.onTurnCompleted("thread", "turn-1", "prompt-1");
+        await vi.waitFor(() => expect(publish).toHaveBeenCalledTimes(1));
+        generator.onTurnCompleted("thread", "turn-2", "prompt-2");
+        await vi.waitFor(() => expect(publish).toHaveBeenCalledTimes(2));
+
+        expect(publish.mock.calls).toEqual([["Run the tests", "prompt-1"], ["Run the tests", "prompt-2"]]);
+    });
+
+    it("drops the answer to a request the next prompt outran, even a failed one", async () => {
+        const pending = deferred<SampleResult>();
+        const {generator, publish} = createGenerator(vi.fn().mockReturnValue(pending.promise));
+
+        generator.onTurnCompleted("thread", "turn", "prompt-1");
+        generator.invalidate();
+        pending.reject(new Error("boom"));
+        await flush();
+
+        expect(publish).not.toHaveBeenCalled();
+    });
+});
+
 describe("promptSuggestionsEnabled", () => {
     /** Only the value false turns the feature off. */
     it("is on unless CODEX_ACP_PROMPT_SUGGESTIONS is false", () => {
