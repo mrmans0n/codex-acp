@@ -11,6 +11,7 @@ import {
 } from "../AirExtension";
 import {type AgentFileChangeReportFormat, clientRequestsNeutralAgentFileChangeReport} from "../AgentFileChangeReport";
 import {clientRequestsNeutralDiffPatch} from "../GitPatch";
+import {PROMPT_SUGGESTIONS_META_KEY} from "../PromptSuggestionGenerator";
 import {clientRequestsNeutralSessionFailure, type SessionFailureFormat} from "../SessionFailureExtension";
 import {
     clientRequestsNeutralPresentation,
@@ -56,6 +57,7 @@ type ClientCapabilityValues = {
     readonly neutralQuestionCustomAnswer: boolean;
     readonly neutralRecommendedConfigValue: boolean;
     readonly neutralCommandPresentation: boolean;
+    readonly neutralPromptSuggestions: boolean;
 };
 
 /**
@@ -83,6 +85,7 @@ export class ClientCapabilities {
         neutralQuestionCustomAnswer: false,
         neutralRecommendedConfigValue: false,
         neutralCommandPresentation: false,
+        neutralPromptSuggestions: false,
     });
 
     /** The client declares `_meta.jetbrains.air`. */
@@ -113,6 +116,11 @@ export class ClientCapabilities {
     readonly neutralRecommendedConfigValue: boolean;
     /** Available commands carry `_meta.commandPresentation`. Only ACP v1 reads the opt-in. */
     readonly neutralCommandPresentation: boolean;
+    /**
+     * A prompt that names `_meta.promptSuggestions.id` gets the predicted follow-up prompt of its turn.
+     * Only ACP v1 reads the opt-in.
+     */
+    readonly neutralPromptSuggestions: boolean;
 
     private constructor(values: ClientCapabilityValues) {
         this.airClient = values.airClient;
@@ -131,6 +139,12 @@ export class ClientCapabilities {
         this.neutralQuestionCustomAnswer = values.neutralQuestionCustomAnswer;
         this.neutralRecommendedConfigValue = values.neutralRecommendedConfigValue;
         this.neutralCommandPresentation = values.neutralCommandPresentation;
+        this.neutralPromptSuggestions = values.neutralPromptSuggestions;
+    }
+
+    /** Whether the client reads predicted follow-up prompts, in any form. */
+    get predictsPrompts(): boolean {
+        return this.airClient || this.neutralPromptSuggestions;
     }
 
     static from(capabilities: acp.ClientCapabilities | null | undefined): ClientCapabilities {
@@ -167,6 +181,7 @@ export class ClientCapabilities {
             neutralQuestionCustomAnswer: clientRequestsNeutralPresentation(capabilities, NEUTRAL_QUESTION_CUSTOM_ANSWER_META_KEY),
             neutralRecommendedConfigValue: clientRequestsNeutralPresentation(capabilities, NEUTRAL_RECOMMENDED_CONFIG_VALUE_META_KEY),
             neutralCommandPresentation: clientRequestsNeutralPresentation(capabilities, NEUTRAL_COMMAND_PRESENTATION_META_KEY),
+            neutralPromptSuggestions: clientRequestsNeutralPresentation(capabilities, PROMPT_SUGGESTIONS_META_KEY),
         });
     }
 
@@ -201,6 +216,7 @@ export class ClientCapabilities {
             neutralQuestionCustomAnswer: false,
             neutralRecommendedConfigValue: false,
             neutralCommandPresentation: false,
+            neutralPromptSuggestions: false,
         });
     }
 
