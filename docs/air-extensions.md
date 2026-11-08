@@ -1696,6 +1696,18 @@ The adapter sends these keys only to AIR:
   The path is an OS-native absolute path, such as `C:\repo\SKILL.md` on Windows. It is not a URI.
   AIR opens this file on a click on the skill chip.
 
+### Client-neutral command presentation
+
+A client that isn't AIR can opt in with `clientCapabilities._meta.commandPresentation: { "version": 1 }`, an object whose `version` is an integer of at least 1, and gets `_meta.commandPresentation: { "version": 1 }` back from `initialize`. ACP v2 ignores the opt-in.
+
+An available command then carries `_meta.commandPresentation`:
+
+- A `$skill` command: `{ "version": 1, "kind": "skill", "skillPath": "<absolute SKILL.md path>" }`, the same path as `skillPath` above.
+- `/plan` and `/goal`: `{ "version": 1, "action": <the commandAction object above> }`.
+- Any other command carries no record.
+
+The record is a presentation hint. The command name and the text the client sends do not change, and a typed `/plan` still toggles plan mode. A client that declares AIR too gets both records.
+
 ## Predicted follow-up prompt
 
 After a turn ends normally, the adapter sends AIR the prompt the user is most likely to send next:

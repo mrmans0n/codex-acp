@@ -261,7 +261,7 @@ describe('CodexACPAgent - initialize', () => {
         expect((both._meta as any).jetbrains).toEqual((airOnly._meta as any).jetbrains);
     });
 
-    it.each(['permissionPresentation', 'questionCustomAnswer', 'recommendedConfigValue'])('advertises the client-neutral %s only to a client that opts in', async (key) => {
+    it.each(['permissionPresentation', 'questionCustomAnswer', 'recommendedConfigValue', 'commandPresentation'])('advertises the client-neutral %s only to a client that opts in', async (key) => {
         const optedIn = await agent.initialize({
             protocolVersion: acp.PROTOCOL_VERSION,
             clientCapabilities: {_meta: {[key]: {version: 2}}},
