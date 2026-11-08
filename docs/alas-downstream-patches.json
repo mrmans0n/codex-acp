@@ -1,6 +1,6 @@
 {
   "schemaVersion": 2,
-  "baseTag": "v2.5.0",
+  "baseTag": "v2.6.0",
   "patches": [
     {
       "name": "goal-opt-in",
@@ -21,16 +21,17 @@
       ],
       "disposition": "active",
       "retiredCommits": [
-        "97aa595ba69c62e896375ea2442358d45d66af74"
+        "97aa595ba69c62e896375ea2442358d45d66af74",
+        "b160987ed8496ce18f8a853883184abaed1de478"
       ],
       "lastResolution": {
-        "fromTag": "v2.2.2",
-        "toTag": "v2.3.0",
-        "originalCommit": "97aa595ba69c62e896375ea2442358d45d66af74",
+        "fromTag": "v2.5.0",
+        "toTag": "v2.6.0",
+        "originalCommit": "b160987ed8496ce18f8a853883184abaed1de478",
         "action": "adapt",
-        "replacementCommit": "b160987ed8496ce18f8a853883184abaed1de478"
+        "replacementCommit": "d173ce85cc34a2c77bbbfc710c55236f82054d9c"
       },
-      "appliedCommit": "b160987ed8496ce18f8a853883184abaed1de478"
+      "appliedCommit": "d173ce85cc34a2c77bbbfc710c55236f82054d9c"
     },
     {
       "name": "async-tasks-opt-in",
@@ -154,16 +155,17 @@
       ],
       "disposition": "active",
       "retiredCommits": [
-        "fc0eb68e9be4d407397cd6bf22620f304afaab96"
+        "fc0eb68e9be4d407397cd6bf22620f304afaab96",
+        "febcd2b9f8a7c470ce23ba60547be2c1298ff7da"
       ],
       "lastResolution": {
-        "fromTag": "v2.2.2",
-        "toTag": "v2.3.0",
-        "originalCommit": "fc0eb68e9be4d407397cd6bf22620f304afaab96",
+        "fromTag": "v2.5.0",
+        "toTag": "v2.6.0",
+        "originalCommit": "febcd2b9f8a7c470ce23ba60547be2c1298ff7da",
         "action": "adapt",
-        "replacementCommit": "febcd2b9f8a7c470ce23ba60547be2c1298ff7da"
+        "replacementCommit": "57fdf7972d6414122241b04e0e51398c0a2b536c"
       },
-      "appliedCommit": "febcd2b9f8a7c470ce23ba60547be2c1298ff7da"
+      "appliedCommit": "57fdf7972d6414122241b04e0e51398c0a2b536c"
     },
     {
       "name": "neutral-session-index",
@@ -187,16 +189,17 @@
       "disposition": "active",
       "retiredCommits": [
         "bf6dd64df0bf990d6528ceaa62c5ba94c8ba9cb0",
-        "aff30ea39da255979e31bc18e8868ca9946b40ee"
+        "aff30ea39da255979e31bc18e8868ca9946b40ee",
+        "a1bfcc7e287a6eca4b52875336b720147b65ea5d"
       ],
       "lastResolution": {
-        "fromTag": "v2.3.0",
-        "toTag": "v2.4.0",
-        "originalCommit": "aff30ea39da255979e31bc18e8868ca9946b40ee",
+        "fromTag": "v2.5.0",
+        "toTag": "v2.6.0",
+        "originalCommit": "a1bfcc7e287a6eca4b52875336b720147b65ea5d",
         "action": "adapt",
-        "replacementCommit": "a1bfcc7e287a6eca4b52875336b720147b65ea5d"
+        "replacementCommit": "688db7ea47cebc7739d07499bfc354f9194051da"
       },
-      "appliedCommit": "a1bfcc7e287a6eca4b52875336b720147b65ea5d"
+      "appliedCommit": "688db7ea47cebc7739d07499bfc354f9194051da"
     },
     {
       "name": "neutral-codex-hook-review",
@@ -224,16 +227,17 @@
       "disposition": "active",
       "retiredCommits": [
         "4d4340534856c343cb68a295a9d48177cf079ee7",
-        "c07bc0f3a802bcbca5f2e17f228643bc873e7c37"
+        "c07bc0f3a802bcbca5f2e17f228643bc873e7c37",
+        "2341b05f7b74c45d21746f3ec7a617997a705b3a"
       ],
       "lastResolution": {
-        "fromTag": "v2.3.0",
-        "toTag": "v2.4.0",
-        "originalCommit": "c07bc0f3a802bcbca5f2e17f228643bc873e7c37",
+        "fromTag": "v2.5.0",
+        "toTag": "v2.6.0",
+        "originalCommit": "2341b05f7b74c45d21746f3ec7a617997a705b3a",
         "action": "adapt",
-        "replacementCommit": "2341b05f7b74c45d21746f3ec7a617997a705b3a"
+        "replacementCommit": "2662df652707ac2c46068669a48737511f6eaf40"
       },
-      "appliedCommit": "2341b05f7b74c45d21746f3ec7a617997a705b3a"
+      "appliedCommit": "2662df652707ac2c46068669a48737511f6eaf40"
     },
     {
       "name": "neutral-codex-hook-review-execution",
@@ -255,16 +259,17 @@
       "disposition": "active",
       "retiredCommits": [
         "960f77945bf94d7cb5fa6ea7fcedb01d210f2ce6",
-        "c0e41b9a03a5847aa4ee01198bc9535224840edd"
+        "c0e41b9a03a5847aa4ee01198bc9535224840edd",
+        "78e7be64310b5894c9248ba5049566083b20a52f"
       ],
       "lastResolution": {
-        "fromTag": "v2.3.0",
-        "toTag": "v2.4.0",
-        "originalCommit": "c0e41b9a03a5847aa4ee01198bc9535224840edd",
+        "fromTag": "v2.5.0",
+        "toTag": "v2.6.0",
+        "originalCommit": "78e7be64310b5894c9248ba5049566083b20a52f",
         "action": "adapt",
-        "replacementCommit": "78e7be64310b5894c9248ba5049566083b20a52f"
+        "replacementCommit": "85c98719f8dcb8d2fa802dc32a46ca36926dc666"
       },
-      "appliedCommit": "78e7be64310b5894c9248ba5049566083b20a52f"
+      "appliedCommit": "85c98719f8dcb8d2fa802dc32a46ca36926dc666"
     },
     {
       "name": "async-questions",
@@ -301,8 +306,16 @@
         "src/__tests__/CodexACPAgent/tool-calls-and-messages-v2.test.ts",
         "src/__tests__/CodexACPAgent/v2-resume-replay.test.ts"
       ],
-      "disposition": "active",
-      "retiredCommits": []
+      "disposition": "dropped",
+      "retiredCommits": [
+        "e57bcd768c8cebd1d3d17b840ae0db2e11639615"
+      ],
+      "lastResolution": {
+        "fromTag": "v2.5.0",
+        "toTag": "v2.6.0",
+        "originalCommit": "e57bcd768c8cebd1d3d17b840ae0db2e11639615",
+        "action": "drop"
+      }
     },
     {
       "name": "neutral-fork-point",
@@ -325,7 +338,17 @@
         "src/__tests__/CodexACPAgent/session-lifecycle-v2.test.ts"
       ],
       "disposition": "active",
-      "retiredCommits": []
+      "retiredCommits": [
+        "fc9a61e080134d623df7e67e8fd8eb8729da875a"
+      ],
+      "lastResolution": {
+        "fromTag": "v2.5.0",
+        "toTag": "v2.6.0",
+        "originalCommit": "fc9a61e080134d623df7e67e8fd8eb8729da875a",
+        "action": "adapt",
+        "replacementCommit": "b1084b78a9523fcc60645710b288e6a067851f94"
+      },
+      "appliedCommit": "b1084b78a9523fcc60645710b288e6a067851f94"
     },
     {
       "name": "neutral-diff-patch",
@@ -351,7 +374,17 @@
         "src/__tests__/tool-calls/tool-call-contract.test.ts"
       ],
       "disposition": "active",
-      "retiredCommits": []
+      "retiredCommits": [
+        "4ab2596b598e955944c2c1908a8765f24147c88d"
+      ],
+      "lastResolution": {
+        "fromTag": "v2.5.0",
+        "toTag": "v2.6.0",
+        "originalCommit": "4ab2596b598e955944c2c1908a8765f24147c88d",
+        "action": "adapt",
+        "replacementCommit": "c51a9ec2ff2c880668c7b680622533fa1d241364"
+      },
+      "appliedCommit": "c51a9ec2ff2c880668c7b680622533fa1d241364"
     },
     {
       "name": "neutral-session-failure",
@@ -382,7 +415,17 @@
         "src/__tests__/tool-calls/tool-call-contract.test.ts"
       ],
       "disposition": "active",
-      "retiredCommits": []
+      "retiredCommits": [
+        "2a1384e5b60358a0da0145c17e467d31485743c2"
+      ],
+      "lastResolution": {
+        "fromTag": "v2.5.0",
+        "toTag": "v2.6.0",
+        "originalCommit": "2a1384e5b60358a0da0145c17e467d31485743c2",
+        "action": "adapt",
+        "replacementCommit": "8aaab396bdeb02f67061d2bf332b67dd4246a6b6"
+      },
+      "appliedCommit": "8aaab396bdeb02f67061d2bf332b67dd4246a6b6"
     },
     {
       "name": "neutral-agent-file-change-report",
@@ -407,7 +450,17 @@
         "src/__tests__/tool-calls/tool-call-contract.test.ts"
       ],
       "disposition": "active",
-      "retiredCommits": []
+      "retiredCommits": [
+        "a68042507683ef2eb4a6d15eff864300e77d897f"
+      ],
+      "lastResolution": {
+        "fromTag": "v2.5.0",
+        "toTag": "v2.6.0",
+        "originalCommit": "a68042507683ef2eb4a6d15eff864300e77d897f",
+        "action": "adapt",
+        "replacementCommit": "95fb2c8e1fb83c98deb0f3c4bc6bda2d2807b95b"
+      },
+      "appliedCommit": "95fb2c8e1fb83c98deb0f3c4bc6bda2d2807b95b"
     },
     {
       "name": "neutral-permission-presentation",
@@ -433,7 +486,13 @@
         "src/__tests__/CodexACPAgent/initialize.test.ts"
       ],
       "disposition": "active",
-      "retiredCommits": []
+      "retiredCommits": [],
+      "lastResolution": {
+        "fromTag": "v2.5.0",
+        "toTag": "v2.6.0",
+        "originalCommit": "295ebe128a39c2c54be3619106799693f22dd0e5",
+        "action": "retain"
+      }
     },
     {
       "name": "neutral-recommended-config-value",
@@ -455,7 +514,17 @@
         "src/__tests__/CodexACPAgent/session-config-options.test.ts"
       ],
       "disposition": "active",
-      "retiredCommits": []
+      "retiredCommits": [
+        "9181cce81f8c737dc1bbe921f964aa31d3ef11b3"
+      ],
+      "lastResolution": {
+        "fromTag": "v2.5.0",
+        "toTag": "v2.6.0",
+        "originalCommit": "9181cce81f8c737dc1bbe921f964aa31d3ef11b3",
+        "action": "adapt",
+        "replacementCommit": "ebc3010ea9675c7e7e8ec51bbf6bd7e55265af79"
+      },
+      "appliedCommit": "ebc3010ea9675c7e7e8ec51bbf6bd7e55265af79"
     },
     {
       "name": "neutral-command-presentation",
@@ -477,7 +546,13 @@
         "src/__tests__/CodexACPAgent/initialize.test.ts"
       ],
       "disposition": "active",
-      "retiredCommits": []
+      "retiredCommits": [],
+      "lastResolution": {
+        "fromTag": "v2.5.0",
+        "toTag": "v2.6.0",
+        "originalCommit": "ab965a0e99d047da935fed6bc107f8564e3df250",
+        "action": "retain"
+      }
     }
   ],
   "retiredCommits": [
