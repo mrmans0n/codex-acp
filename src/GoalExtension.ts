@@ -28,6 +28,7 @@ export type GoalSnapshot = {
     controlMethod: typeof GOAL_CONTROL_METHOD;
 }
 
-export type GoalControlRequest =
+export type GoalControlRequest = { _meta?: Record<string, unknown> | null } & (
     | { sessionId: SessionId; action: "set"; objective: string }
     | { sessionId: SessionId; action: Exclude<GoalControlAction, "set"> }
+);
