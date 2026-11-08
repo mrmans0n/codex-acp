@@ -48,7 +48,13 @@ projects using that home. Accepting another hash replaces a key's prior trust.
 ## Execution and recovery
 
 Every opted-in `session/new`, `session/load`, `session/resume`, `session/fork`,
-and `session/prompt` supplies:
+and `session/prompt` supplies the metadata below. Active `_session/goal` actions
+`set` and `resume` also require it because Codex may start a native model turn.
+A steering request (`_session/steering`) that starts a new turn supplies the
+same metadata, next to any `_meta.steering`; with
+`_meta.steering.idleBehavior: "promptRequired"` an idle steer starts no turn and
+answers `promptRequired`. Read-only goal requests and pause/clear on a live thread do not
+require a review token:
 
 ```json
 {"_meta": {"codexHooks": {"reviewToken": "opaque-token-from-list"}}}
@@ -56,14 +62,23 @@ and `session/prompt` supplies:
 
 The adapter carries the token in request-local asynchronous context. It checks
 fresh hooks at the actual app-server `thread/start`, `thread/resume`,
-`thread/fork`, `turn/start`, and `review/start` dispatch boundaries, including
-a queued rollout load, lazy recovery, and internal first-turn work. A final
+`thread/fork`, `turn/start`, `review/start`, and active `thread/goal/set` dispatch
+boundaries, including queued rollout loads, lazy recovery, and internal
+first-turn work. A final
 synchronous fence rejects a process or provider change after validation and
 before dispatch. No hook-capable request is sent by a failed fence.
 
 Tokens are adapter-local and do not survive an adapter restart, app-server
 replacement, provider update, or authentication that can change routing.
 Changing captured launch hooks requires a replacement process and fresh review.
+Authentication invalidates both when it starts and when it settles, including
+failed/cancelled login, so reviews issued during the transition cannot survive
+it. Reviews also bind the persisted provider selection and the selected
+provider's routing definition (merged with launch/gateway overrides), without
+binding unrelated settings or provider display metadata. The final gate checks
+the resolved provider carried by an opening request as well as freshly read
+provider inputs.
+
 A provider replacement still initializes the new process, but leaves opted-in
 threads unopened until a reviewed lifecycle request or prompt resumes them.
 Recovery preserves structured review errors instead of wrapping them as process
@@ -77,8 +92,15 @@ The adapter uses JSON-RPC error code `-32044` with `data.kind`:
 - `codex_hook_changed`: changed definitions or an invalid/ambiguous selected
   identity. Refresh the displayed list and selection before trusting again.
 
-These errors do not write trust or dispatch the blocked operation. Trust writes
-are not transactional: a transport failure or failed readback after a write
+The adapter reserves `-32044` for an ACP operation that has sent no hook-capable
+work. Once an operation dispatches a potentially turn-starting request, a later
+review failure returns an ordinary `-32603` failure instead. Clients must not
+automatically replay earlier work. Generated goal and steering continuations
+retain the current request's reviewed context and dispatch history; they do not
+silently begin a new retry boundary.
+
+A failed pre-dispatch review does not write trust or send the blocked operation.
+Trust writes are not transactional: a transport failure or failed readback after a write
 must be reconciled with a fresh list. Likewise, an application retry must use
 a new idempotency key after review changes if its transport caches errors.
 
