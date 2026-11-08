@@ -87,14 +87,14 @@ export async function forkSession(
     await dependencies.refreshSkills(request.cwd, additionalDirectories);
     const match = forkPoint ? await resolveForkPoint(request, forkPoint, dependencies.codexClient) : undefined;
     const lastTurnId = match?.turnId;
-    const sessionConfig = await dependencies.createSessionConfig(
+    const {config, skippedMcpServers, defaultPermissionProfileId: _defaultPermissionProfileId, ...permissionProfileMetadata} = await dependencies.createSessionConfig(
         request.cwd,
         additionalDirectories,
         request.mcpServers ?? [],
     );
     const response = await dependencies.codexClient.threadFork({
         excludeTurns: true,
-        config: sessionConfig.config,
+        config,
         cwd: request.cwd,
         ...(lastTurnId !== undefined && {lastTurnId}),
         modelProvider: await dependencies.getResumeModelProvider(),
@@ -121,7 +121,9 @@ export async function forkSession(
         modelProvider: response.modelProvider,
         currentServiceTier: response.serviceTier as ServiceTier ?? null,
         additionalDirectories,
-        skippedMcpServers: sessionConfig.skippedMcpServers,
+        skippedMcpServers,
+        activePermissionProfileId: response.activePermissionProfile?.id ?? null,
+        ...permissionProfileMetadata,
         ...(instructions ? {instructions} : {}),
         ...(forkPoint?.kind === "neutral" && match ? {
             forkPoint: {

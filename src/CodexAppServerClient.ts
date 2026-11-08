@@ -7,9 +7,11 @@ import type {
     ClientRequest,
     InitializeParams,
     InitializeResponse,
+    ReasoningEffort,
     ServerNotification
 } from "./app-server";
 import type {
+    ActivePermissionProfile,
     CancelLoginAccountParams,
     CancelLoginAccountResponse,
     ConfigReadParams,
@@ -34,6 +36,8 @@ import type {
     McpServerStatusUpdatedNotification,
     ModelListParams,
     ModelListResponse,
+    PermissionProfileListParams,
+    PermissionProfileListResponse,
     ReviewStartParams,
     ReviewStartResponse,
     SkillsExtraRootsSetParams,
@@ -102,6 +106,7 @@ import type {
     TurnError,
 } from "./app-server/v2";
 import type {
+    ThreadBackgroundTerminal,
     ThreadBackgroundTerminalsRequest,
     ThreadBackgroundTerminalsTerminateParams,
     ThreadBackgroundTerminalsTerminateResponse,
@@ -320,11 +325,11 @@ export class CodexAppServerClient {
         return response;
     }
 
-    async turnStart(params: TurnStartParams): Promise<TurnStartResponse> {
+    async turnStart(params: ExperimentalTurnStartParams): Promise<TurnStartResponse> {
         return await this.sendRequest({ method: "turn/start", params: params });
     }
 
-    async runTurn(params: TurnStartParams, onTurnStarted?: (turnId: string) => void): Promise<TurnCompletedNotification> {
+    async runTurn(params: ExperimentalTurnStartParams, onTurnStarted?: (turnId: string) => void): Promise<TurnCompletedNotification> {
         const capturedCompletions: Array<TurnCompletedNotification> = [];
         const releaseCapture = this.captureTurnCompletions(params.threadId, (event) => {
             capturedCompletions.push(event);
@@ -671,7 +676,7 @@ export class CodexAppServerClient {
         this.staleTurnIds.set(threadId, threadStaleTurns);
     }
 
-    async threadStart(params: ThreadStartParams): Promise<ThreadStartResponse> {
+    async threadStart(params: ThreadStartParams): Promise<ExperimentalThreadStartResponse> {
         return await this.sendRequest({ method: "thread/start", params: params });
     }
 
@@ -679,11 +684,11 @@ export class CodexAppServerClient {
         return await this.sendRequest({ method: "thread/name/set", params });
     }
 
-    async threadResume(params: ThreadResumeParams): Promise<ThreadResumeResponse> {
+    async threadResume(params: ThreadResumeParams): Promise<ExperimentalThreadResumeResponse> {
         return await this.sendRequest({ method: "thread/resume", params: params });
     }
 
-    async threadFork(params: ThreadForkParams): Promise<ThreadForkResponse> {
+    async threadFork(params: ThreadForkParams): Promise<ExperimentalThreadForkResponse> {
         return await this.sendRequest({ method: "thread/fork", params: params });
     }
 
@@ -838,6 +843,24 @@ export class CodexAppServerClient {
         return await this.sendRequest({method: "thread/backgroundTerminals/terminate", params});
     }
 
+    async threadSample(params: ThreadSampleParams): Promise<ThreadSampleResponse> {
+        return await this.sendRequest({method: "thread/sample", params});
+    }
+
+    async *backgroundTerminalPages(threadId: string): AsyncGenerator<ThreadBackgroundTerminal[]> {
+        const seen = new Set<string>();
+        let cursor: string | null = null;
+        do {
+            const response = await this.threadBackgroundTerminalsList({threadId, cursor});
+            yield response.data;
+            cursor = response.nextCursor;
+            if (cursor !== null) {
+                if (seen.has(cursor)) throw new Error("Codex returned a repeated background terminal cursor");
+                seen.add(cursor);
+            }
+        } while (cursor !== null);
+    }
+
     async threadGoalSet(params: ThreadGoalSetParams): Promise<ThreadGoalSetResponse> {
         return await this.sendRequest({ method: "thread/goal/set", params: params });
     }
@@ -967,6 +990,10 @@ export class CodexAppServerClient {
 
     async listModels(params: ModelListParams): Promise<ModelListResponse> {
         return await this.sendRequest({ method: "model/list", params });
+    }
+
+    async listPermissionProfiles(params: PermissionProfileListParams): Promise<PermissionProfileListResponse> {
+        return await this.sendRequest({ method: "permissionProfile/list", params });
     }
 
     async skillsExtraRootsSet(params: SkillsExtraRootsSetParams): Promise<void> {
@@ -1369,6 +1396,7 @@ export type CompactionCompletedNotification =
     | { method: "item/completed", params: ItemCompletedNotification & { item: Extract<ItemCompletedNotification["item"], { type: "contextCompaction" }> } };
 
 type CodexRequest = DistributiveOmit<ClientRequest, "id"> | ThreadBackgroundTerminalsRequest
+    | { method: "thread/sample"; params: ThreadSampleParams }
 
 type DistributiveOmit<T, K extends keyof any> = T extends any
     ? Omit<T, K>
@@ -1385,6 +1413,37 @@ export interface ExperimentalThreadSettingsUpdateParams {
         };
     };
 }
+
+// These fields are generated with `generate-ts --experimental`; `npm run generate-types` uses the stable schema.
+type ExperimentalThreadPermissions = {
+    activePermissionProfile?: ActivePermissionProfile | null;
+};
+
+export type ExperimentalThreadStartResponse = ThreadStartResponse & ExperimentalThreadPermissions;
+export type ExperimentalThreadResumeResponse = ThreadResumeResponse & ExperimentalThreadPermissions;
+export type ExperimentalThreadForkResponse = ThreadForkResponse & ExperimentalThreadPermissions;
+
+export type ExperimentalTurnStartParams = TurnStartParams & {
+    permissions?: string | null;
+    runtimeWorkspaceRoots?: string[] | null;
+};
+
+// `thread/sample` is an experimental app-server method missing from the stable generated schema.
+export type ThreadSampleParams = {
+    threadId: string;
+    expectedTurnId: string;
+    prompt: string;
+    effort?: ReasoningEffort | null;
+};
+
+export type ThreadSampleResponse = {
+    sourceTurnId: string;
+    responseId: string;
+    text: string | null;
+    inputTokens: number | null;
+    cachedInputTokens: number | null;
+    outputTokens: number | null;
+};
 
 function isMcpServerStatusUpdatedNotification(notification: ServerNotification): notification is {
     method: "mcpServer/startupStatus/updated";
