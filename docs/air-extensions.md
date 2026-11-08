@@ -61,7 +61,7 @@ Only these differences are allowed:
 - Bug fixes: a unique MCP startup tool call id, the result of a dynamic tool in `content`,
   no output after a tool call ended, a terminal status for a replayed image generation,
   and the command as the title of a command approval.
-- Feature changes for every client: the `/mcp` command has a new description and an input hint.
+- Feature changes for every client: the `/mcp` command has a new description and an input hint; initialization advertises the opt-in [system prompt append extension](system-prompt-extension.md).
 - The client gets no AIR-only key.
   That is no `_meta.jetbrains.air` key and none of the earlier keys in [Removed keys](#removed-keys).
 - The output of a command arrives once, in the chunks or in `content`, as [Zed conventions](#zed-conventions) describe.
