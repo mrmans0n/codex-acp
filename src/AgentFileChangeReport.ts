@@ -1,8 +1,12 @@
 import fs from "node:fs";
 import path from "node:path";
 import {parsePatch} from "diff";
+import type * as acp from "@agentclientprotocol/sdk/unstable";
 import {
+    AIR_AGENT_FILE_CHANGE_REPORT_KEY,
     AIR_AGENT_FILE_CHANGE_REPORT_REQUEST_KEY,
+    AIR_EXTENSION_VERSION,
+    AIR_EXTENSION_VERSION_KEY,
     AIR_META_KEY,
     JETBRAINS_META_KEY,
 } from "./AirExtension";
@@ -13,6 +17,17 @@ export const AGENT_FILE_CHANGE_REPORT_MAX_PATH_LENGTH = 4_096;
 export const AGENT_FILE_CHANGE_REPORT_MAX_TOTAL_BYTES = 256 * 1_024;
 export const AGENT_FILE_CHANGE_REPORT_MAX_UNCERTAINTY_LENGTH = 2_000;
 export const AGENT_FILE_CHANGE_REPORT_MAX_DIFF_BYTES = 8 * 1_024 * 1_024;
+
+/** The top-level `_meta` key of the client-neutral opt-in, advert and report. */
+export const NEUTRAL_AGENT_FILE_CHANGE_REPORT_META_KEY = "agentFileChangeReport";
+/** The top-level `session/prompt._meta` key of the client-neutral report request. */
+export const NEUTRAL_AGENT_FILE_CHANGE_REPORT_REQUEST_META_KEY = "agentFileChangeReportRequest";
+
+/**
+ * How a client asks for and gets the report: not at all, in the AIR namespace, or in the client-neutral top-level
+ * `_meta`. Both forms use the same request validation, builders, limits and timing.
+ */
+export type AgentFileChangeReportFormat = "none" | "air" | "neutral";
 
 const TURN_DIFF_UNCERTAINTY = "Codex turn diffs may omit same-content renames and changes made outside apply_patch, including shell commands, version-control commands, generators, and child processes.";
 
@@ -72,12 +87,72 @@ export function captureAgentFileChangeWorkspace(
     };
 }
 
+/** The `initialize` answer `_meta.agentFileChangeReport` for a client that opted into the client-neutral form. */
+export function neutralAgentFileChangeReportCapability(): {version: number} {
+    return {version: AGENT_FILE_CHANGE_REPORT_VERSION};
+}
+
+/**
+ * Whether the client opted into the client-neutral report with
+ * `clientCapabilities._meta.agentFileChangeReport: {version}`, an integer of at least 1.
+ */
+export function clientRequestsNeutralAgentFileChangeReport(
+    capabilities: acp.ClientCapabilities | null | undefined,
+): boolean {
+    const declared = asRecord(capabilities?._meta?.[NEUTRAL_AGENT_FILE_CHANGE_REPORT_META_KEY]);
+    const version = declared?.["version"];
+    return typeof version === "number" && Number.isInteger(version) && version >= 1;
+}
+
 export function parseAgentFileChangeReportRequest(
     meta: Record<string, unknown> | null | undefined,
 ): AgentFileChangeReportRequest | null {
     const jetbrains = asRecord(meta?.[JETBRAINS_META_KEY]);
     const air = asRecord(jetbrains?.[AIR_META_KEY]);
-    const request = asRecord(air?.[AIR_AGENT_FILE_CHANGE_REPORT_REQUEST_KEY]);
+    return validateAgentFileChangeReportRequest(air?.[AIR_AGENT_FILE_CHANGE_REPORT_REQUEST_KEY]);
+}
+
+export function parseNeutralAgentFileChangeReportRequest(
+    meta: Record<string, unknown> | null | undefined,
+): AgentFileChangeReportRequest | null {
+    return validateAgentFileChangeReportRequest(meta?.[NEUTRAL_AGENT_FILE_CHANGE_REPORT_REQUEST_META_KEY]);
+}
+
+/** The prompt's report request in the negotiated form. A request in the other form is ignored. */
+export function agentFileChangeReportRequestFor(
+    format: AgentFileChangeReportFormat,
+    meta: Record<string, unknown> | null | undefined,
+): AgentFileChangeReportRequest | null {
+    switch (format) {
+        case "none":
+            return null;
+        case "air":
+            return parseAgentFileChangeReportRequest(meta);
+        case "neutral":
+            return parseNeutralAgentFileChangeReportRequest(meta);
+    }
+}
+
+/** The `session_info_update._meta` that carries the report in the negotiated form. */
+export function agentFileChangeReportMeta(
+    format: Exclude<AgentFileChangeReportFormat, "none">,
+    report: AgentFileChangeReport,
+): Record<string, unknown> {
+    if (format === "neutral") {
+        return {[NEUTRAL_AGENT_FILE_CHANGE_REPORT_META_KEY]: report};
+    }
+    return {
+        [JETBRAINS_META_KEY]: {
+            [AIR_META_KEY]: {
+                [AIR_EXTENSION_VERSION_KEY]: AIR_EXTENSION_VERSION,
+                [AIR_AGENT_FILE_CHANGE_REPORT_KEY]: report,
+            },
+        },
+    };
+}
+
+function validateAgentFileChangeReportRequest(value: unknown): AgentFileChangeReportRequest | null {
+    const request = asRecord(value);
     if (request === null
         || !hasOnlyKeys(request, ["version", "requestId"])
         || request["version"] !== AGENT_FILE_CHANGE_REPORT_VERSION) {
