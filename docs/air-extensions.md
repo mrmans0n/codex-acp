@@ -1733,6 +1733,30 @@ After a turn ends normally, the adapter sends AIR the prompt the user is most li
 - A turn that is cancelled or fails produces no prediction.
 - `CODEX_ACP_PROMPT_SUGGESTIONS=false` turns the feature off.
 
+### Client-neutral predicted prompt
+
+A client that is not AIR can get the prediction too, asked for per prompt.
+It declares `initialize.clientCapabilities._meta.promptSuggestions: {"version": 1}` (any integer version of at least 1).
+The adapter answers with `_meta.promptSuggestions: {"version": 1}` in the `initialize` response while the feature is on (see the switch above).
+A `session/prompt` that wants the prediction of its turn names an id, a non-empty string of at most 256 characters:
+
+```json
+{"_meta": {"promptSuggestions": {"id": "<client id of this prompt>"}}}
+```
+
+The prediction of that turn carries the id:
+
+```json
+{"sessionUpdate": "session_info_update", "_meta": {"promptSuggestions": {"suggestions": [{"text": "Run the tests"}], "id": "<client id of this prompt>"}}}
+```
+
+- A prompt without an id costs no model call and gets no prediction.
+- A request is always answered once its sample ends: with `suggestions: []` and the id when the sample gives nothing or fails, and again even when the text repeats the last one.
+  A turn with no sample (plan mode, a cancelled or failed turn) sends nothing; the client must not wait for it forever.
+- The clear at the next prompt carries no id. A prompt that starts first drops the answer, as above.
+- A client that declares both forms gets one update; it carries the id when the prompt named one.
+- ACP v2 ignores the neutral opt-in.
+
 ## Removed keys
 
 These keys moved into the AIR namespace.

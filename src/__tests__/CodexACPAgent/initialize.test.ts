@@ -262,7 +262,7 @@ describe('CodexACPAgent - initialize', () => {
         expect((both._meta as any).jetbrains).toEqual((airOnly._meta as any).jetbrains);
     });
 
-    it.each(['permissionPresentation', 'questionCustomAnswer', 'recommendedConfigValue', 'commandPresentation'])('advertises the client-neutral %s only to a client that opts in', async (key) => {
+    it.each(['permissionPresentation', 'questionCustomAnswer', 'recommendedConfigValue', 'commandPresentation', 'promptSuggestions'])('advertises the client-neutral %s only to a client that opts in', async (key) => {
         const optedIn = await agent.initialize({
             protocolVersion: acp.PROTOCOL_VERSION,
             clientCapabilities: {_meta: {[key]: {version: 2}}},
@@ -275,6 +275,19 @@ describe('CodexACPAgent - initialize', () => {
                 clientCapabilities: {_meta: {[key]: declared}},
             });
             expect(other._meta).not.toHaveProperty(key);
+        }
+    });
+
+    it('does not advertise the client-neutral predicted prompt while predictions are off', async () => {
+        vi.stubEnv('CODEX_ACP_PROMPT_SUGGESTIONS', 'false');
+        try {
+            const response = await agent.initialize({
+                protocolVersion: acp.PROTOCOL_VERSION,
+                clientCapabilities: {_meta: {promptSuggestions: {version: 1}}},
+            });
+            expect(response._meta).not.toHaveProperty('promptSuggestions');
+        } finally {
+            vi.unstubAllEnvs();
         }
     });
 
