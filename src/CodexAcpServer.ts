@@ -201,7 +201,13 @@ import {
 } from "./AuthStatusMeta";
 import {randomUUID} from "node:crypto";
 import {TitleGenerator} from "./TitleGenerator";
-import {PromptSuggestionGenerator, promptSuggestionsEnabled, promptSuggestionsMeta} from "./PromptSuggestionGenerator";
+import {
+    PROMPT_SUGGESTIONS_META_KEY,
+    PromptSuggestionGenerator,
+    promptSuggestionsEnabled,
+    promptSuggestionsMeta,
+    promptSuggestionsRequestId,
+} from "./PromptSuggestionGenerator";
 import {once} from "node:events";
 import {
     AIR_AGENT_FILE_CHANGE_REPORT_KEY,
@@ -323,7 +329,7 @@ export interface SessionState extends SessionIndexTitleState {
     sessionTitleSource: "unset" | "fallback" | "explicit" | "unknown";
     sessionFailure?: SessionFailure;
     titleGen?: TitleGenerator;
-    /** Predicts the follow-up prompt of a finished turn; set for AIR clients only. */
+    /** Predicts the follow-up prompt of a finished turn; set for AIR and client-neutral clients only. */
     promptSuggestions?: PromptSuggestionGenerator | undefined;
     subagents: SubagentEventRouter;
     subagentTransition?: Promise<void>;
@@ -1037,6 +1043,10 @@ export class CodexAcpServer {
             } : {}),
             ...(this.capabilities.neutralCommandPresentation ? {
                 [NEUTRAL_COMMAND_PRESENTATION_META_KEY]: neutralPresentationCapability(),
+            } : {}),
+            // Only while the adapter predicts at all: `CODEX_ACP_PROMPT_SUGGESTIONS=false` turns it off.
+            ...(this.capabilities.neutralPromptSuggestions && promptSuggestionsEnabled() ? {
+                [PROMPT_SUGGESTIONS_META_KEY]: neutralPresentationCapability(),
             } : {}),
             // The session index for a client that opted in without AIR, see `docs/air-extensions.md`.
             ...(neutralSessionIndex ? {
@@ -4263,13 +4273,13 @@ export class CodexAcpServer {
     }
 
     private createPromptSuggestions(sessionState: SessionState): PromptSuggestionGenerator | undefined {
-        if (!sessionState.clientCapabilities.airClient || !promptSuggestionsEnabled()) return undefined;
+        if (!sessionState.clientCapabilities.predictsPrompts || !promptSuggestionsEnabled()) return undefined;
         return new PromptSuggestionGenerator(
             this.codexAcpClient.appServerClient,
-            async text => {
+            async (text, requestId) => {
                 await new ACPSessionConnection(this.connection, sessionState.sessionId).update({
                     sessionUpdate: "session_info_update",
-                    _meta: promptSuggestionsMeta(text),
+                    _meta: promptSuggestionsMeta(text, requestId),
                 });
             },
         );
@@ -5683,7 +5693,22 @@ export class CodexAcpServer {
             sessionState.titleGen?.onTurnCompleted(promptText);
 
             // Same fire-and-forget rule: a predicted follow-up comes after the answer, never before it. No prediction in plan mode or after a turn that did not complete.
-            if (turnCompleted.turn.status === "completed" && sessionState.collaborationMode !== PLAN_COLLABORATION_MODE) sessionState.promptSuggestions?.onTurnCompleted(sessionState.sessionId, turnCompleted.turn.id);
+            // A client-neutral client asks per prompt, so a turn whose prompt named no id costs no model call; AIR
+            // takes every turn's prediction.
+            const promptSuggestionRequestId = sessionState.clientCapabilities.neutralPromptSuggestions
+                ? promptSuggestionsRequestId(params._meta)
+                : undefined;
+            if (
+                turnCompleted.turn.status === "completed"
+                && sessionState.collaborationMode !== PLAN_COLLABORATION_MODE
+                && (sessionState.clientCapabilities.airClient || promptSuggestionRequestId !== undefined)
+            ) {
+                sessionState.promptSuggestions?.onTurnCompleted(
+                    sessionState.sessionId,
+                    turnCompleted.turn.id,
+                    promptSuggestionRequestId,
+                );
+            }
 
             // On v2, a prompt whose user message was never recorded (`pendingInsertion` still set)
             // never happened from the client's view, so it must not leave a title behind either.
