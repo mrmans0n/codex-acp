@@ -57,6 +57,9 @@ model and reasoning effort selectors.
 `neutral-command-presentation` (no upstream PR yet) lets a client that does not
 declare AIR negotiate `_meta.commandPresentation`, for the kind and `SKILL.md` path of
 skill commands and the command actions of `/plan` and `/goal`.
+`neutral-prompt-suggestions` (no upstream PR yet) lets a client that does not declare
+AIR negotiate `_meta.promptSuggestions` and ask for the predicted follow-up prompt per
+prompt with `_meta.promptSuggestions.id`; a prompt without an id costs no model call.
 Keep ledger entries and their file
 lists exact when a patch changes. `npm run test:maintenance` verifies the ledger
 against the recorded commits. A file list may extend the original commit's paths
