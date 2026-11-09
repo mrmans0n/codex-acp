@@ -553,6 +553,30 @@
         "originalCommit": "ab965a0e99d047da935fed6bc107f8564e3df250",
         "action": "retain"
       }
+    },
+    {
+      "name": "neutral-prompt-suggestions",
+      "commit": "62ee6fec6365323b79a1ba1212246864491d7d1d",
+      "upstreamPr": null,
+      "files": [
+        "docs/air-extensions.md",
+        "src/CodexAcpServer.ts",
+        "src/PromptSuggestionGenerator.ts",
+        "src/__tests__/CodexACPAgent/initialize-v2.test.ts",
+        "src/__tests__/CodexACPAgent/initialize.test.ts",
+        "src/__tests__/CodexACPAgent/prompt-suggestions.test.ts",
+        "src/__tests__/CodexACPAgent/v2-prompt-harness.ts",
+        "src/__tests__/PromptSuggestionGenerator.test.ts",
+        "src/tool-calls/ClientCapabilities.ts"
+      ],
+      "tests": [
+        "src/__tests__/CodexACPAgent/initialize-v2.test.ts",
+        "src/__tests__/CodexACPAgent/initialize.test.ts",
+        "src/__tests__/CodexACPAgent/prompt-suggestions.test.ts",
+        "src/__tests__/PromptSuggestionGenerator.test.ts"
+      ],
+      "disposition": "active",
+      "retiredCommits": []
     }
   ],
   "retiredCommits": [
