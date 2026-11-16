@@ -2,7 +2,7 @@ import * as acp from "@agentclientprotocol/sdk/unstable";
 import {describe, expect, it, vi} from "vitest";
 import {ACPSessionConnection, AcpV2Connection} from "../../ACPSessionConnection";
 import {publishAirSessionMetadata} from "../../AirExtension";
-import {CodexEventHandler} from "../../CodexEventHandler";
+import {CodexEventHandler, SessionFailureIds} from "../../CodexEventHandler";
 import {SESSION_ARCHIVE_METHOD} from "../../SessionIndex";
 import {connectSession, createThread, sessionId, type PromptSession} from "./v2-prompt-harness";
 
@@ -61,9 +61,10 @@ describe.each([1, 2] as const)("ACP v%s owned session metadata", version => {
             else expect(metadata(h)["jetbrains"].air.goal).toBeUndefined();
 
             h.emit({method: "error", params: {threadId: sessionId, turnId: "background-turn", willRetry: true,
-                error: {message: "Retrying", codexErrorInfo: null, additionalDetails: null, misalignment: null}}});
+                error: {message: "Retrying", codexErrorInfo: null, additionalDetails: " idle timeout waiting for websocket\n", misalignment: null}}});
             await flush(h);
-            expect(metadata(h)["jetbrains"].air.sessionFailure).toMatchObject({severity: "warning"});
+            expect(metadata(h)["jetbrains"].air.sessionFailure)
+                .toMatchObject({severity: "warning", details: "idle timeout waiting for websocket"});
             if (version === 2) expect(metadata(h)["jetbrains"].air.agentFileChangeReport).toEqual(report);
             else expect(metadata(h)["jetbrains"].air.agentFileChangeReport).toBeUndefined();
             const failure = metadata(h)["jetbrains"].air.sessionFailure;
@@ -134,7 +135,7 @@ describe("V2 namespace transactions", () => {
             await v2.client.notify("session/update", {sessionId: "child", update: {sessionUpdate: "session_info_update", _meta: {codex: {child: true}}}});
             const state = h.agent.getSessionState(sessionId);
             vi.spyOn(state.subagents, "notificationSessionId").mockReturnValue("child");
-            const handler = new CodexEventHandler(outbound, state, false, "epoch", state.subagents, undefined, false, false, false);
+            const handler = new CodexEventHandler(outbound, state, false, new SessionFailureIds("epoch"), state.subagents, undefined, false, false, false);
             await handler.handleNotification({method: "thread/status/changed", params: {threadId: sessionId, status: {type: "idle"}}});
             await flush(h);
             const child = h.scopedUpdates.filter(entry => entry.sessionId === "child").at(-1)?.update;

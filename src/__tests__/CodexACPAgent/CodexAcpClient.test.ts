@@ -3870,6 +3870,34 @@ describe('ACP server test', { timeout: 40_000 }, () => {
         expect(requestsOfRecoveryServer(fixture.current(), "thread/resume")).toHaveLength(1);
     });
 
+    it('reports a hook that blocks goal work set before the first prompt as a typed session failure', async () => {
+        const fixture = createRecoveryFixture();
+        await initializeRecoveryFixture(fixture, true);
+        const {sessionId} = await fixture.agent.newSession({cwd: "/work", mcpServers: []});
+        const goal = {threadId: sessionId, objective: "ship it", status: "paused", tokenBudget: null, tokensUsed: 0, timeUsedSeconds: 0, createdAt: 1, updatedAt: 2};
+        fixture.answers.set("thread/goal/set", (_params, server) => {
+            setImmediate(() => server.rpc.notify({method: "thread/goal/updated", params: {threadId: sessionId, turnId: null, goal}}));
+            return {goal};
+        });
+        const failures = () => fixture.updates()
+            .filter(({sessionId: id, update}) => id === sessionId && update["sessionUpdate"] === "session_info_update")
+            .map(({update}) => (update["_meta"] as {jetbrains?: {air?: {sessionFailure?: {id: string, title: string}}}})
+                .jetbrains?.air?.sessionFailure)
+            .filter(failure => failure !== undefined);
+
+        await fixture.agent.extMethod(GOAL_CONTROL_METHOD, {sessionId, action: "pause"});
+        fixture.current().rpc.notify({method: "hook/completed", params: {threadId: sessionId, turnId: "goal-turn", run: {
+            id: "preToolUse:0", eventName: "preToolUse", handlerType: "command", executionMode: "sync", scope: "turn",
+            sourcePath: "/hooks/config.toml", source: "user", displayOrder: 0n, status: "blocked", statusMessage: null,
+            startedAt: 1n, completedAt: 1n, durationMs: 1n, entries: [{kind: "feedback", text: "not in goal work"}],
+        }}} as ServerNotification);
+
+        await vi.waitFor(() => expect(failures()).toEqual([expect.objectContaining({
+            id: expect.stringMatching(new RegExp(`^${sessionId}:notice:`)),
+            title: "PreToolUse hook blocked the tool call — not in goal work",
+        })]));
+    });
+
     it('keeps tracking a Codex-started goal turn after goal control replaced the baseline turn tracker', async () => {
         const fixture = createRecoveryFixture();
         await initializeRecoveryFixture(fixture, true);

@@ -32,19 +32,15 @@ export function clientRequestsNeutralSessionFailure(capabilities: acp.ClientCapa
 }
 
 /**
- * The incident numbers and revisions of the client-neutral form, shared by every event handler of a connection.
+ * The revisions of the client-neutral form, shared by every event handler of a connection.
  *
  * A session gets a new handler for each prompt, and each `session/load` gets a new session state, while the client
- * keeps its records. Without this, a later handler can send a known id at revision 1, which the client drops,
- * or reuse the number of an unrelated incident. The AIR form keeps its per-handler numbering.
+ * keeps its records. Without this, a later handler can send a known id at revision 1, which the client drops.
+ * Incident numbers come from the connection-wide `SessionFailureIds` of both forms. The AIR form keeps its
+ * per-handler revisions.
  */
 export class NeutralSessionFailureLedger {
     private readonly revisions = new Map<string, number>();
-    private nextIncident = 1;
-
-    incidentNumber(): number {
-        return this.nextIncident++;
-    }
 
     /** The lowest revision of `id` that is at least `proposed` and above every revision already sent. */
     revision(id: string, proposed: number): number {

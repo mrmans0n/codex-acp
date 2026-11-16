@@ -17,7 +17,7 @@ import {afterEach, beforeEach, expect, vi} from "vitest";
 import {once} from "node:events";
 import type {Model, ReasoningEffortOption} from "../app-server/v2";
 import {CodexSubagentEventRouter} from "../subagents/CodexSubagentEventRouter";
-import {CodexEventHandler} from "../CodexEventHandler";
+import {CodexEventHandler, SessionFailureIds} from "../CodexEventHandler";
 import {NeutralSessionFailureLedger, type SessionFailureFormat} from "../SessionFailureExtension";
 import type {AccountUpdatedNotification} from "../app-server/v2";
 import {CodexBackgroundTerminalTasks} from "../async-tasks/CodexBackgroundTerminalTasks";
@@ -632,7 +632,7 @@ export function createTestEventHandler(
         connection,
         sessionState,
         options.sessionFailureFormat ?? (options.typedSessionFailures ? "air" : "none"),
-        options.sessionFailureEpoch ?? "test-epoch",
+        new SessionFailureIds(options.sessionFailureEpoch ?? "test-epoch"),
         sessionState.subagents,
         options.onAccountUpdated,
         options.collectTurnDiffs ?? false,

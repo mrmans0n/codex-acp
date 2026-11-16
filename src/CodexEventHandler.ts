@@ -18,6 +18,8 @@ import type {
     ConfigWarningNotification,
     DeprecationNoticeNotification,
     ErrorNotification,
+    HookCompletedNotification,
+    HookEventName,
     ItemCompletedNotification,
     ItemStartedNotification,
     ThreadItem,
@@ -47,7 +49,7 @@ import {ImageGenerationReporter} from "./tool-calls/reporters/ImageGenerationRep
 import {ImageViewReporter} from "./tool-calls/reporters/ImageViewReporter";
 import {McpToolReporter} from "./tool-calls/reporters/McpToolReporter";
 import {WebSearchReporter} from "./tool-calls/reporters/WebSearchReporter";
-import {CodexPlanStream} from "./CodexPlanStream";
+import {CodexPlanStream, structuredPlanUpdate} from "./CodexPlanStream";
 import {isWorkspaceRoutingUnavailableMessage} from "./CodexThreadErrors";
 import {
     createMessagePhaseMeta,
@@ -202,19 +204,59 @@ export function failureWasShownAsMessage(error: unknown): boolean {
     return error instanceof RequestError && failuresShownAsMessages.has(error);
 }
 
+/** What a hook of the event blocks, for the title of its notice. */
+function hookBlockTarget(eventName: HookEventName): string {
+    switch (eventName) {
+        case "userPromptSubmit":
+            return "the prompt";
+        case "preToolUse":
+        case "permissionRequest":
+            return "the tool call";
+        case "postToolUse":
+            return "the tool result";
+        case "preModelRequest":
+            return "the model request";
+        case "preCompact":
+            return "the compaction";
+        case "subagentStart":
+            return "the subagent";
+        case "postModelRequest":
+        case "postCompact":
+        case "sessionStart":
+        case "sessionEnd":
+        case "subagentStop":
+        case "stop":
+        case "interrupt":
+            return "the request";
+    }
+}
+
+/**
+ * Numbers failure and advisory ids for the adapter process. Each prompt gets its own event handler, so the counter
+ * must outlive a handler: otherwise the first advisory of every prompt gets the same id and revision.
+ */
+export class SessionFailureIds {
+    private next = 1;
+
+    constructor(private readonly epoch: string) {}
+
+    allocate(): string {
+        return `${this.epoch}:${this.next++}`;
+    }
+}
+
 export class CodexEventHandler {
 
     private readonly sessionState: SessionState;
     /** The typed failure lane, in either form. Only {@link createSessionFailureMeta} reads the form itself. */
     private readonly supportsTypedSessionFailures: boolean;
-    private readonly sessionFailureEpoch: string;
+    private readonly sessionFailureIds: SessionFailureIds;
     private readonly pendingErrors: ErrorNotification[] = [];
     private readonly failuresById = new Map<string, SessionFailure>();
     private readonly activeFailureIdByScope = new Map<string, string>();
     private readonly failureTurnIdById = new Map<string, string | undefined>();
     private readonly allocatedFailureScopes = new Set<string>();
     private lastSessionNotice: {key: string; failure: SessionFailure} | undefined;
-    private nextNoticeId = 1;
     private failure: RequestError | null = null;
     private terminalTurnError: {turnId: string; error: ErrorNotification["error"]} | null = null;
     private completedPlan: CompletedPlan | null = null;
@@ -241,7 +283,7 @@ export class CodexEventHandler {
         connection: AcpClientConnection,
         sessionState: SessionState,
         sessionFailureFormat: SessionFailureFormat | boolean,
-        sessionFailureEpoch: string,
+        sessionFailureIds: SessionFailureIds,
         subagents: SubagentEventRouter,
         onAccountUpdated: ((notification: AccountUpdatedNotification) => void) | undefined,
         collectTurnDiffs: boolean,
@@ -255,7 +297,7 @@ export class CodexEventHandler {
             ? (sessionFailureFormat ? "air" : "none")
             : sessionFailureFormat;
         this.supportsTypedSessionFailures = this.sessionFailureFormat !== "none";
-        this.sessionFailureEpoch = sessionFailureEpoch;
+        this.sessionFailureIds = sessionFailureIds;
         this.session = new ACPSessionConnection(connection, sessionState.sessionId);
         this.renderer = new AcpToolCallRenderer(sessionState.clientCapabilities);
         this.plans = new CodexPlanStream(this.session, sessionState.clientCapabilities);
@@ -705,6 +747,8 @@ export class CodexEventHandler {
                 return await this.createConfigWarningEvent(notification.params);
             case "warning":
                 return this.createWarningEvent(notification.params);
+            case "hook/completed":
+                return this.createHookCompletedEvent(notification.params);
             case "guardianWarning":
                 return null;
             case "deprecationNotice":
@@ -765,7 +809,6 @@ export class CodexEventHandler {
             case "thread/environment/disconnected":
             case "command/exec/outputDelta":
             case "hook/started":
-            case "hook/completed":
             case "turn/moderationMetadata":
             case "item/fileChange/outputDelta":
             case "item/fileChange/patchUpdated":
@@ -891,6 +934,27 @@ export class CodexEventHandler {
             return this.createSessionFailureUpdate(this.recordSessionNotice(event.message));
         }
         return createAgentTextMessageChunk(`Warning: ${event.message}\n\n`);
+    }
+
+    /**
+     * A hook that blocks or stops Codex can end the turn before the model runs. Without this the client sees
+     * an empty turn and no reason. Other hook results do not change what Codex does, so they stay silent.
+     */
+    private createHookCompletedEvent({run}: HookCompletedNotification): UpdateSessionEvent | null {
+        if (run.status !== "blocked" && run.status !== "stopped") return null;
+        const eventName = run.eventName.charAt(0).toUpperCase() + run.eventName.slice(1);
+        const title = `${eventName} hook ${run.status === "blocked" ? `blocked ${hookBlockTarget(run.eventName)}` : "stopped the turn"}`;
+        // Context entries are text the hook adds to the model input, not a reason.
+        const reason = run.entries
+            .filter(entry => entry.kind !== "context")
+            .map(entry => entry.text.trim())
+            .filter(text => text.length > 0)
+            .join("\n") || null;
+        if (this.supportsNotices) return createSessionNotice("warning", title, reason);
+        if (this.supportsTypedSessionFailures) {
+            return this.createSessionFailureUpdate(this.recordSessionNotice(...this.sessionNoticeContent(title, reason)));
+        }
+        return createAgentTextMessageChunk(reason === null ? `${title}.\n\n` : `${title}: ${reason}\n\n`);
     }
 
     private createModelReroutedEvent(event: ModelReroutedNotification): UpdateSessionEvent {
@@ -1104,10 +1168,7 @@ export class CodexEventHandler {
                 priority: "medium"
             })
         );
-        return {
-            sessionUpdate: "plan",
-            entries: plan,
-        }
+        return structuredPlanUpdate(plan, this.sessionState.clientCapabilities);
     }
 
     private async createErrorEvent(params: ErrorNotification): Promise<UpdateSessionEvent | null> {
@@ -1186,6 +1247,7 @@ export class CodexEventHandler {
         title: string,
         actionsOverride?: SessionFailureAction[],
         attributeToTurn = true,
+        details?: string,
     ): NonNullable<SessionState["sessionFailure"]> {
         const policy = SESSION_FAILURE_POLICY[kind];
         const scope = turnId ?? this.sessionState.sessionId;
@@ -1198,6 +1260,7 @@ export class CodexEventHandler {
             category: policy.category,
             severity,
             title: readableServiceErrorMessage(title),
+            ...(details === undefined ? {} : {details}),
             actions: actionsOverride ?? policy.actions,
             kind,
         };
@@ -1215,11 +1278,7 @@ export class CodexEventHandler {
             return `${turnId}:error`;
         }
         this.allocatedFailureScopes.add(scope);
-        return `${scope}:error:${this.sessionFailureEpoch}:${this.nextIncidentNumber()}`;
-    }
-
-    private nextIncidentNumber(): number {
-        return this.sessionFailureFormat === "neutral" ? this.neutralFailures.incidentNumber() : this.nextNoticeId++;
+        return `${scope}:error:${this.sessionFailureIds.allocate()}`;
     }
 
     private sessionFailureRevision(previous: SessionFailure | undefined, id: string): number {
@@ -1247,6 +1306,8 @@ export class CodexEventHandler {
 
     private recordRetryWarning(params: ErrorNotification, attributeToTurn = true): SessionFailure {
         const kind = this.sessionFailureKind(params.error);
+        // Codex puts the cause of the retry here, e.g. "idle timeout waiting for websocket".
+        const details = params.error.additionalDetails?.trim() || undefined;
         return this.recordSessionFailure(
             kind,
             params.turnId,
@@ -1254,6 +1315,7 @@ export class CodexEventHandler {
             params.error.message,
             [],
             attributeToTurn,
+            details,
         );
     }
 
@@ -1263,7 +1325,7 @@ export class CodexEventHandler {
             ? this.lastSessionNotice.failure
             : undefined;
         const id = previous?.id
-            ?? `${this.sessionState.sessionId}:notice:${this.sessionFailureEpoch}:${this.nextIncidentNumber()}`;
+            ?? `${this.sessionState.sessionId}:notice:${this.sessionFailureIds.allocate()}`;
         const notice: SessionFailure = {
             id,
             revision: this.sessionFailureRevision(previous, id),

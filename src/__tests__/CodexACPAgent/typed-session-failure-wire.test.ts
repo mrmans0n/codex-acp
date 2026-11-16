@@ -4,6 +4,7 @@ import {CodexAppServerClient} from "../../CodexAppServerClient";
 import {CodexAcpClient} from "../../CodexAcpClient";
 import {CodexAcpServer} from "../../CodexAcpServer";
 import {createTestSessionState} from "../acp-test-utils";
+import type {HookOutputEntry, HookRunStatus} from "../../app-server/v2";
 import {createMockConnections} from "./test-utils";
 
 const noticeCapabilities: acp.ClientCapabilities = {
@@ -416,6 +417,26 @@ describe("typed session failures over ACP transport", () => {
         expect(records[2]!.id).not.toBe(records[0]!.id);
     });
 
+    it("gives the advisory of each prompt its own id", async () => {
+        const fixture = await createIdleFixture("wire-hook-blocked");
+        vi.spyOn(fixture.appServer, "awaitTurnCompleted").mockImplementation(async () => {
+            fixture.sendServerNotification(hookCompleted(fixture.sessionId, "blocked", [{kind: "feedback", text: "blocked by policy"}]));
+            await fixture.codexClient.waitForSessionNotifications(fixture.sessionId);
+            return {threadId: fixture.sessionId, turn: createTurn("completed")};
+        });
+
+        for (const text of ["first", "second"]) {
+            await fixture.client.request(acp.methods.agent.session.prompt, {sessionId: fixture.sessionId, prompt: [{type: "text", text}]});
+        }
+
+        const records = fixture.updates.map(update => (update.update._meta as {
+            jetbrains: {air: {sessionFailure: {id: string; revision: number; title: string}}};
+        }).jetbrains.air.sessionFailure);
+        expect(records).toHaveLength(2);
+        expect(records[0]).toMatchObject({revision: 1, title: "UserPromptSubmit hook blocked the prompt — blocked by policy"});
+        expect(records[1]!.id).not.toBe(records[0]!.id);
+    });
+
     it("updates one late retry incident from warning attempts to terminal error", async () => {
         const fixture = await createIdleFixture("wire-late-retry-chain");
         const error = {
@@ -456,6 +477,82 @@ describe("typed session failures over ACP transport", () => {
         }).jetbrains.air.sessionFailure;
         expect(next.id).toBe(records[0]!.id);
         expect(next.revision).toBe(4);
+    });
+
+    it("carries the retry cause of each revision as details and none on the terminal revision", async () => {
+        const fixture = await createIdleFixture("wire-retry-details");
+
+        for (const [willRetry, message, additionalDetails] of [
+            [true, "Reconnecting... 1/5", " idle timeout waiting for websocket "],
+            [true, "Reconnecting... 2/5", "stream disconnected before completion"],
+            [true, "Reconnecting... 3/5", null],
+            [true, "Reconnecting... 4/5", "   "],
+            [false, "Connection to Codex was lost.", "stream disconnected after 5 attempts"],
+        ] as const) {
+            fixture.sendServerNotification({
+                method: "error",
+                params: {
+                    threadId: fixture.sessionId,
+                    turnId: "turn-id",
+                    willRetry,
+                    error: {
+                        message,
+                        codexErrorInfo: {responseStreamDisconnected: {httpStatusCode: null}},
+                        additionalDetails,
+                    },
+                },
+            });
+        }
+        await fixture.codexClient.waitForSessionNotifications(fixture.sessionId);
+        await vi.waitFor(() => expect(fixture.wireUpdates).toHaveLength(5));
+
+        const records = fixture.wireUpdates.map(update => (update.params.update["_meta"] as {
+            jetbrains: {air: {sessionFailure: Record<string, unknown>}};
+        }).jetbrains.air.sessionFailure);
+        expect(records).toStrictEqual([
+            {
+                id: "turn-id:error",
+                revision: 1,
+                category: "connection",
+                severity: "warning",
+                title: "Reconnecting... 1/5",
+                details: "idle timeout waiting for websocket",
+                actions: [],
+            },
+            {
+                id: "turn-id:error",
+                revision: 2,
+                category: "connection",
+                severity: "warning",
+                title: "Reconnecting... 2/5",
+                details: "stream disconnected before completion",
+                actions: [],
+            },
+            {
+                id: "turn-id:error",
+                revision: 3,
+                category: "connection",
+                severity: "warning",
+                title: "Reconnecting... 3/5",
+                actions: [],
+            },
+            {
+                id: "turn-id:error",
+                revision: 4,
+                category: "connection",
+                severity: "warning",
+                title: "Reconnecting... 4/5",
+                actions: [],
+            },
+            {
+                id: "turn-id:error",
+                revision: 5,
+                category: "connection",
+                severity: "error",
+                title: "Connection to Codex was lost.",
+                actions: ["retry", "new_session"],
+            },
+        ]);
     });
 });
 
@@ -872,6 +969,21 @@ function createWireFixture(options: {exitCode?: number | null; stderr?: string} 
             const handler = mockConnections.getUnhandledNotificationHandler();
             if (!handler) throw new Error("App-server notification handler was not installed");
             handler(notification);
+        },
+    };
+}
+
+function hookCompleted(threadId: string, status: HookRunStatus, entries: HookOutputEntry[]) {
+    return {
+        method: "hook/completed",
+        params: {
+            threadId,
+            turnId: "turn-id",
+            run: {
+                id: "user-prompt-submit:0", eventName: "userPromptSubmit", handlerType: "command", executionMode: "sync",
+                scope: "turn", sourcePath: "/hooks/config.toml", source: "user", displayOrder: 0, status,
+                statusMessage: null, startedAt: 1, completedAt: 1, durationMs: 1, entries,
+            },
         },
     };
 }
