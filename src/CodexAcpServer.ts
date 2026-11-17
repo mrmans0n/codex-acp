@@ -1,7 +1,7 @@
 import * as acp from "@agentclientprotocol/sdk/unstable";
 import {RequestError, type SessionId, type SessionModeState} from "@agentclientprotocol/sdk/unstable";
 import {SYSTEM_PROMPT_CAPABILITY, withSessionInstructionAppend} from "./SessionInstructions";
-import {CodexEventHandler, type CompletedPlan, failureWasShownAsMessage} from "./CodexEventHandler";
+import {CodexEventHandler, type CompletedPlan, failureWasShownAsMessage, SessionFailureIds} from "./CodexEventHandler";
 import {attachmentFileUri, desktopAttachmentHistory} from "./DesktopAttachmentHistory";
 import {CodexApprovalHandler} from "./permissions/CodexApprovalHandler";
 import {isRecord} from "./permissions/json";
@@ -138,7 +138,6 @@ import {
 } from "./AcpExtensions";
 import {AcpToolCallRenderer} from "./tool-calls/AcpToolCallRenderer";
 import {ClientCapabilities} from "./tool-calls/ClientCapabilities";
-import {CollabAgentReporter} from "./tool-calls/reporters/CollabAgentReporter";
 import {CommandReporter} from "./tool-calls/reporters/CommandReporter";
 import {CompactionReporter} from "./tool-calls/reporters/CompactionReporter";
 import {DynamicToolReporter} from "./tool-calls/reporters/DynamicToolReporter";
@@ -157,6 +156,7 @@ import {
     FAST_MODE_ON,
     modelSupportsFast,
     resolveFastServiceTier,
+    serviceTierEnablesFast,
 } from "./FastModeConfig";
 import packageJson from "../package.json";
 import {isJetBrains2026_1Client} from "./JBUtils";
@@ -226,6 +226,7 @@ import {
     AIR_META_KEY,
     AIR_SESSION_FAILURE_KEY,
     clientSupportsAirCapability,
+    isAirClient,
     JETBRAINS_META_KEY,
     publishAirSessionMetadata,
 } from "./AirExtension";
@@ -539,7 +540,7 @@ export class CodexAcpServer {
     private readonly defaultAuthRequest: CodexAuthRequest | null;
     private readonly getExitCode: () => number | null;
     private readonly getRecentStderr: () => string;
-    private readonly sessionFailureEpoch: string;
+    private readonly sessionFailureIds: SessionFailureIds;
     private readonly neutralSessionFailures = new NeutralSessionFailureLedger();
     private availableCommands: CodexCommands;
     private clientInfo: acp.Implementation | null;
@@ -679,7 +680,7 @@ export class CodexAcpServer {
         this.captureStderr();
         this.getExitCode = getExitCode ?? (() => this.codexProcessState?.connection.process.exitCode ?? null);
         this.getRecentStderr = getRecentStderr ?? (() => this.codexProcessState?.stderr ?? "");
-        this.sessionFailureEpoch = randomUUID();
+        this.sessionFailureIds = new SessionFailureIds(randomUUID());
         this.clientInfo = null;
         this.clientCapabilities = null;
         this.capabilities = ClientCapabilities.DEFAULT;
@@ -725,7 +726,7 @@ export class CodexAcpServer {
                 id => this.codexAcpClient.appServerClient.runningTurnId(id), models, {
                     read: (id, parent) => this.readSubagentConfiguration(id, parent),
                     enqueuePublication: publish => this.codexAcpClient.enqueueSessionTransition(sessionId, publish),
-                })
+                }, item => this.userMessageContent(item))
             : new CodexSubagentEventRouter(sessionId, this.supportsNativeSubagents(), session, release, models);
         if (router instanceof StandardSubagentEventRouter) this.getSubagentInteractionHandlers(router, sessionId);
         return router;
@@ -870,7 +871,8 @@ export class CodexAcpServer {
             fork: { },
             title: {},
             additionalDirectories: {},
-            subagents: {},
+            // Standard subagent sessions have no Agent-side capability. Only AIR's contract negotiates both sides.
+            ...(isAirClient(_params.clientCapabilities) ? {subagents: {}} : {}),
             systemPrompt: {},
         };
         return {
@@ -1522,7 +1524,7 @@ export class CodexAcpServer {
             cwd: request.cwd,
             additionalDirectories: sessionMetadata.additionalDirectories,
             mcpServers: requestedMcpServers,
-            fastModeEnabled: sessionMetadata.currentServiceTier === "fast",
+            fastModeEnabled: serviceTierEnablesFast(sessionMetadata.currentServiceTier),
             currentModelSupportsFast: currentModelSupportsFast,
             sessionMcpServers: sessionMcpServers,
             clientCapabilities: this.capabilities,
@@ -1785,7 +1787,7 @@ export class CodexAcpServer {
                         this.connection,
                         sessionState,
                         this.capabilities.sessionFailureFormat,
-                        this.sessionFailureEpoch,
+                        this.sessionFailureIds,
                         sessionState.subagents,
                         (accountUpdated) => this.handleAccountUpdated(accountUpdated),
                         false,
@@ -2114,7 +2116,8 @@ export class CodexAcpServer {
     }
 
     async resumeSessionV2(params: acpV2.ResumeSessionRequest): Promise<acpV2.ResumeSessionResponse> {
-        const {replayFrom, systemPrompt, ...rest} = params;
+        // Initial config option values are not advertised, so they are not applied.
+        const {replayFrom, systemPrompt, configOptions: _configOptions, ...rest} = params;
         const request = {...rest, systemPrompt: toV1SystemPrompt(systemPrompt)};
         if (replayFrom == null) {
             await this.resumeSession(request);
@@ -2356,7 +2359,8 @@ export class CodexAcpServer {
     }
 
     async newSessionV2(params: acpV2.NewSessionRequest): Promise<acpV2.NewSessionResponse> {
-        const {systemPrompt, ...rest} = params;
+        // Initial config option values are not advertised, so they are not applied.
+        const {systemPrompt, configOptions: _configOptions, ...rest} = params;
         const request = {...rest, systemPrompt: toV1SystemPrompt(systemPrompt)};
         const {sessionId} = await this.newSession(request);
         return {
@@ -3395,7 +3399,7 @@ export class CodexAcpServer {
             this.connection,
             sessionState,
             this.capabilities.sessionFailureFormat,
-            this.sessionFailureEpoch,
+            this.sessionFailureIds,
             sessionState.subagents,
             (accountUpdated) => this.handleAccountUpdated(accountUpdated),
             false,
@@ -3896,7 +3900,7 @@ export class CodexAcpServer {
             cwd: request.cwd,
             additionalDirectories: sessionMetadata.additionalDirectories,
             mcpServers: requestedMcpServers,
-            fastModeEnabled: sessionMetadata.currentServiceTier === "fast",
+            fastModeEnabled: serviceTierEnablesFast(sessionMetadata.currentServiceTier),
             currentModelSupportsFast: currentModelSupportsFast,
             sessionMcpServers: sessionMcpServers,
             clientCapabilities: this.capabilities,
@@ -4152,6 +4156,7 @@ export class CodexAcpServer {
         if (!(router instanceof StandardSubagentEventRouter)) return;
         const session = new ACPSessionConnection(this.connection, sessionId);
         const replayedEntities = new Set<string>();
+        if (threadId === state.sessionId) router.beginHistoryReplay();
         const replayChild = async (childThreadId: string, childId: string | null) => {
             if (childId === null || replayed.has(childThreadId)) return;
             if (ancestry.has(childThreadId)) { gaps.add(childThreadId); return; }
@@ -4159,6 +4164,7 @@ export class CodexAcpServer {
             try {
                 const history = await this.codexAcpClient.readSubagentHistory(childThreadId);
                 if (!isOpen()) throw new SessionClosedDuringLoadError();
+                await router.observeRole(childThreadId, history.thread.agentRole);
                 const parent = router.parentThreadId(childThreadId);
                 if (parent !== undefined) {
                     try {
@@ -4202,21 +4208,30 @@ export class CodexAcpServer {
                     continue;
                 }
                 if (item.type === "collabAgentToolCall" && item.tool === "spawnAgent") {
-                    if (item.senderThreadId === threadId) for (const child of item.receiverThreadIds) {
-                        if (!child.trim() || ancestry.has(child)) { gaps.add(child); continue; }
-                        await replayChild(child, await router.announce(child, sessionId, undefined, item.prompt ?? undefined));
+                    if (item.senderThreadId === threadId) {
+                        const children: Array<[string, string]> = [];
+                        for (const child of item.receiverThreadIds) {
+                            if (!child.trim() || ancestry.has(child)) { gaps.add(child); continue; }
+                            children.push([child, await router.announce(child, sessionId)]);
+                        }
+                        // The delegated task precedes the child's transcript, which holds the incoming view.
+                        await router.reportOutgoingMessages(item);
+                        for (const [child, childId] of children) await replayChild(child, childId);
                     }
                     continue;
                 }
+                if (item.type === "collabAgentToolCall" && item.senderThreadId === threadId) await router.reportOutgoingMessages(item);
                 if (threadId !== state.sessionId) {
-                    // Agent-owned input is not an ordinary human message. Incomplete text has no safe delta cursor.
-                    if (item.type === "userMessage" || (!completed && !supportsPartialHistory(item))) {
+                    // Incomplete text has no safe delta cursor.
+                    if (item.type !== "userMessage" && !completed && !supportsPartialHistory(item)) {
                         gaps.add(threadId);
                         continue;
                     }
-                    if (!completed) gaps.add(threadId);
+                    if (item.type !== "userMessage" && !completed) gaps.add(threadId);
                     if (!await router.reconcileHistoryItem(threadId, item, completed, turnId)) { gaps.add(threadId); continue; }
                     if (!isOpen()) throw new SessionClosedDuringLoadError();
+                    // Agent-owned input is a message between sessions, not an ordinary human message.
+                    if (item.type === "userMessage") { await router.reportIncomingMessage(threadId, item); continue; }
                 }
                 for (const update of await this.createHistoryUpdates(item, state)) {
                     await session.replayUpdate(update, replayedEntities);
@@ -4373,7 +4388,7 @@ export class CodexAcpServer {
             case "dynamicToolCall":
                 return [renderer.render(DynamicToolReporter.started(item))];
             case "collabAgentToolCall":
-                return [renderer.render(CollabAgentReporter.started(item))];
+                return [renderer.render(sessionState.subagents.legacyCollaborationStarted(item))];
             case "webSearch":
                 return [renderer.render(WebSearchReporter.history(item))];
             case "imageView":
@@ -4394,11 +4409,15 @@ export class CodexAcpServer {
     }
 
     private createUserMessageUpdates(item: ThreadItem & { type: "userMessage" }): UpdateSessionEvent[] {
-        const updates: UpdateSessionEvent[] = [];
         // On v2, a message inserted via `session/prompt` is replayed under the id the client
         // provided then (`clientId`), so it round-trips as the same message on reconnect; v1 has
         // no such client-minted id and keeps using Codex's own item id.
         const messageId = this.protocolVersion === 2 ? (item.clientId ?? item.id) : item.id;
+        return this.userMessageContent(item).map(block => createUserMessageChunk(block, messageId));
+    }
+
+    private userMessageContent(item: ThreadItem & { type: "userMessage" }): acp.ContentBlock[] {
+        const content: acp.ContentBlock[] = [];
         const contentBlocks = item.content.map(input => this.userInputToContentBlocks(input));
         const attachmentUris = new Set(contentBlocks.flatMap((blocks, index) =>
             item.content[index]?.type === "text"
@@ -4409,12 +4428,9 @@ export class CodexAcpServer {
                 ? input.path
                 : (input.type === "image" || input.type === "audio") && "url" in input ? input.url : null;
             if (nativePath !== null && attachmentUris.has(attachmentFileUri(nativePath) ?? "")) continue;
-            const blocks = contentBlocks[index]!;
-            for (const block of blocks) {
-                updates.push(createUserMessageChunk(block, messageId));
-            }
+            content.push(...contentBlocks[index]!);
         }
-        return updates;
+        return content;
     }
 
     private createReasoningUpdates(item: ThreadItem & { type: "reasoning" }): UpdateSessionEvent[] {
@@ -5256,7 +5272,7 @@ export class CodexAcpServer {
                 this.connection,
                 sessionState,
                 this.capabilities.sessionFailureFormat,
-                this.sessionFailureEpoch,
+                this.sessionFailureIds,
                 sessionState.subagents,
                 (accountUpdated) => this.handleAccountUpdated(accountUpdated),
                 agentFileChangeReportRequest !== null,

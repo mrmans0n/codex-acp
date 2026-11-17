@@ -143,6 +143,7 @@ const MCP_COMMAND = {
  * the `/mcp` command has a new description and an input hint.
  * Initialize also advertises text-only append system prompts, client-set titles and, in `_meta`, the
  * provider-neutral, opt-in system prompt append capability.
+ * It no longer advertises `sessionCapabilities.subagents`, which the subagent RFD does not define for an Agent.
  * Only a command that equals the baseline `/mcp` command changes.
  */
 export function withFeatureChanges(messages: RecordedMessage[]): RecordedMessage[] {
@@ -155,8 +156,9 @@ export function withFeatureChanges(messages: RecordedMessage[]): RecordedMessage
             const meta = {...(params["_meta"] as Json),
                 systemPrompt: {version: 1, append: true, clear: true, maxBytes: 262144}};
             if (session) {
+                const {subagents: _subagents, ...kept} = session;
                 return {...message, params: {...params, _meta: meta, agentCapabilities: {
-                    ...capabilities, sessionCapabilities: {...session, systemPrompt: {}, title: {}},
+                    ...capabilities, sessionCapabilities: {...kept, systemPrompt: {}, title: {}},
                 }}};
             }
             return {...message, params: {...params, _meta: meta}};

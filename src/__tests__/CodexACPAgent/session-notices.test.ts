@@ -2,7 +2,7 @@ import type * as acp from "@agentclientprotocol/sdk/unstable";
 import {describe, expect, it, vi} from "vitest";
 import {ACPSessionConnection} from "../../ACPSessionConnection";
 import type {ServerNotification} from "../../app-server";
-import type {Thread, Turn} from "../../app-server/v2";
+import type {HookEventName, HookOutputEntry, HookRunStatus, HookRunSummary, Thread, Turn} from "../../app-server/v2";
 import {CodexSubagentEventRouter} from "../../subagents/CodexSubagentEventRouter";
 import {
     createCodexMockTestFixture,
@@ -93,6 +93,35 @@ describe("session notices", () => {
         }
     });
 
+    it("reports hooks that block or stop Codex as client-neutral records without notice support", async () => {
+        const fixture = await createFixture(neutralFailureCapabilities);
+        await sendNotifications(fixture, [
+            hookCompleted("userPromptSubmit", "blocked", [{kind: "feedback", text: " blocked by policy \n"}]),
+            hookCompleted("sessionStart", "stopped", [{kind: "context", text: "context for the model"}, {kind: "stop", text: "stopped by hook"}]),
+            hookCompleted("preToolUse", "blocked", []),
+            hookCompleted("postToolUse", "completed", [{kind: "context", text: "ok"}]),
+        ]);
+
+        const events = fixture.getAcpConnectionEvents([]).filter(event => event.method === "sessionUpdate");
+        const records = events.map(event => event.args[0].update._meta?.sessionFailure);
+        expect(records).toEqual([
+            "UserPromptSubmit hook blocked the prompt — blocked by policy",
+            "SessionStart hook stopped the turn — stopped by hook",
+            "PreToolUse hook blocked the tool call",
+        ].map(title => ({
+            version: 1,
+            id: expect.stringMatching(new RegExp(`^${sessionId}:notice:[0-9a-f-]+:\\d+$`)),
+            revision: 1,
+            category: "unknown",
+            severity: "warning",
+            title,
+            actions: [],
+            kind: "notice",
+        })));
+        expect(new Set(records.map(record => record.id)).size).toBe(3);
+        expect(JSON.stringify(events)).not.toContain("jetbrains");
+    });
+
     it("preserves optional descriptions and supplies nonempty titles for empty upstream text", async () => {
         const fixture = await createFixture(noticeCapabilities);
         await sendNotifications(fixture, [
@@ -105,6 +134,30 @@ describe("session notices", () => {
         ]);
 
         await expect(fixture.getAcpConnectionDump([])).toMatchFileSnapshot("data/session-notices-optional-content.json");
+    });
+
+    it.each([
+        ["notices", noticeCapabilities, "notices"],
+        ["AIR typed failures", airCapabilities, "air"],
+        ["no capabilities", undefined, "legacy"],
+    ])("reports hooks that block or stop Codex with %s", async (_label, capabilities, snapshot) => {
+        const fixture = await createFixture(capabilities);
+        await sendNotifications(fixture, [
+            hookCompleted("userPromptSubmit", "blocked", [{kind: "feedback", text: " blocked by policy \n"}]),
+            hookCompleted("sessionStart", "stopped", [
+                {kind: "context", text: "context for the model"},
+                {kind: "stop", text: "stopped by hook"},
+                {kind: "error", text: "hook error"},
+            ]),
+            hookCompleted("preToolUse", "blocked", []),
+            // These do not change what Codex does, so they send nothing.
+            hookCompleted("postToolUse", "completed", [{kind: "context", text: "ok"}]),
+            hookCompleted("stop", "failed", [{kind: "error", text: "hook crashed"}]),
+            {method: "hook/started", params: {threadId: sessionId, turnId, run: hookRun("userPromptSubmit", "running", [])}},
+        ]);
+
+        await expect(fixture.getAcpConnectionDump(["args.0.update._meta.jetbrains.air.sessionFailure.id"]))
+            .toMatchFileSnapshot(`data/session-notices-hooks-${snapshot}.json`);
     });
 
     it("uses the negotiated compaction lifecycle without adding a redundant notice", async () => {
@@ -279,6 +332,18 @@ function advisoryNotifications(): ServerNotification[] {
         modelRerouted(sessionId),
         {method: "thread/compacted", params: {threadId: sessionId, turnId}},
     ];
+}
+
+function hookRun(eventName: HookEventName, status: HookRunStatus, entries: HookOutputEntry[]): HookRunSummary {
+    return {
+        id: `${eventName}:0`, eventName, handlerType: "command", executionMode: "sync", scope: "turn",
+        sourcePath: "/hooks/config.toml", source: "user", displayOrder: 0n, status, statusMessage: null,
+        startedAt: 1n, completedAt: 1n, durationMs: 1n, entries,
+    };
+}
+
+function hookCompleted(eventName: HookEventName, status: HookRunStatus, entries: HookOutputEntry[]): ServerNotification {
+    return {method: "hook/completed", params: {threadId: sessionId, turnId, run: hookRun(eventName, status, entries)}};
 }
 
 function modelRerouted(threadId: string): ServerNotification {

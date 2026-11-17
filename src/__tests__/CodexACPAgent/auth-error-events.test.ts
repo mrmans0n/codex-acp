@@ -9,7 +9,7 @@ import {
     deferred,
 } from "../acp-test-utils";
 import {logger} from "../../Logger";
-import {CodexEventHandler} from "../../CodexEventHandler";
+import {CodexEventHandler, SessionFailureIds} from "../../CodexEventHandler";
 import type {AcpClientConnection} from "../../ACPSessionConnection";
 import {CodexCommands, type CommandHandleResult} from "../../CodexCommands";
 
@@ -132,7 +132,7 @@ describe("CodexEventHandler - auth error events", () => {
         const connection = {
             notify: vi.fn(async (_method: unknown, params: {update: unknown}) => updates.push(params.update)),
         } as unknown as AcpClientConnection;
-        const handler = new CodexEventHandler(connection, state, typed, "epoch", state.subagents, undefined, false, false, false);
+        const handler = new CodexEventHandler(connection, state, typed, new SessionFailureIds("epoch"), state.subagents, undefined, false, false, false);
         await handler.handleSessionScopedNotification({
             method: "error",
             params: {
@@ -326,7 +326,7 @@ describe("CodexEventHandler - auth error events", () => {
         }), {
             message: "Reconnecting... 1/5",
             codexErrorInfo: {responseStreamDisconnected: {httpStatusCode: null}},
-            additionalDetails: "secret retry details",
+            additionalDetails: "  stream disconnected before completion: idle timeout waiting for websocket\n",
             misalignment: null,
         }, true, neutralFailureCapabilities);
 
@@ -341,6 +341,7 @@ describe("CodexEventHandler - auth error events", () => {
                     category: "connection",
                     severity: "warning",
                     title: "Reconnecting... 1/5",
+                    details: "stream disconnected before completion: idle timeout waiting for websocket",
                     actions: [],
                     kind: "transport_lost",
                 },
@@ -461,12 +462,11 @@ describe("CodexEventHandler - auth error events", () => {
         }), {
             message: "Reconnecting... 1/5",
             codexErrorInfo: {responseStreamDisconnected: {httpStatusCode: null}},
-            additionalDetails: "secret retry details",
+            additionalDetails: "  stream disconnected before completion: idle timeout waiting for websocket\n",
             misalignment: null,
         }, true, typedFailureCapabilities);
 
         expect(result).toMatchObject({stopReason: "end_turn"});
-        expect(JSON.stringify(updates)).not.toContain("secret retry details");
         expect(updates).toEqual([{
             sessionUpdate: "session_info_update",
             _meta: {
@@ -479,6 +479,7 @@ describe("CodexEventHandler - auth error events", () => {
                             category: "connection",
                             severity: "warning",
                             title: "Reconnecting... 1/5",
+                            details: "stream disconnected before completion: idle timeout waiting for websocket",
                             actions: [],
                         },
                     },
@@ -487,19 +488,18 @@ describe("CodexEventHandler - auth error events", () => {
         }]);
     });
 
-    it("publishes a safe rate-limit diagnostic while Codex retries HTTP 429", async () => {
+    it("publishes a rate-limit warning with its cause while Codex retries HTTP 429", async () => {
         const {result, updates} = await runPromptWithError(createTestSessionState({
             sessionId: "typed-rate-limit-retry-session",
             account: { type: "apiKey" },
         }), {
             message: "Rate limit reached. Please try again later.",
             codexErrorInfo: {responseStreamDisconnected: {httpStatusCode: 429}},
-            additionalDetails: "secret rate-limit details",
+            additionalDetails: "HTTP 429 Too Many Requests",
             misalignment: null,
         }, true, typedFailureCapabilities);
 
         expect(result).toMatchObject({stopReason: "end_turn"});
-        expect(JSON.stringify(updates)).not.toContain("secret rate-limit details");
         expect(updates).toEqual([{
             sessionUpdate: "session_info_update",
             _meta: {
@@ -512,6 +512,7 @@ describe("CodexEventHandler - auth error events", () => {
                             category: "limit",
                             severity: "warning",
                             title: "Rate limit reached. Please try again later.",
+                            details: "HTTP 429 Too Many Requests",
                             actions: [],
                         },
                     },
@@ -837,7 +838,7 @@ describe("CodexEventHandler - auth error events", () => {
                 error: {
                     message: "Reconnecting... 1/5",
                     codexErrorInfo: {responseStreamDisconnected: {httpStatusCode: null}},
-                    additionalDetails: "secret retry detail",
+                    additionalDetails: "idle timeout waiting for websocket",
                     misalignment: null,
                 },
             },
@@ -857,6 +858,7 @@ describe("CodexEventHandler - auth error events", () => {
                             category: "connection",
                             severity: "warning",
                             title: "Reconnecting... 1/5",
+                            details: "idle timeout waiting for websocket",
                             actions: [],
                         },
                     },
@@ -864,7 +866,6 @@ describe("CodexEventHandler - auth error events", () => {
             },
         }]);
         expect(sessionState.sessionFailure).toMatchObject({id: "completed-turn:error", severity: "warning"});
-        expect(JSON.stringify(updates)).not.toContain("secret retry detail");
     });
 
     it("drains a terminal error that arrives during a local slash command", async () => {

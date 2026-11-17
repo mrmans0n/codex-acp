@@ -4,13 +4,8 @@ import {randomUUID} from "node:crypto";
 import * as path from "node:path";
 import type {AcpSessionUpdate} from "./AcpSessionExtensions";
 import {toV2ConfigOptions} from "./AcpV2ConfigOptions";
+import {STRUCTURED_PLAN_ID} from "./CodexPlanStream";
 import {stripShellPrefix} from "./CommandUtils";
-
-/**
- * `planId` of the structured (tool-driven) plan on v2. A session has at most one such plan and
- * every update replaces it, so a constant id is stable for the whole session.
- */
-export const STRUCTURED_PLAN_ID = "codex-structured-plan";
 
 export function toV2AvailableCommands(commands: acp.AvailableCommand[]): acpV2.AvailableCommand[] {
     return commands.map((command) => {
@@ -68,9 +63,13 @@ export function toV2SessionUpdate(update: AcpSessionUpdate): acpV2.SessionUpdate
         case "notice":
         case "compaction_update":
         case "compaction_summary_chunk":
+        case "session_message":
+        case "session_message_chunk":
             return update;
         case "config_option_update":
             return {...update, configOptions: toV2ConfigOptions(update.configOptions)};
+        // v2 clients always get plan updates, so the event handler already sends `plan_update`.
+        // The legacy shape is still mapped so that it never reaches a v2 client.
         case "plan": {
             const {entries, _meta} = update;
             return {
@@ -165,6 +164,8 @@ export function toV2ToolCallContent(content: acp.ToolCallContent): acpV2.ToolCal
             return content;
         // Same shape on v2; the terminal itself is sent by `toV2SessionUpdates`.
         case "terminal":
+            return content;
+        case "session":
             return content;
         case "diff":
             return {type: "diff", ...toV2Diff(content)};

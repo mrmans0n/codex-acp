@@ -1,5 +1,4 @@
 import type {ModeKind} from "./app-server/ModeKind";
-import type {ServiceTier} from "./app-server/ServiceTier";
 import type {
     ApprovalsReviewer,
     AskForApproval,
@@ -18,7 +17,7 @@ export type SessionMetadata = {
     models: Model[],
     collaborationMode: ModeKind,
     modelProvider?: string | null,
-    currentServiceTier?: ServiceTier | null,
+    currentServiceTier?: string | null,
     threadStatus?: ThreadStatus,
     additionalDirectories: string[],
     skippedMcpServers?: string[],
