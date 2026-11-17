@@ -67,6 +67,12 @@ import {
     JETBRAINS_META_KEY,
     withAirMetadata,
 } from "./AirExtension";
+import {
+    NEUTRAL_SESSION_FAILURE_META_KEY,
+    NeutralSessionFailureLedger,
+    SESSION_FAILURE_VERSION,
+    type SessionFailureFormat,
+} from "./SessionFailureExtension";
 import type {SubagentEventRouter} from "./subagents/SubagentEventRouter";
 import {StandardSubagentEventRouter} from "./subagents/StandardSubagentEventRouter";
 import type {SubagentState} from "./subagents/AcpSubagents";
@@ -94,6 +100,9 @@ type SessionFailurePolicy = {
 };
 
 const MAX_SESSION_FAILURE_TITLE_LENGTH = 240;
+
+/** The `kind` of a warning record that comes from a Codex notice, not from a failure. */
+const SESSION_NOTICE_KIND = "notice";
 
 const SESSION_FAILURE_POLICY: Record<CodexFailureKind, SessionFailurePolicy> = {
     transport_lost: {
@@ -239,6 +248,7 @@ export class SessionFailureIds {
 export class CodexEventHandler {
 
     private readonly sessionState: SessionState;
+    /** The typed failure lane, in either form. Only {@link createSessionFailureMeta} reads the form itself. */
     private readonly supportsTypedSessionFailures: boolean;
     private readonly sessionFailureIds: SessionFailureIds;
     private readonly pendingErrors: ErrorNotification[] = [];
@@ -266,20 +276,27 @@ export class CodexEventHandler {
     /** Connection-level `authStatus` sink; the app-server account push feeds it. */
     private readonly onAccountUpdated: ((notification: AccountUpdatedNotification) => void) | undefined;
 
+    /** The typed failure form. Upstream's own callers pass their boolean AIR flag, which means `air` or `none`. */
+    private readonly sessionFailureFormat: SessionFailureFormat;
+
     constructor(
         connection: AcpClientConnection,
         sessionState: SessionState,
-        supportsTypedSessionFailures: boolean,
+        sessionFailureFormat: SessionFailureFormat | boolean,
         sessionFailureIds: SessionFailureIds,
         subagents: SubagentEventRouter,
         onAccountUpdated: ((notification: AccountUpdatedNotification) => void) | undefined,
         collectTurnDiffs: boolean,
         private readonly supportsCompaction: boolean,
         private readonly supportsNotices: boolean,
+        private readonly neutralFailures: NeutralSessionFailureLedger = new NeutralSessionFailureLedger(),
     ) {
         this.onAccountUpdated = onAccountUpdated;
         this.sessionState = sessionState;
-        this.supportsTypedSessionFailures = supportsTypedSessionFailures;
+        this.sessionFailureFormat = typeof sessionFailureFormat === "boolean"
+            ? (sessionFailureFormat ? "air" : "none")
+            : sessionFailureFormat;
+        this.supportsTypedSessionFailures = this.sessionFailureFormat !== "none";
         this.sessionFailureIds = sessionFailureIds;
         this.session = new ACPSessionConnection(connection, sessionState.sessionId);
         this.renderer = new AcpToolCallRenderer(sessionState.clientCapabilities);
@@ -1239,12 +1256,13 @@ export class CodexEventHandler {
         const previous = this.failuresById.get(id);
         const failure: NonNullable<SessionState["sessionFailure"]> = {
             id,
-            revision: nextSessionFailureRevision(previous, id),
+            revision: this.sessionFailureRevision(previous, id),
             category: policy.category,
             severity,
             title: readableServiceErrorMessage(title),
             ...(details === undefined ? {} : {details}),
             actions: actionsOverride ?? policy.actions,
+            kind,
         };
         this.failuresById.set(id, failure);
         this.failureTurnIdById.set(id, attributeToTurn ? turnId : undefined);
@@ -1261,6 +1279,11 @@ export class CodexEventHandler {
         }
         this.allocatedFailureScopes.add(scope);
         return `${scope}:error:${this.sessionFailureIds.allocate()}`;
+    }
+
+    private sessionFailureRevision(previous: SessionFailure | undefined, id: string): number {
+        const revision = nextSessionFailureRevision(previous, id);
+        return this.sessionFailureFormat === "neutral" ? this.neutralFailures.revision(id, revision) : revision;
     }
 
     /**
@@ -1305,12 +1328,13 @@ export class CodexEventHandler {
             ?? `${this.sessionState.sessionId}:notice:${this.sessionFailureIds.allocate()}`;
         const notice: SessionFailure = {
             id,
-            revision: nextSessionFailureRevision(previous, id),
+            revision: this.sessionFailureRevision(previous, id),
             category: "unknown",
             severity: "warning",
             title,
             ...(details === undefined ? {} : {details}),
             actions: [],
+            kind: SESSION_NOTICE_KIND,
         };
         this.lastSessionNotice = {key, failure: notice};
         return notice;
@@ -1327,11 +1351,16 @@ export class CodexEventHandler {
     private createSessionFailureMeta(
         failure: NonNullable<SessionState["sessionFailure"]>,
     ): Record<string, unknown> {
+        if (this.sessionFailureFormat === "neutral") {
+            return {[NEUTRAL_SESSION_FAILURE_META_KEY]: {version: SESSION_FAILURE_VERSION, ...failure}};
+        }
+        // The AIR record has no `kind`.
+        const {kind: _kind, ...airFailure} = failure;
         return {
             [JETBRAINS_META_KEY]: {
                 [AIR_META_KEY]: {
                     [AIR_EXTENSION_VERSION_KEY]: AIR_EXTENSION_VERSION,
-                    [AIR_SESSION_FAILURE_KEY]: failure,
+                    [AIR_SESSION_FAILURE_KEY]: airFailure,
                 },
             },
         };

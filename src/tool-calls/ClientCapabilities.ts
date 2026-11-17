@@ -4,10 +4,12 @@ import {
     AIR_DIFF_PATCH_KEY,
     AIR_PLAN_CONTENT_DELTA_KEY,
     AIR_RAW_INPUT_RENDERING_KEY,
+    AIR_SESSION_FAILURE_KEY,
     clientSupportsAirCapability,
     isAirClient,
 } from "../AirExtension";
 import {clientRequestsNeutralDiffPatch} from "../GitPatch";
+import {clientRequestsNeutralSessionFailure, type SessionFailureFormat} from "../SessionFailureExtension";
 
 /** The `_meta` key of a command output chunk. */
 type TerminalOutputKey = "terminal_output" | "terminal_output_delta";
@@ -38,6 +40,7 @@ type ClientCapabilityValues = {
     readonly planUpdates: boolean;
     readonly air: AirCapabilities;
     readonly diffPatchFormat: DiffPatchFormat;
+    readonly sessionFailureFormat: SessionFailureFormat;
     readonly permissionPromptFields: boolean;
 };
 
@@ -59,6 +62,7 @@ export class ClientCapabilities {
         planUpdates: false,
         air: {rawInputRendering: false, planContentDelta: false, diffPatch: false},
         diffPatchFormat: "none",
+        sessionFailureFormat: "none",
         permissionPromptFields: false,
     });
 
@@ -78,6 +82,7 @@ export class ClientCapabilities {
     readonly planUpdates: boolean;
     readonly air: AirCapabilities;
     readonly diffPatchFormat: DiffPatchFormat;
+    readonly sessionFailureFormat: SessionFailureFormat;
     /** A permission request has its own `title` and `description` (ACP v2). */
     readonly permissionPromptFields: boolean;
 
@@ -91,6 +96,7 @@ export class ClientCapabilities {
         this.planUpdates = values.planUpdates;
         this.air = values.air;
         this.diffPatchFormat = values.diffPatchFormat;
+        this.sessionFailureFormat = values.sessionFailureFormat;
         this.permissionPromptFields = values.permissionPromptFields;
     }
 
@@ -115,6 +121,10 @@ export class ClientCapabilities {
             },
             // A client that declares both forms gets only the client-neutral one.
             diffPatchFormat: clientRequestsNeutralDiffPatch(capabilities) ? "neutral" : diffPatch ? "air" : "none",
+            // Likewise, and the client-neutral form selects the whole typed failure lane.
+            sessionFailureFormat: clientRequestsNeutralSessionFailure(capabilities)
+                ? "neutral"
+                : clientSupportsAirCapability(capabilities, AIR_SESSION_FAILURE_KEY) ? "air" : "none",
             permissionPromptFields: false,
         });
     }
@@ -138,6 +148,8 @@ export class ClientCapabilities {
             planUpdates: true,
             air: {rawInputRendering: false, planContentDelta: false, diffPatch: false},
             diffPatchFormat: "acpV2",
+            // ACP v2 has its own terminal failure state, so it ignores the client-neutral opt-in.
+            sessionFailureFormat: clientSupportsAirCapability(capabilities, AIR_SESSION_FAILURE_KEY) ? "air" : "none",
             permissionPromptFields: true,
         });
     }
