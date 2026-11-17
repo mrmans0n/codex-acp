@@ -352,7 +352,9 @@ test("the committed sync review matches recomputed classifications and has expli
   // An absorbed patch (upstream released an equivalent change) can only be dropped.
   assert.ok(review.patches.every((patch) => patch.classification === "overlap" ||
     (patch.classification === "absorbed" && patch.resolution.action === "drop")));
-  assert.ok(review.patches.every((patch) => patch.resolution.automatic === false));
+  // A patch that an earlier sync dropped stays dropped automatically; every other resolution is manual.
+  assert.ok(review.patches.every((patch) => patch.resolution.automatic === false ||
+    (patch.disposition === "dropped" && patch.resolution.action === "drop")));
   // Classification computes the patch-id of every upstream commit that touches a ledger path, which
   // takes about 4 s on v2.2.2 and 5 s on v2.3.0 locally: above vitest's 5 s default.
 }, 120_000);
