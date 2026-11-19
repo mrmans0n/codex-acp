@@ -2,7 +2,7 @@ import { describe, it, expect, vi, beforeEach } from 'vitest';
 import type { SessionState } from '../../CodexAcpServer';
 import type { ServerNotification } from '../../app-server';
 import { AcpToolCallRenderer } from '../../tool-calls/AcpToolCallRenderer';
-import { ClientCapabilities } from '../../tool-calls/ClientCapabilities';
+import { ClientCapabilities, type DiffPatchFormat } from '../../tool-calls/ClientCapabilities';
 import { FileChangeReporter } from '../../tool-calls/reporters/FileChangeReporter';
 
 import type { ThreadItem } from '../../app-server/v2';
@@ -11,9 +11,24 @@ import {AgentMode} from "../../AgentMode";
 
 import {DIFF_PATCH_MAX_BYTES} from '../../GitPatch';
 
-async function createFileChangeUpdate(item: ThreadItem & {type: 'fileChange'}, diffPatch = false) {
-    return new AcpToolCallRenderer(ClientCapabilities.DEFAULT).render(FileChangeReporter.started(item, diffPatch ? "air" : "none"));
+async function createFileChangeUpdate(item: ThreadItem & {type: 'fileChange'}, diffPatch: boolean | DiffPatchFormat = false) {
+    const format: DiffPatchFormat = diffPatch === true ? "air" : diffPatch === false ? "none" : diffPatch;
+    return new AcpToolCallRenderer(ClientCapabilities.DEFAULT).render(FileChangeReporter.started(item, format));
 }
+
+/** The patch forms of ACP v1: the AIR extension and the client-neutral top-level `_meta.diffPatch`. */
+const PATCH_FORMS = [
+    {
+        format: 'air' as const,
+        meta: (kind: string) => ({kind, jetbrains: {air: {version: 1, diffPatch: {version: 1, format: 'git_patch'}}}}),
+        patchText: (content: any): string => content._meta.jetbrains.air.diffPatch.text,
+    },
+    {
+        format: 'neutral' as const,
+        meta: (kind: string) => ({kind, diffPatch: {version: 1, format: 'git_patch'}}),
+        patchText: (content: any): string => content._meta.diffPatch.text,
+    },
+];
 
 const { mockFiles, mockReadDelays, mockFileContent, delayMockFileRead, removeMockFile, clearMockFiles } = vi.hoisted(() => {
     const files = new Map<string, string>();
@@ -447,7 +462,7 @@ Moved to: /test/project/NewFile.kt`,
         });
     });
 
-    it('should send compact git patches when the client supports diffPatch', async () => {
+    it.each(PATCH_FORMS)('should send compact git patches in the $format form when the client supports diffPatch', async ({format, meta, patchText}) => {
         const updateEvent = await createFileChangeUpdate({
             type: 'fileChange',
             id: 'file-change-patches',
@@ -461,28 +476,18 @@ Moved to: /test/project/NewFile.kt`,
                 },
             ],
             status: 'completed',
-        }, true);
+        }, format);
 
         expect(updateEvent.sessionUpdate).toBe('tool_call');
         if (updateEvent.sessionUpdate !== 'tool_call') throw new Error('Expected a tool call');
         const contentBlocks = updateEvent.content ?? [];
         expect(contentBlocks).toHaveLength(3);
-        for (const content of contentBlocks) {
-            expect(content).toMatchObject({
-                type: 'diff',
-                oldText: null,
-                newText: '',
-                _meta: {
-                    jetbrains: {
-                        air: {
-                            version: 1,
-                            diffPatch: {version: 1, format: 'git_patch'},
-                        },
-                    },
-                },
-            });
-        }
-        const patches = contentBlocks.map((block) => (block._meta as any).jetbrains.air.diffPatch.text);
+        contentBlocks.forEach((content, index) => {
+            expect(content).toMatchObject({type: 'diff', oldText: null, newText: '', _meta: meta(['add', 'delete', 'update'][index]!)});
+            // Each form carries only its own wrapper.
+            expect(Object.keys(content._meta!).sort()).toEqual(['kind', format === 'air' ? 'jetbrains' : 'diffPatch'].sort());
+        });
+        const patches = contentBlocks.map(patchText);
         expect(patches[0]).toContain('--- /dev/null');
         expect(patches[1]).toContain('+++ /dev/null');
         expect(patches[2]).toContain('@@ -1 +1 @@');
@@ -508,7 +513,7 @@ Moved to: /test/project/NewFile.kt`,
         ]);
     });
 
-    it('sends no diff for a change whose text is larger than the limit', async () => {
+    it.each(PATCH_FORMS)('sends no diff in the $format form for a change whose text is larger than the limit', async ({format}) => {
         const text = 'x'.repeat(DIFF_PATCH_MAX_BYTES + 1);
         const update = await createFileChangeUpdate({
             type: 'fileChange',
@@ -518,7 +523,7 @@ Moved to: /test/project/NewFile.kt`,
                 {path: '/w/small.txt', kind: {type: 'add'}, diff: 'ok\n'},
             ],
             status: 'completed',
-        }, true);
+        }, format);
 
         if (update.sessionUpdate !== 'tool_call') throw new Error('Expected a tool call');
         expect(update.content?.map(content => content.type === 'diff' ? content.path : null)).toEqual(['/w/small.txt']);
@@ -548,93 +553,6 @@ Moved to: /test/project/NewFile.kt`,
             });
         });
 
-        it.each([
-            {name: 'an empty added file', kind: {type: 'add' as const}, diff: '', expected: {oldText: null, newText: ''}},
-            {name: 'an empty deleted file', kind: {type: 'delete' as const}, diff: '', expected: {oldText: '', newText: ''}},
-            {name: 'a binary added file', kind: {type: 'add' as const}, diff: 'PNG\0data', expected: {oldText: null, newText: 'PNG\0data'}},
-        ])('sends the standard diff for $name', async ({kind, diff, expected}) => {
-            const content = onlyContent(await createFileChangeUpdate({
-                type: 'fileChange',
-                id: 'fallback',
-                changes: [{path: '/w/File', kind, diff}],
-                status: 'completed',
-            }, true));
-
-            expect(content).toMatchObject({type: 'diff', path: '/w/File', ...expected});
-            expect(JSON.stringify(content)).not.toContain('diffPatch');
-        });
-
-        it('sends the standard diff when the Codex hunks cannot form a valid patch', async () => {
-            mockFileContent('/w/Edit.kt', 'old\n');
-            const content = onlyContent(await createFileChangeUpdate({
-                type: 'fileChange',
-                id: 'fallback-update',
-                changes: [{
-                    path: '/w/Edit.kt',
-                    kind: {type: 'update', move_path: null},
-                    diff: 'Index: /w/Edit.kt\n@@ -1 +1 @@\n-old\n+new\n',
-                }],
-                status: 'completed',
-            }, true));
-
-            expect(content).toEqual({
-                type: 'diff',
-                oldText: 'old\n',
-                newText: 'new\n',
-                path: '/w/Edit.kt',
-                _meta: {kind: 'update'},
-            });
-        });
-
-        it('sends the standard diff when a hunk has a marker line other than the final newline marker', async () => {
-            mockFileContent('/w/Edit.kt', 'old');
-            const content = onlyContent(await createFileChangeUpdate({
-                type: 'fileChange',
-                id: 'fallback-marker',
-                changes: [{
-                    path: '/w/Edit.kt',
-                    kind: {type: 'update', move_path: null},
-                    diff: '@@ -1 +1 @@\n-old\n\\ injected\n+new\n',
-                }],
-                status: 'completed',
-            }, true));
-
-            expect(content).toEqual({
-                type: 'diff',
-                oldText: 'old',
-                newText: 'new\n',
-                path: '/w/Edit.kt',
-                _meta: {kind: 'update'},
-            });
-        });
-
-        it('sends the standard diff for a pure rename', async () => {
-            const content = onlyContent(await createFileChangeUpdate({
-                type: 'fileChange',
-                id: 'pure-rename',
-                changes: [{path: '/w/Old.kt', kind: {type: 'update', move_path: '/w/New.kt'}, diff: ''}],
-                status: 'completed',
-            }, true));
-
-            expect(content).toMatchObject({type: 'diff', oldText: '', newText: '', path: '/w/New.kt'});
-        });
-
-        it('uses the target path of a rename in the patch block', async () => {
-            const content = onlyContent(await createFileChangeUpdate({
-                type: 'fileChange',
-                id: 'rename',
-                changes: [{
-                    path: '/w/Old.kt',
-                    kind: {type: 'update', move_path: '/w/New.kt'},
-                    diff: '@@ -1 +1 @@\n-old\n+new\n\n\nMoved to: /w/New.kt',
-                }],
-                status: 'completed',
-            }, true));
-
-            expect(content.type === 'diff' && content.path).toBe('/w/New.kt');
-            expect((content._meta as any).jetbrains.air.diffPatch.text).toContain('rename from w/Old.kt\nrename to w/New.kt\n');
-        });
-
         it('uses the target path when the moved file is already patched', async () => {
             mockFileContent('/w/Old.kt', 'new\n');
             const content = onlyContent(await createFileChangeUpdate({
@@ -645,6 +563,95 @@ Moved to: /test/project/NewFile.kt`,
             }, false));
 
             expect(content).toMatchObject({oldText: 'old\n', newText: 'new\n', path: '/w/New.kt'});
+        });
+
+        describe.each(PATCH_FORMS)('in the $format form', ({format, patchText}) => {
+            it.each([
+                {name: 'an empty added file', kind: {type: 'add' as const}, diff: '', expected: {oldText: null, newText: ''}},
+                {name: 'an empty deleted file', kind: {type: 'delete' as const}, diff: '', expected: {oldText: '', newText: ''}},
+                {name: 'a binary added file', kind: {type: 'add' as const}, diff: 'PNG\0data', expected: {oldText: null, newText: 'PNG\0data'}},
+            ])('sends the standard diff for $name', async ({kind, diff, expected}) => {
+                const content = onlyContent(await createFileChangeUpdate({
+                    type: 'fileChange',
+                    id: 'fallback',
+                    changes: [{path: '/w/File', kind, diff}],
+                    status: 'completed',
+                }, format));
+
+                expect(content).toMatchObject({type: 'diff', path: '/w/File', ...expected});
+                expect(JSON.stringify(content)).not.toContain('diffPatch');
+            });
+
+            it('sends the standard diff when the Codex hunks cannot form a valid patch', async () => {
+                mockFileContent('/w/Edit.kt', 'old\n');
+                const content = onlyContent(await createFileChangeUpdate({
+                    type: 'fileChange',
+                    id: 'fallback-update',
+                    changes: [{
+                        path: '/w/Edit.kt',
+                        kind: {type: 'update', move_path: null},
+                        diff: 'Index: /w/Edit.kt\n@@ -1 +1 @@\n-old\n+new\n',
+                    }],
+                    status: 'completed',
+                }, format));
+
+                expect(content).toEqual({
+                    type: 'diff',
+                    oldText: 'old\n',
+                    newText: 'new\n',
+                    path: '/w/Edit.kt',
+                    _meta: {kind: 'update'},
+                });
+            });
+
+            it('sends the standard diff when a hunk has a marker line other than the final newline marker', async () => {
+                mockFileContent('/w/Edit.kt', 'old');
+                const content = onlyContent(await createFileChangeUpdate({
+                    type: 'fileChange',
+                    id: 'fallback-marker',
+                    changes: [{
+                        path: '/w/Edit.kt',
+                        kind: {type: 'update', move_path: null},
+                        diff: '@@ -1 +1 @@\n-old\n\\ injected\n+new\n',
+                    }],
+                    status: 'completed',
+                }, format));
+
+                expect(content).toEqual({
+                    type: 'diff',
+                    oldText: 'old',
+                    newText: 'new\n',
+                    path: '/w/Edit.kt',
+                    _meta: {kind: 'update'},
+                });
+            });
+
+            it('sends the standard diff for a pure rename', async () => {
+                const content = onlyContent(await createFileChangeUpdate({
+                    type: 'fileChange',
+                    id: 'pure-rename',
+                    changes: [{path: '/w/Old.kt', kind: {type: 'update', move_path: '/w/New.kt'}, diff: ''}],
+                    status: 'completed',
+                }, format));
+
+                expect(content).toMatchObject({type: 'diff', oldText: '', newText: '', path: '/w/New.kt'});
+            });
+
+            it('uses the target path of a rename in the patch block', async () => {
+                const content = onlyContent(await createFileChangeUpdate({
+                    type: 'fileChange',
+                    id: 'rename',
+                    changes: [{
+                        path: '/w/Old.kt',
+                        kind: {type: 'update', move_path: '/w/New.kt'},
+                        diff: '@@ -1 +1 @@\n-old\n+new\n\n\nMoved to: /w/New.kt',
+                    }],
+                    status: 'completed',
+                }, format));
+
+                expect(content.type === 'diff' && content.path).toBe('/w/New.kt');
+                expect(patchText(content)).toContain('rename from w/Old.kt\nrename to w/New.kt\n');
+            });
         });
     });
 });
