@@ -1,29 +1,27 @@
 {
   "schemaVersion": 2,
-  "fromTag": "v2.6.0",
-  "toTag": "v2.7.0",
-  "toCommit": "7c98a1608022cbb2b7e425ae7a1df5fde86c6ff2",
+  "fromTag": "v2.7.0",
+  "toTag": "v2.8.0",
+  "toCommit": "ad09e0ead18511a65a0761cac832aa3087219b10",
   "canonicalHead": null,
   "patches": [
     {
       "name": "goal-opt-in",
       "originalCommit": "97aa595ba69c62e896375ea2442358d45d66af74",
-      "commit": "d173ce85cc34a2c77bbbfc710c55236f82054d9c",
-      "appliedCommit": "d173ce85cc34a2c77bbbfc710c55236f82054d9c",
+      "commit": "0baf53fb3da82c6d4a7e99425a24b836f7d871d9",
+      "appliedCommit": "0baf53fb3da82c6d4a7e99425a24b836f7d871d9",
       "disposition": "active",
-      "patchId": "bbe0bd358ba60e749b68fe069fc10519325762fd",
+      "patchId": "6269f3d9c1e1d52072099eb637690df4955df940",
       "classification": "overlap",
       "overlappingFiles": [
         "docs/air-extensions.md",
         "src/CodexAcpServer.ts",
-        "src/CodexEventHandler.ts",
-        "src/__tests__/CodexACPAgent/initialize.test.ts"
+        "src/CodexEventHandler.ts"
       ],
       "resolution": {
-        "action": "adapt",
-        "commit": "0baf53fb3da82c6d4a7e99425a24b836f7d871d9",
+        "action": "retain",
         "automatic": false,
-        "rationale": "Upstream v2.7.0 (#760) stops advertising sessionCapabilities.subagents to clients that are not AIR and adds an initialize test for it (it.each, standard client and AIR) at the position of the goal opt-in initialize test, so d173ce8 conflicted in initialize.test.ts only. The adaptation 0baf53f (stacked on the exact tag) keeps both tests; its sorted added/removed lines are identical to d173ce8. Upstream v2.7.0 does not change publishGoalSessionInfo, goalSessionInfoUpdate, goal control or the goal capability, so the non-AIR ACP v1 _meta.goal opt-in keeps its contract. The goal tests and the initialize tests pass at the replay point and on the integration.",
+        "rationale": "Overlap through src/CodexAcpServer.ts, src/CodexEventHandler.ts and docs/air-extensions.md. Upstream v2.8.0 changes the event handler for ACP v2 background terminals and plan removal (#777) and the server for MCP-over-ACP, SDK 2.7/2.8 rules and v2 background work (#769, #771, #775, #777), but does not change publishGoalSessionInfo, goalSessionInfoUpdate, ThreadGoalSnapshot, goal control, the goal capability in ClientCapabilities or the _meta.goal initialize advert. The v2.7.0 adaptation 0baf53f replays cleanly with an unchanged contract; the goal and initialize tests pass on the integration.",
         "tests": [
           "src/__tests__/CodexACPAgent/thread-goal-events.test.ts",
           "src/__tests__/CodexACPAgent/initialize.test.ts"
@@ -40,12 +38,13 @@
       "classification": "overlap",
       "overlappingFiles": [
         "src/CodexAcpServer.ts",
-        "src/__tests__/CodexACPAgent/initialize.test.ts"
+        "src/async-tasks/CodexBackgroundTerminalTasks.ts"
       ],
       "resolution": {
-        "action": "retain",
+        "action": "adapt",
+        "commit": "ed0e3e28ab7504516b2f10d657fb5f8181a10d37",
         "automatic": false,
-        "rationale": "Overlap only through src/CodexAcpServer.ts and initialize.test.ts. Upstream v2.7.0 changes the server's subagent capability advert (#760), its session failure ids (#767), the fast service tier (#327) and subagent history replay (#760), but not createAsyncTasks, CodexBackgroundTerminalTasks, AsyncTaskExtension, ClientCapabilities or the _meta[\"async-tasks\"] initialize advert. 808ea06 replays cleanly with an unchanged contract; its tests pass on the integration.",
+        "rationale": "Upstream v2.8.0 (#777) adds two constructor parameters to CodexBackgroundTerminalTasks after the session connection (standard: ACP v2 background terminal reporting; standardChildren) and passes them from createAsyncTasks, where 808ea06 had added its airClient parameter and argument, so the pick conflicted there. The adaptation ed0e3e2 (stacked on the goal-opt-in binding) keeps upstream's parameters and arguments and appends airClient after them, still defaulting to enabled, so upstream's callers keep their meaning; its sorted added/removed lines are identical to 808ea06. On ACP v1 standard is false, so a client that opts in with _meta[\"async-tasks\"] keeps the provider-neutral spawn, stop and terminal-state events without the AIR backgrounded marker (#777's v1 branch still announces through the enabled flag, which the neutral opt-in sets). On ACP v2 asyncTasks still follows upstream's AIR rule; the new v2 state_update.background list and terminal/cancel are upstream behaviour and do not absorb the v1 extension. The async-task, initialize and tool-call contract tests pass at the replay point and on the integration.",
         "tests": [
           "src/__tests__/CodexACPAgent/async-tasks.test.ts",
           "src/__tests__/CodexACPAgent/initialize.test.ts",
@@ -56,19 +55,19 @@
     {
       "name": "goal-before-first-prompt",
       "originalCommit": "9d2c300ec82da759d3a1606962c04304d2e60fa7",
-      "commit": "8f65eb87351c4937ac883c60723a40922cf1df76",
-      "appliedCommit": "8f65eb87351c4937ac883c60723a40922cf1df76",
+      "commit": "1716ad587dd692b9c6054415d0360b890d637c03",
+      "appliedCommit": "1716ad587dd692b9c6054415d0360b890d637c03",
       "disposition": "active",
-      "patchId": "12a196c177802e69a5e218fcb69a59be623af906",
+      "patchId": "c2c7ef0e302da773b05b85aeca918b8e59a6c3ef",
       "classification": "overlap",
       "overlappingFiles": [
-        "src/CodexAcpServer.ts"
+        "src/CodexAcpServer.ts",
+        "src/__tests__/CodexACPAgent/CodexAcpClient.test.ts"
       ],
       "resolution": {
-        "action": "adapt",
-        "commit": "1716ad587dd692b9c6054415d0360b890d637c03",
+        "action": "retain",
         "automatic": false,
-        "rationale": "8f65eb8 replays cleanly, but upstream v2.7.0 (#767) replaces the event handler's session failure epoch with SessionFailureIds, one counter per connection that every prompt's handler shares. The pre-prompt goal subscription still passed this.sessionFailureEpoch, which no longer exists: npm run typecheck failed, and at run time the first notice or failure of goal work set before the first prompt threw. The adaptation 1716ad5 passes this.sessionFailureIds like upstream's prompt subscription; every other line is unchanged, and the prompt subscription it mirrors is otherwise identical between v2.6.0 and v2.7.0 (the new router argument of #760 is inside the shared router factory). The hook reports of #767 reach it through the same event handler. A new test (a hook that blocks goal work set before the first prompt is reported as a typed AIR session failure) fails with the old argument.",
+        "rationale": "Overlap through src/CodexAcpServer.ts and CodexAcpClient.test.ts. The pre-prompt goal subscription mirrors the prompt subscription, whose CodexEventHandler construction and subscribeToSessionEvents arguments are identical in v2.7.0 and v2.8.0; #777 only moves background-terminal reconciliation inside the shared event handler and #775 adds v2 prompt idempotency inside promptV2. Upstream's getAccount mocks gain userId (#780), which the patch's tests already pass through the shared helpers. 1716ad5 replays cleanly with an unchanged contract; its tests pass on the integration.",
         "tests": [
           "src/__tests__/CodexACPAgent/CodexAcpClient.test.ts"
         ]
@@ -77,35 +76,66 @@
     {
       "name": "session-system-prompt-append",
       "originalCommit": "fc0eb68e9be4d407397cd6bf22620f304afaab96",
-      "commit": "57fdf7972d6414122241b04e0e51398c0a2b536c",
-      "appliedCommit": "57fdf7972d6414122241b04e0e51398c0a2b536c",
+      "commit": "904a70d49d475624477126e3e4bd003a933c44e9",
+      "appliedCommit": "904a70d49d475624477126e3e4bd003a933c44e9",
       "disposition": "active",
-      "patchId": "661d855c14e179f323a7e1f1db6424d969c593b4",
+      "patchId": "7bd26ffb2efc4027f5e43ed1ed7e465d6d67eb8a",
       "classification": "overlap",
       "overlappingFiles": [
         "README.md",
         "docs/air-extensions.md",
         "src/CodexAcpClient.ts",
         "src/CodexAcpServer.ts",
-        "src/SessionFork.ts",
+        "src/JsonSnapshot.ts",
         "src/__tests__/CodexACPAgent/data/initialize-v1-routed-response.json",
-        "src/__tests__/CodexACPAgent/initialize.test.ts",
-        "src/__tests__/acp-test-utils.ts",
         "src/__tests__/scenarios/baseline.ts",
-        "src/__tests__/scenarios/data/air/plan-deltas-and-turn-plan.jsonl"
+        "src/__tests__/scenarios/data/air/agent-message-and-reasoning.jsonl",
+        "src/__tests__/scenarios/data/air/background-terminal.jsonl",
+        "src/__tests__/scenarios/data/air/collab-agent.jsonl",
+        "src/__tests__/scenarios/data/air/collab-controls.jsonl",
+        "src/__tests__/scenarios/data/air/command-approval.jsonl",
+        "src/__tests__/scenarios/data/air/command-failed.jsonl",
+        "src/__tests__/scenarios/data/air/command-output-stdin.jsonl",
+        "src/__tests__/scenarios/data/air/command-without-streamed-output.jsonl",
+        "src/__tests__/scenarios/data/air/context-compaction.jsonl",
+        "src/__tests__/scenarios/data/air/dynamic-tool.jsonl",
+        "src/__tests__/scenarios/data/air/file-change-approval.jsonl",
+        "src/__tests__/scenarios/data/air/file-changes.jsonl",
+        "src/__tests__/scenarios/data/air/fuzzy-file-search.jsonl",
+        "src/__tests__/scenarios/data/air/goal-update.jsonl",
+        "src/__tests__/scenarios/data/air/guardian-review.jsonl",
+        "src/__tests__/scenarios/data/air/history-replay.jsonl",
+        "src/__tests__/scenarios/data/air/image-generation.jsonl",
+        "src/__tests__/scenarios/data/air/image-view.jsonl",
+        "src/__tests__/scenarios/data/air/late-subagent-update.jsonl",
+        "src/__tests__/scenarios/data/air/mcp-elicitation.jsonl",
+        "src/__tests__/scenarios/data/air/mcp-startup-failure.jsonl",
+        "src/__tests__/scenarios/data/air/mcp-tool-approval.jsonl",
+        "src/__tests__/scenarios/data/air/mcp-tool.jsonl",
+        "src/__tests__/scenarios/data/air/mcp-url-elicitation.jsonl",
+        "src/__tests__/scenarios/data/air/native-subagent-session.jsonl",
+        "src/__tests__/scenarios/data/air/nested-subagent-session.jsonl",
+        "src/__tests__/scenarios/data/air/network-and-sandbox-approval.jsonl",
+        "src/__tests__/scenarios/data/air/plan-deltas-and-turn-plan.jsonl",
+        "src/__tests__/scenarios/data/air/plan-review-permission.jsonl",
+        "src/__tests__/scenarios/data/air/plan-stream.jsonl",
+        "src/__tests__/scenarios/data/air/read-search-list.jsonl",
+        "src/__tests__/scenarios/data/air/subagent-activity.jsonl",
+        "src/__tests__/scenarios/data/air/web-search.jsonl"
       ],
       "resolution": {
         "action": "adapt",
-        "commit": "904a70d49d475624477126e3e4bd003a933c44e9",
+        "commit": "4573e4f6ef2f58dc01c5f5a9cabc40679b4bb1d8",
         "automatic": false,
-        "rationale": "Upstream v2.7.0 (#760) makes the scenario baseline strip sessionCapabilities.subagents from each recorded initialize response and documents it next to the baseline comment that 57fdf79 changes, and #767 changes the CodexEventHandler import next to the patch's SessionInstructions import. The adaptation 904a70d (stacked on the exact candidate at its replay point) keeps upstream's subagents removal with the patch's _meta.systemPrompt capability in the baseline and both notes in its comment; its sorted added/removed lines are identical to 57fdf79. Upstream v2.7.0 only adds configOptions to the destructuring of newSessionV2/resumeSessionV2 and does not change the systemPrompt conversion that the ACP v1 _meta.systemPrompt.append alias feeds. The session instruction, initialize and scenario tests pass at the replay point and on the integration.",
+        "rationale": "904a70d conflicted in four places. #775 rejects a fork at a session cursor at the top of forkSession, where the patch maps the ACP v1 _meta.systemPrompt.append alias: the cursor check stays first and the alias mapping follows unchanged. #778 notes the new configOptions order in the scenario baseline comment and docs/air-extensions.md, and #771 rewrites the README MCP line, next to the patch's notes: both are kept. #742 replaces JsonSnapshot's recursive walk with an explicit container stack; the patch's MAX_DEPTH 64 headroom for native JSON.stringify existed only because of that recursion. On darwin-arm64 (Node 26), upstream's new test (the deepest value JSON.stringify accepts) fails with a RangeError on the v2.7.0 recursive walk both at 256 and with the downstream 64, and passes on #742's walk at 256, so the adaptation 4573e4f drops that hunk and JsonSnapshot now follows upstream. Apart from that hunk (one removed and three added lines) its sorted added/removed lines are identical to 904a70d. Upstream does not change the systemPrompt conversion that the alias feeds; newSessionV2, resumeSessionV2 and forkSessionV2 only drop configOptions. The session instruction, JsonSnapshot, initialize and scenario tests pass at the replay point and on the integration.",
         "tests": [
           "src/__tests__/SessionInstructions.test.ts",
           "src/__tests__/CodexACPAgent/session-instructions.test.ts",
           "src/__tests__/CodexACPAgent/session-instructions-native.test.ts",
           "src/__tests__/CodexACPAgent/initialize.test.ts",
           "src/__tests__/CodexACPAgent/data/initialize-v1-routed-response.json",
-          "src/__tests__/scenarios/client-profiles.test.ts"
+          "src/__tests__/scenarios/client-profiles.test.ts",
+          "src/__tests__/JsonSnapshot.test.ts"
         ]
       }
     },
@@ -120,12 +150,12 @@
       "overlappingFiles": [
         "docs/air-extensions.md",
         "src/CodexAcpServer.ts",
-        "src/__tests__/CodexACPAgent/initialize.test.ts"
+        "src/__tests__/CodexACPAgent/session-index.test.ts"
       ],
       "resolution": {
         "action": "retain",
         "automatic": false,
-        "rationale": "Overlap only through src/CodexAcpServer.ts, initialize.test.ts and tool-call-contract.test.ts. Upstream v2.7.0 does not change SessionIndex, SessionIndexService, SessionListSubscriptions, publishAirSessionMetadata or the archive delivery fence that the v2.6.0 adaptation 688db7e publishes in; #760 gates sessionCapabilities.subagents with the same isAirClient helper the neutral index uses, without touching the session index advert. 688db7e replays cleanly with an unchanged contract; its tests pass on the integration.",
+        "rationale": "Overlap through src/CodexAcpServer.ts, session-index.test.ts and docs/air-extensions.md. Upstream v2.8.0 does not change SessionIndex, SessionIndexService, SessionListSubscriptions, publishAirSessionMetadata or the archive delivery fence; its session-index test change is the userId field of the getAccount mock (#780). The v2 router's new catch-all for unimplemented methods (#775) is registered after the session list subscription routes. 688db7e replays cleanly with an unchanged contract; its tests pass on the integration.",
         "tests": [
           "src/__tests__/CodexACPAgent/session-index.test.ts",
           "src/__tests__/CodexACPAgent/initialize.test.ts",
@@ -136,21 +166,23 @@
     {
       "name": "neutral-codex-hook-review",
       "originalCommit": "4d4340534856c343cb68a295a9d48177cf079ee7",
-      "commit": "2662df652707ac2c46068669a48737511f6eaf40",
-      "appliedCommit": "2662df652707ac2c46068669a48737511f6eaf40",
+      "commit": "a2b37d3513d138f12c2b79842b54e65bda687621",
+      "appliedCommit": "a2b37d3513d138f12c2b79842b54e65bda687621",
       "disposition": "active",
-      "patchId": "f1e2def919cf3b3c9abaf2c476994e6ad71649a5",
+      "patchId": "983bbe7728009b80301062ad3961bf757e22d56f",
       "classification": "overlap",
       "overlappingFiles": [
         "docs/air-extensions.md",
+        "src/AcpAgentRouter.ts",
         "src/CodexAcpServer.ts",
-        "src/__tests__/CodexACPAgent/initialize.test.ts"
+        "src/CodexAppServerClient.ts",
+        "src/__tests__/scenarios/client-profiles.test.ts",
+        "src/index.ts"
       ],
       "resolution": {
-        "action": "adapt",
-        "commit": "a2b37d3513d138f12c2b79842b54e65bda687621",
+        "action": "retain",
         "automatic": false,
-        "rationale": "Upstream v2.7.0 (#760) adds an initialize test (sessionCapabilities.subagents only for AIR) at the position of 2662df6's hook review initialize tests. The adaptation a2b37d3 keeps both; its sorted added/removed lines are identical to 2662df6. Upstream's #767 reports hook runs that block or stop Codex from hook/completed notifications in the event handler, independently of the _codex/hooks/list and _codex/hooks/trust review, the review token and the dispatch gate, which v2.7.0 does not touch (no change to AcpAgentRouter, CodexAppServerClient, CodexHookReview, CodexHookTrust or AppServerRecovery). The recovery, initialize and client profile tests pass at the replay point and on the integration.",
+        "rationale": "Overlap through AcpAgentRouter.ts, CodexAppServerClient.ts, index.ts, CodexAcpServer.ts and client-profiles.test.ts. Upstream v2.8.0 passes an MCP-over-ACP bridge to createAgent and CodexAcpClient (#771), adds experimentalFeature/list to CodexAppServerClient and a v2 catch-all for unimplemented methods (#775), but does not change CodexHookReview, CodexHookTrust, AppServerRecovery or the v1 _codex/hooks/list and _codex/hooks/trust routes, which stay on the v1 chain. a2b37d3 replays cleanly with an unchanged contract; the recovery, initialize and client profile tests pass on the integration.",
         "tests": [
           "src/__tests__/app-server-recovery/recovery.test.ts",
           "src/__tests__/CodexACPAgent/initialize.test.ts",
@@ -168,12 +200,13 @@
       "classification": "overlap",
       "overlappingFiles": [
         "src/CodexAcpClient.ts",
-        "src/CodexAcpServer.ts"
+        "src/CodexAcpServer.ts",
+        "src/CodexAppServerClient.ts"
       ],
       "resolution": {
         "action": "retain",
         "automatic": false,
-        "rationale": "Overlap through src/CodexAcpServer.ts and src/CodexAcpClient.ts. Upstream v2.7.0 only drops the ServiceTier casts of the session config builders in CodexAcpClient (#327) and does not change authenticate and its finally block, the provider restart, goal control, steering, CodexAppServerClient, CodexHookReview or GoalExtension. The #767 hook reports only read hook/completed notifications. 85c9871 replays cleanly with an unchanged contract; the recovery tests pass on the integration.",
+        "rationale": "Overlap through src/CodexAcpServer.ts, src/CodexAcpClient.ts and src/CodexAppServerClient.ts. Upstream v2.8.0 adds the MCP-over-ACP registration to session setup in CodexAcpClient (#771), v2 prompt idempotency receipts (#775) and experimentalFeature/list, but does not change authenticate and its finally block, the provider restart, goal control, steering, CodexHookReview or GoalExtension. 85c9871 replays cleanly with an unchanged contract; the recovery tests pass on the integration.",
         "tests": [
           "src/__tests__/app-server-recovery/recovery.test.ts"
         ]
@@ -189,8 +222,14 @@
       "classification": "absorbed",
       "overlappingFiles": [
         "README.md",
+        "src/ACPSessionConnection.ts",
         "src/CodexAcpServer.ts",
-        "src/CodexEventHandler.ts"
+        "src/CodexElicitationHandler.ts",
+        "src/CodexEventHandler.ts",
+        "src/__tests__/CodexACPAgent/agent-message-events.test.ts",
+        "src/__tests__/CodexACPAgent/async-questions.test.ts",
+        "src/__tests__/CodexACPAgent/tool-calls-and-messages-v2.test.ts",
+        "src/__tests__/CodexACPAgent/v2-resume-replay.test.ts"
       ],
       "resolution": {
         "action": "drop",
@@ -208,24 +247,23 @@
     {
       "name": "neutral-fork-point",
       "originalCommit": "fc9a61e080134d623df7e67e8fd8eb8729da875a",
-      "commit": "b1084b78a9523fcc60645710b288e6a067851f94",
-      "appliedCommit": "b1084b78a9523fcc60645710b288e6a067851f94",
+      "commit": "fdcc23cba576cf69aeb098d0b954f5d54cd1546d",
+      "appliedCommit": "fdcc23cba576cf69aeb098d0b954f5d54cd1546d",
       "disposition": "active",
-      "patchId": "e7c0cc2ce4ab9a8d7fae398634f574a4142e8293",
+      "patchId": "2b344fa989c4de45e01f4db4afd4b19a6c59bad5",
       "classification": "overlap",
       "overlappingFiles": [
         "docs/air-extensions.md",
         "src/CodexAcpServer.ts",
-        "src/SessionFork.ts",
-        "src/SessionMetadata.ts",
-        "src/__tests__/CodexACPAgent/initialize.test.ts",
+        "src/__tests__/CodexACPAgent/CodexAcpClient.test.ts",
+        "src/__tests__/CodexACPAgent/session-fork.test.ts",
         "src/__tests__/CodexACPAgent/session-lifecycle-v2.test.ts"
       ],
       "resolution": {
         "action": "adapt",
-        "commit": "fdcc23cba576cf69aeb098d0b954f5d54cd1546d",
+        "commit": "5fe00d9058b415d0a3afc94dc57af16e2f2f7d07",
         "automatic": false,
-        "rationale": "Upstream v2.7.0 (#327) drops the ServiceTier import and cast from SessionFork.ts and adds a serviceTier option to the session lifecycle v2 test client, next to b1084b7's Turn import and capabilitiesMeta option. The adaptation fdcc23c imports Model and Turn without ServiceTier and keeps both test options; its sorted added/removed lines are identical to b1084b7. Upstream's fork code (resolveForkTurnId, the fork metadata) is otherwise unchanged in v2.7.0, so the fork point resolution and the forkPoint metadata keep their contract. The fork point tests pass at the replay point and on the integration.",
+        "rationale": "fdcc23c replays cleanly, but upstream v2.8.0 (#780) updates Codex to 0.170.0, whose regenerated GetAccountResponse requires userId, and upstream updated every getAccount mock in its tests. The patch's fork point test in session-fork.test.ts still mocked getAccount without userId, so npm run typecheck failed on the candidate (TS2741); reverting the line at the adaptation reproduces it. The adaptation 5fe00d9 adds userId: null to that mock like upstream's other fork tests; every other added and removed line is identical to fdcc23c. Upstream's fork changes do not touch the fork point contract: #775 rejects an ACP session cursor before the neutral _meta fork point is checked, and #769 makes forkSessionV2 ignore initial configOptions; resolveForkTurnId and the forkPoint metadata are unchanged. The fork point tests pass at the replay point and on the integration.",
         "tests": [
           "src/__tests__/CodexACPAgent/CodexAcpClient.test.ts",
           "src/__tests__/CodexACPAgent/initialize.test.ts",
@@ -245,12 +283,14 @@
       "overlappingFiles": [
         "docs/air-extensions.md",
         "src/CodexAcpServer.ts",
-        "src/__tests__/CodexACPAgent/initialize.test.ts"
+        "src/__tests__/CodexACPAgent/initialize-v2.test.ts",
+        "src/__tests__/CodexACPAgent/load-session.test.ts"
       ],
       "resolution": {
-        "action": "retain",
+        "action": "adapt",
+        "commit": "af7bb26f2d4f4024d28b033468815e4457a5eced",
         "automatic": false,
-        "rationale": "Overlap only through src/CodexAcpServer.ts and its initialize test files. Upstream v2.7.0 does not change GitPatch, FileChangeReporter or ClientCapabilities, and its plan (#752) and subagent (#760) changes do not touch file change reports, so the ACP v1 _meta.diffPatch keeps the Git-relative patch of the AIR extension. c51a9ec replays cleanly with an unchanged contract; its tests pass on the integration.",
+        "rationale": "Upstream v2.8.0 (#771) adds an initialize-v2 test (no ACP transport advert when Codex lacks modern MCP) at the position of c51a9ec's v2 test, and #775 renames the following test to 'still routes a v1 initialize to the v1 chain'. The adaptation af7bb26 keeps upstream's test and name and the patch's test after it; its sorted added/removed lines are identical to c51a9ec. Upstream does not change GitPatch, FileChangeReporter or the diff patch format in ClientCapabilities; #775 only drops v2 diffs without any change, so the ACP v1 _meta.diffPatch keeps carrying the Git-relative patch. The file change, initialize and load tests pass at the replay point and on the integration.",
         "tests": [
           "src/__tests__/CodexACPAgent/file-change-events.test.ts",
           "src/__tests__/CodexACPAgent/initialize-v2.test.ts",
@@ -263,26 +303,24 @@
     {
       "name": "neutral-session-failure",
       "originalCommit": "2a1384e5b60358a0da0145c17e467d31485743c2",
-      "commit": "8aaab396bdeb02f67061d2bf332b67dd4246a6b6",
-      "appliedCommit": "8aaab396bdeb02f67061d2bf332b67dd4246a6b6",
+      "commit": "3f967164f1bbc784f3fb12df223cc5a93589e009",
+      "appliedCommit": "3f967164f1bbc784f3fb12df223cc5a93589e009",
       "disposition": "active",
-      "patchId": "a41832e8bb547b2f15fceb824d2f65828afb8e13",
+      "patchId": "c5e686a9696df855aa3ccbc1531dd4d90143cd4c",
       "classification": "overlap",
       "overlappingFiles": [
         "docs/air-extensions.md",
         "src/CodexAcpServer.ts",
         "src/CodexEventHandler.ts",
-        "src/__tests__/CodexACPAgent/auth-error-events.test.ts",
-        "src/__tests__/CodexACPAgent/initialize.test.ts",
+        "src/__tests__/CodexACPAgent/initialize-v2.test.ts",
         "src/__tests__/CodexACPAgent/session-notices.test.ts",
-        "src/__tests__/CodexACPAgent/typed-session-failure-wire.test.ts",
-        "src/__tests__/acp-test-utils.ts"
+        "src/__tests__/CodexACPAgent/structured-failures-v2.test.ts"
       ],
       "resolution": {
         "action": "adapt",
-        "commit": "3f967164f1bbc784f3fb12df223cc5a93589e009",
+        "commit": "97fc9ba2d9a952469e5b41647da56848016b605b",
         "automatic": false,
-        "rationale": "Upstream v2.7.0 (#767) replaces the event handler's session failure epoch and per-handler notice counter with SessionFailureIds, one counter per connection shared by every prompt's handler, passed as the fourth constructor argument; 8aaab39 conflicted there, in the server's three handler constructions and in the test helper. 8aaab39 numbered client-neutral incidents with the incident counter of its connection-wide NeutralSessionFailureLedger, which upstream's counter now does for both typed forms with the same <epoch>:<n> ids. The adaptation 3f96716 takes SessionFailureIds next to the format (upstream's boolean flag still means air or none), allocates failure and notice ids from it in both forms, drops the ledger's unused incident counter and keeps its revision floor (a later handler can still re-send <turnId>:error). With #755 a retry warning carries the trimmed Codex additionalDetails as details; the neutral record follows the AIR lane's title and details rules as docs/air-extensions.md states, so the neutral retry test now expects them. With #767 a hook that blocks or stops Codex is a notice, which a neutral client without session.notices gets as a _meta.sessionFailure record with kind notice. A new test covers that; it and the other neutral tests fail when the typed lane is AIR-only, the later-prompt id test fails with per-handler ids, and the cross-handler revision test fails without the revision floor.",
+        "rationale": "Upstream v2.8.0 (#775) renames the initialize-v2 test that follows 3f96716's v2 test, so the pick conflicted on that context line only. The adaptation 97fc9ba keeps the patch's test before upstream's renamed test; its sorted added/removed lines are identical to 3f96716. Upstream does not change SessionFailureIds, the event handler's failure and notice reports, SessionFailureExtension or the session failure format in ClientCapabilities; its new notice for missing child history (#769) is sent only on ACP v2 while v1 keeps the advisory thought, so the ACP v1 _meta.sessionFailure records keep their contract. The session failure, notice and initialize tests pass at the replay point and on the integration.",
         "tests": [
           "src/__tests__/CodexACPAgent/auth-error-events.test.ts",
           "src/__tests__/CodexACPAgent/initialize-v2.test.ts",
@@ -305,12 +343,13 @@
       "overlappingFiles": [
         "docs/air-extensions.md",
         "src/CodexAcpServer.ts",
-        "src/__tests__/CodexACPAgent/initialize.test.ts"
+        "src/__tests__/CodexACPAgent/initialize-v2.test.ts"
       ],
       "resolution": {
-        "action": "retain",
+        "action": "adapt",
+        "commit": "f86c114e4450ea20486b805e02171f65affe7cd0",
         "automatic": false,
-        "rationale": "Overlap through src/CodexAcpServer.ts and its initialize and contract tests. Upstream v2.7.0 does not change AgentFileChangeReport, the collectTurnDiffs argument of the event handler or the composed AIR publication that the v2.6.0 adaptation 95fb2c8 keeps; #760 changes the standard subagent views but not the turn diffs, and the patch's test of files a native subagent changed during the root turn passes on the new contract. 95fb2c8 replays cleanly; its tests and upstream's session-metadata-writers test pass on the integration.",
+        "rationale": "Upstream v2.8.0 (#775) renames the initialize-v2 test that follows 95fb2c8's v2 test, so the pick conflicted on that context line only. The adaptation f86c114 keeps the patch's test before upstream's renamed test; its sorted added/removed lines are identical to 95fb2c8. Upstream does not change AgentFileChangeReport, the event handler's turn diff collection or the composed AIR publication; #775 only drops tool-call diffs without any change and #777 only adds terminal tracking to command items. The agent file-change report tests and upstream's session-metadata-writers test pass at the replay point and on the integration.",
         "tests": [
           "src/__tests__/AgentFileChangeReport.test.ts",
           "src/__tests__/CodexACPAgent/agent-file-change-report.test.ts",
@@ -332,12 +371,13 @@
       "overlappingFiles": [
         "docs/air-extensions.md",
         "src/CodexAcpServer.ts",
-        "src/__tests__/CodexACPAgent/initialize.test.ts"
+        "src/CodexElicitationHandler.ts",
+        "src/__tests__/CodexACPAgent/initialize-v2.test.ts"
       ],
       "resolution": {
         "action": "retain",
         "automatic": false,
-        "rationale": "Overlap only through src/CodexAcpServer.ts and its initialize tests. Upstream v2.7.0 does not change permissions/metadata.ts, permissions/mcp.ts, CodexAsyncQuestions, CodexElicitationHandler or ClientCapabilities, so the ACP v1 _meta.permissionPresentation and the question custom answers keep their contract. 295ebe1 replays cleanly; the approval, elicitation and initialize tests pass on the integration.",
+        "rationale": "Overlap through src/CodexAcpServer.ts, src/CodexElicitationHandler.ts and initialize-v2.test.ts. Upstream v2.8.0 (#775) only makes v2 elicitation requests stop waiting on cancellation and omit string patterns from v2 forms; it does not change permissions/metadata.ts, permissions/mcp.ts, CodexAsyncQuestions or the presentation capabilities in ClientCapabilities, so the ACP v1 _meta.permissionPresentation and question custom answers keep their contract. 295ebe1 replays cleanly; the approval, elicitation and initialize tests pass on the integration.",
         "tests": [
           "src/__tests__/CodexACPAgent/approval-events.test.ts",
           "src/__tests__/CodexACPAgent/elicitation-events.test.ts",
@@ -357,12 +397,14 @@
       "overlappingFiles": [
         "docs/air-extensions.md",
         "src/CodexAcpServer.ts",
-        "src/__tests__/CodexACPAgent/initialize.test.ts"
+        "src/ModelConfigOption.ts",
+        "src/__tests__/CodexACPAgent/initialize-v2.test.ts",
+        "src/__tests__/CodexACPAgent/session-config-options.test.ts"
       ],
       "resolution": {
         "action": "retain",
         "automatic": false,
-        "rationale": "Overlap only through src/CodexAcpServer.ts and its initialize tests. Upstream v2.7.0 does not change ModelConfigOption or permissions/metadata.ts; #327 only lets the fast mode toggle treat Codex's canonical priority tier as fast, and #760 makes newSessionV2/resumeSessionV2 ignore initial config option values on ACP v2, neither of which touches the model and reasoning effort selectors or their ACP v1 recommendation records. ebc3010 replays cleanly; the session config option tests pass on the integration.",
+        "rationale": "Overlap through src/CodexAcpServer.ts, src/ModelConfigOption.ts and session-config-options.test.ts. Upstream v2.8.0 (#778) moves the model, reasoning effort and fast mode options before the mode and collaboration mode options, and #769 gives fast mode the speed category and comments that Codex supplies the effort order. The ACP v1 recommendation records sit in the _meta of the model and reasoning effort options and do not depend on their position; ebc3010 does not touch the option order. ebc3010 replays cleanly; the session config option tests (including upstream's new order assertions) pass on the integration.",
         "tests": [
           "src/__tests__/CodexACPAgent/session-config-options.test.ts",
           "src/__tests__/CodexACPAgent/initialize-v2.test.ts",
@@ -381,12 +423,13 @@
       "overlappingFiles": [
         "docs/air-extensions.md",
         "src/CodexAcpServer.ts",
-        "src/__tests__/CodexACPAgent/initialize.test.ts"
+        "src/__tests__/CodexACPAgent/CodexAcpClient.test.ts",
+        "src/__tests__/CodexACPAgent/initialize-v2.test.ts"
       ],
       "resolution": {
         "action": "retain",
         "automatic": false,
-        "rationale": "Overlap only through src/CodexAcpServer.ts and its initialize tests. Upstream v2.7.0 does not change CodexCommands, buildAvailableCommands or the skill commands that the ACP v1 _meta.commandPresentation extends. ab965a0 replays cleanly; its tests pass on the integration.",
+        "rationale": "Overlap through src/CodexAcpServer.ts, CodexAcpClient.test.ts and initialize-v2.test.ts. Upstream v2.8.0 does not change CodexCommands, buildAvailableCommands or the skill commands that the ACP v1 _meta.commandPresentation extends; its CodexAcpClient.test.ts change is the userId field of the getAccount mocks (#780). ab965a0 replays cleanly; its tests pass on the integration.",
         "tests": [
           "src/__tests__/CodexACPAgent/CodexAcpClient.test.ts",
           "src/__tests__/CodexACPAgent/initialize-v2.test.ts",
@@ -405,12 +448,14 @@
       "overlappingFiles": [
         "docs/air-extensions.md",
         "src/CodexAcpServer.ts",
-        "src/__tests__/CodexACPAgent/initialize.test.ts"
+        "src/__tests__/CodexACPAgent/initialize-v2.test.ts",
+        "src/__tests__/CodexACPAgent/prompt-suggestions.test.ts",
+        "src/__tests__/CodexACPAgent/v2-prompt-harness.ts"
       ],
       "resolution": {
         "action": "retain",
         "automatic": false,
-        "rationale": "Overlap only through src/CodexAcpServer.ts and its initialize tests. Upstream v2.7.0 does not change PromptSuggestionGenerator, the thread/sample request of CodexAppServerClient that it uses on an ephemeral fork of the session's thread, the v2 prompt harness or ClientCapabilities; its user message refactor (#760, userMessageContent) only changes how the adapter renders history to the client. 62ee6fe replays cleanly; the prompt suggestion tests pass on the integration.",
+        "rationale": "Overlap through src/CodexAcpServer.ts, prompt-suggestions.test.ts, v2-prompt-harness.ts and initialize-v2.test.ts. Upstream v2.8.0 does not change PromptSuggestionGenerator or the thread/sample request it uses on an ephemeral fork; #769 keeps standard prompt suggestions unadvertised and only lets a v2 prompt_suggestions_update pass through as a non-history update, and the harness and test changes are the userId field of the getAccount mocks (#780). 62ee6fe replays cleanly; the prompt suggestion tests pass on the integration.",
         "tests": [
           "src/__tests__/CodexACPAgent/initialize-v2.test.ts",
           "src/__tests__/CodexACPAgent/initialize.test.ts",
@@ -421,13 +466,37 @@
     }
   ],
   "preservedCommits": [],
+  "downstreamCommits": [
+    {
+      "commit": "efa92962f0d972680b7a1e3e60df608e64ebc5a2",
+      "subject": "chore: retain downstream workflows for review",
+      "patchId": "3b769ea277fea239216370bcccb3c00532bbbf94",
+      "equivalentCommits": [
+        "a672b73fdc1db8778b0609d060c2179d7c23032d",
+        "8b601c3f7c7474d0ee987b95f95f424d55c7e144",
+        "0191d4ab454171c54527da1da78a828ffbe5445a",
+        "fd8a43cebc5d9328dcbc5600c3c7ccb396494a5e"
+      ],
+      "resolution": {
+        "action": "adapt",
+        "commit": "5bd3d59676f4d2e913e0e4d91414f1cea96e9361",
+        "automatic": false,
+        "rationale": "efa9296 is the workflow-retention commit of an earlier sync review that alas still carries and the sync replays as a non-ledger fork commit. Its codex-update.yml hunk pins openai/codex-action to 86365089 over the line it found then (bdf19a4); upstream v2.8.0 (#779) changes that same line to 306c6a1 (v1.14), so the pick conflicted. The adaptation 5bd3d59 (stacked on the exact candidate at its replay point) keeps efa9296's result: the same four workflow files, the same added lines and the same removed lines in ci.yml, e2e.yml and publish.yml; only the replaced codex-update.yml line is now upstream's v1.14 pin. The later replayed workflow commits apply on the same context as before, the candidate's .github/workflows tree is restored to alas's as for any upstream workflow change, and the integration's .github tree equals alas.",
+        "tests": [
+          "scripts/sync-review.test.mjs",
+          "scripts/sync-reviewed-exceptions.test.mjs",
+          "scripts/sync-downstream-transitions.test.mjs"
+        ]
+      }
+    }
+  ],
   "upstreamWorkflowChanges": [
     {
-      "path": ".github/workflows/conventional-prs.yml",
+      "path": ".github/workflows/codex-update.yml",
       "resolution": {
         "action": "retain-downstream",
         "automatic": false,
-        "rationale": "Upstream v2.7.0 (#756) only bumps the pinned amannn/action-semantic-pull-request in conventional-prs.yml from v6.1.1 (48f256284bd4) to v6.1.2 (2252a14e810a). alas still pins v6.1.1, and the publication verifier requires the candidate's .github/workflows tree to equal the previous alas tree, so the candidate keeps alas's workflow unchanged. The pin bump is mirrored in a separate level-3 automation/* PR after this sync; it changes no step, input or permission.",
+        "rationale": "Upstream v2.8.0 (#779) only changes the pinned openai/codex-action of the Finalize step in codex-update.yml from bdf19a4 (v1.13) to 306c6a1 (v1.14), which fixes its drop-sudo probe on Ubuntu 26.04. alas still pins bdf19a4, and the publication verifier requires the candidate's .github/workflows tree to equal the previous alas tree, so the candidate keeps alas's workflow unchanged. The pin bump is mirrored in a separate level-3 automation/* PR after this sync; it changes no step, input or permission.",
         "tests": [
           "scripts/sync-review.test.mjs",
           "scripts/sync-reviewed-exceptions.test.mjs"
