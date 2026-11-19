@@ -94,7 +94,6 @@ jobs:
       - uses: actions/setup-node@820762786026740c76f36085b0efc47a31fe5020
         with:
           node-version: "24"
-          check-latest: true
       - name: Record missing-key E2E waiver
         if: ${{ env.OPENAI_API_KEY == '' }}
         run: |
@@ -164,7 +163,6 @@ jobs:
       - uses: actions/setup-node@820762786026740c76f36085b0efc47a31fe5020
         with:
           node-version: "24"
-          check-latest: true
           registry-url: "https://registry.npmjs.org"
       - run: npm ci
       # prepublishOnly builds the bundle.
@@ -221,7 +219,6 @@ jobs:
       - uses: actions/setup-node@820762786026740c76f36085b0efc47a31fe5020
         with:
           node-version: "24"
-          check-latest: true
           registry-url: "https://registry.npmjs.org"
       # Ahead of the version bump, so this still validates the committed lockfile.
       - run: npm ci
