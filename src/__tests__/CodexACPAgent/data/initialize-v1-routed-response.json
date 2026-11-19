@@ -63,6 +63,12 @@
     }
   ],
   "_meta": {
+    "systemPrompt": {
+      "version": 1,
+      "append": true,
+      "clear": true,
+      "maxBytes": 262144
+    },
     "steering": {
       "supported": true
     }
