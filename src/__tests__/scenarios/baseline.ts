@@ -141,6 +141,7 @@ const MCP_COMMAND = {
 /**
  * The feature changes of the compatibility rule that change the messages of the scenarios:
  * the `/mcp` command has a new description and an input hint.
+ * Session config options put permissions and collaboration modes after the model options.
  * Initialize also advertises text-only append system prompts, client-set titles and, in `_meta`, the
  * provider-neutral, opt-in system prompt append capability.
  * It no longer advertises `sessionCapabilities.subagents`, which the subagent RFD does not define for an Agent.
@@ -162,6 +163,15 @@ export function withFeatureChanges(messages: RecordedMessage[]): RecordedMessage
                 }}};
             }
             return {...message, params: {...params, _meta: meta}};
+        }
+        if (message.direction === "response") {
+            const params = message.params as Json;
+            const options = params?.["configOptions"];
+            if (Array.isArray(options)) {
+                const isMode = (option: Json) => option["id"] === "mode" || option["id"] === "collaboration_mode";
+                const configOptions = [...options.filter(option => !isMode(option)), ...options.filter(isMode)];
+                return {...message, params: {...params, configOptions}};
+            }
         }
         const update = sessionUpdate(message);
         if (update === undefined || update["sessionUpdate"] !== "available_commands_update") return message;

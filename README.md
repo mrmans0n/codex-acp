@@ -24,7 +24,7 @@ Use [OpenAI Codex](https://github.com/openai/codex) from [Agent Client Protocol]
 - All AIR extensions, capabilities, and `_meta` keys: [AIR extensions](docs/air-extensions.md).
 - A per-turn [agent file-change report](docs/air-extensions.md#agent-file-change-report) after capability negotiation.
 - Client-provided, session-scoped [system prompt append](docs/system-prompt-extension.md), preserving configured developer instructions.
-- Client-provided MCP servers over command-based stdio config and HTTP transport.
+- Client-provided MCP servers over stdio, HTTP, or the existing ACP connection ([MCP-over-ACP](docs/mcp-over-acp.md)).
 - Slash commands: `/status`, `/mcp` (with `/mcp reconnect`), `/skills`, `/goal`, `/review`, `/review-branch`, `/review-commit`, `/compact`, and `/logout`, as well as configured skills.
 
 ## Installation
@@ -103,11 +103,11 @@ JetBrains AIR clients keep an older private contract instead. Without either con
 
 See [docs/subagent-sessions.md](docs/subagent-sessions.md) for both contracts, `session/load` replay, and the fallback.
 
-### Background terminal tasks
+### Background work
 
-Codex can keep a shell command running after a turn continues. AIR clients can show this work in the Async Tasks panel and stop one command.
+ACP v2 shows detached children and background terminals in the session's `background` list. Clients can stop a listed terminal without cancelling the foreground turn.
 
-See [AIR extensions](docs/air-extensions.md#async-tasks) for the capability, lifecycle events, and stop request.
+See [Background work](docs/background-work.md) for the v2 lifecycle and cancel methods, or [AIR async tasks](docs/air-extensions.md#async-tasks) for the existing AIR extension.
 
 ## License
 
