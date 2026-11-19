@@ -126,6 +126,23 @@ describe.each([1, 2] as const)("ACP v%s live standard subagents", version => {
         expect(JSON.stringify(h.scopedUpdates.filter(entry => entry.update.sessionUpdate === "session_message"))).not.toContain("Never sent");
     });
 
+    it("leaves repeated identical messages unlinked rather than guessing their sender view", async () => {
+        await connect();
+        h.emit(itemCompleted(collab("spawnAgent", "spawn", null)));
+        h.emit(itemCompleted(collab("sendInput", "send-1", "Check the tests")));
+        h.emit(itemCompleted(collab("sendInput", "send-2", "Check the tests")));
+        h.emit(onWorker(turnStarted("child-turn")));
+        h.emit(onWorker(itemStarted(task("received", "Check the tests"), "child-turn")));
+        await flush(h);
+        const messages = h.scopedUpdates.filter(entry => entry.update.sessionUpdate === "session_message");
+        const incoming = messages.find(entry => entry.sessionId === childId)?.update;
+        expect(incoming).not.toHaveProperty("senderSessionId");
+        expect(incoming).not.toHaveProperty("senderMessageId");
+        expect(messages.every(entry => !("recipientMessageId" in entry.update))).toBe(true);
+        await expect(JSON.stringify(messages, null, 2) + "\n")
+            .toMatchFileSnapshot(`data/live-core-v${version}-ambiguous-delegation.json`);
+    });
+
     it("waits for immediate parentage and announces ancestors before child traffic", async () => {
         await connect();
         h.emit(itemStarted(activityItem(worker, "/root/coordinator/worker")));
@@ -158,7 +175,7 @@ describe.each([1, 2] as const)("ACP v%s live standard subagents", version => {
         if (version === 1) methods.push(["session/load", {cwd, mcpServers: []}], ["session/set_mode", {modeId: "agent"}],
             [LEGACY_SET_SESSION_MODEL_METHOD, {modelId: "gpt-5"}]);
         for (const id of [childId, worker]) for (const [method, params] of methods) {
-            await expect(h.request(method, {sessionId: id, ...params}), `${method}: ${id}`).rejects.toMatchObject({code: -32600});
+            await expect(h.request(method, {sessionId: id, ...params}), `${method}: ${id}`).rejects.toMatchObject({code: -32602});
         }
         await h.agent.cancel({sessionId: childId});
         expect(h.turnInterruptCalls()).toEqual([]);
@@ -320,7 +337,7 @@ describe.each([1, 2] as const)("ACP v%s live standard subagents", version => {
         const blocked = client.enqueueSessionTransition(sessionId, () => held);
         try {
             h.emit(itemStarted(activityItem()));
-            await expect(h.request("session/close", {sessionId: worker})).rejects.toMatchObject({code: -32600});
+            await expect(h.request("session/close", {sessionId: worker})).rejects.toMatchObject({code: -32602});
             expect(childUpdates()).toEqual([]);
         } finally { release(); }
         await blocked;
@@ -329,6 +346,7 @@ describe.each([1, 2] as const)("ACP v%s live standard subagents", version => {
 
     it("cascades parent cancellation without inventing a child ending", async () => {
         await connect();
+        h.emit(turnStarted());
         h.emit(itemStarted(activityItem()));
         h.emit(onWorker(turnStarted("child-turn")));
         await flush(h);
@@ -390,6 +408,7 @@ describe.each([1, 2] as const)("ACP v%s live standard subagents", version => {
     it("replays parent history and empty child associations without inventing a gap or current runtime", async () => {
         await connect();
         const item: ThreadItem = {type: "agentMessage", id: "parent-answer", text: "Parent history", phase: null,
+            moderation: null,
             memoryCitation: null, delivery: null, questions: null};
         history(h, [activityItem(), item], "foreign-root");
         await load();
@@ -398,7 +417,7 @@ describe.each([1, 2] as const)("ACP v%s live standard subagents", version => {
             && entry.update.messageId === "parent-answer")).toBe(true);
         expect(h.scopedUpdates.some(entry => entry.sessionId === sessionId && entry.update.sessionUpdate === "agent_thought_chunk"
             && entry.update.messageId === `${sessionId}:subagent-history-gap`)).toBe(false);
-        expect(childUpdates().filter(entry => entry.sessionId === childId)).toEqual([]);
+        expect(childUpdates().filter(entry => entry.sessionId === childId && entry.update.sessionUpdate !== "replay_complete")).toEqual([]);
     });
 
     it("finishes concurrent same-parent setups without deadlock", async () => {
@@ -440,6 +459,7 @@ describe.each([1, 2] as const)("ACP v%s live standard subagents", version => {
 
     it.skipIf(version !== 2)("publishes snapshots after the setup response without waiting for unrelated requests", async () => {
         await connect();
+        h.emit(turnStarted());
         h.emit(itemStarted(activityItem()));
         h.emit(onWorker(turnStarted("child-turn")));
         await flush(h);

@@ -10,7 +10,7 @@ describe("ACP session fork", () => {
         const model = createTestModel({id: "gpt-5"});
 
         vi.spyOn(client, "readAuthRequirement").mockResolvedValue({required: false, account: null});
-        vi.spyOn(client, "getAccount").mockResolvedValue({account: null, requiresOpenaiAuth: false});
+        vi.spyOn(client, "getAccount").mockResolvedValue({account: null, userId: null, requiresOpenaiAuth: false});
         vi.spyOn(client, "listSkills").mockResolvedValue({data: []});
         const forkSpy = vi.spyOn(client, "forkSession").mockResolvedValue({
             sessionId: "fork-id",
@@ -54,7 +54,7 @@ describe("ACP session fork", () => {
         const forkPoint = {boundary: "turn", messageId: "item-1", turnId: "turn-1", lastItemId: "item-3", matchedBy: "id"} as const;
 
         vi.spyOn(client, "readAuthRequirement").mockResolvedValue({required: false, account: null});
-        vi.spyOn(client, "getAccount").mockResolvedValue({account: null, requiresOpenaiAuth: false});
+        vi.spyOn(client, "getAccount").mockResolvedValue({account: null, userId: null, requiresOpenaiAuth: false});
         vi.spyOn(client, "listSkills").mockResolvedValue({data: []});
         vi.spyOn(client, "forkSession").mockResolvedValue({
             sessionId: "fork-id",
@@ -84,7 +84,7 @@ describe("ACP session fork", () => {
         const mcpStartup = deferred<McpStartupResult>();
 
         vi.spyOn(client, "readAuthRequirement").mockResolvedValue({required: false, account: null});
-        vi.spyOn(client, "getAccount").mockResolvedValue({account: null, requiresOpenaiAuth: false});
+        vi.spyOn(client, "getAccount").mockResolvedValue({account: null, userId: null, requiresOpenaiAuth: false});
         vi.spyOn(client, "listSkills").mockResolvedValue({data: []});
         vi.spyOn(client, "forkSession").mockResolvedValue({
             sessionId: "fork-id",
@@ -124,7 +124,7 @@ describe("ACP session fork", () => {
         const client = fixture.getCodexAcpClient();
 
         vi.spyOn(client, "readAuthRequirement").mockResolvedValue({required: false, account: null});
-        vi.spyOn(client, "getAccount").mockResolvedValue({account: null, requiresOpenaiAuth: false});
+        vi.spyOn(client, "getAccount").mockResolvedValue({account: null, userId: null, requiresOpenaiAuth: false});
         vi.spyOn(client, "listSkills").mockResolvedValue({data: []});
         vi.spyOn(client, "forkSession").mockResolvedValue({
             sessionId: "fork-id",

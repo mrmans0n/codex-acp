@@ -10,7 +10,7 @@ import {expectConformingV2SessionUpdates} from "./v2-session-update-guard";
 const worker = "worker";
 const childId = `${sessionId}:subagent:${worker}`;
 const message = (id: string, text: string): ThreadItem => ({
-    type: "agentMessage", id, text, phase: null, memoryCitation: null, delivery: null, questions: null,
+    type: "agentMessage", id, text, phase: null, moderation: null, memoryCitation: null, delivery: null, questions: null,
 });
 function activity(id = worker, path = "/root/worker"): Extract<ThreadItem, {type: "subAgentActivity"}> {
     return {type: "subAgentActivity", id: `activity-${id}`, agentThreadId: id, agentPath: path,
@@ -68,8 +68,9 @@ describe.each([1, 2] as const)("ACP v%s recorded child replay", version => {
         sessionId, cwd, mcpServers: [], ...(version === 2 ? {replayFrom: {type: "start"}} : {}),
     });
     const childUpdates = (id = childId) => h.scopedUpdates.filter(entry => entry.sessionId === id);
-    const gap = () => h.scopedUpdates.filter(entry => entry.sessionId === sessionId
-        && entry.update.sessionUpdate === "agent_thought_chunk" && entry.update.messageId === `${sessionId}:subagent-history-gap`);
+    const gap = () => h.scopedUpdates.filter(entry => entry.sessionId === sessionId && (version === 1
+        ? entry.update.sessionUpdate === "agent_thought_chunk" && entry.update.messageId === `${sessionId}:subagent-history-gap`
+        : entry.update.sessionUpdate === "notice" && entry.update.title === "Some recorded child history is unavailable or incomplete."));
     const text = (value: string) => h.scopedUpdates.some(entry => entry.update.sessionUpdate === "agent_message_chunk"
         && entry.update.content !== null && typeof entry.update.content === "object"
         && "text" in entry.update.content && entry.update.content.text === value);
@@ -124,10 +125,16 @@ describe.each([1, 2] as const)("ACP v%s recorded child replay", version => {
         await load();
         await flush(h);
         const known = new Set([sessionId]);
+        const completed = new Set<string>();
         for (const entry of h.scopedUpdates) {
             expect(known.has(entry.sessionId)).toBe(true);
             if (entry.update.sessionUpdate === "subagent_update" && typeof entry.update.sessionId === "string") known.add(entry.update.sessionId);
+            if (entry.update.sessionUpdate === "replay_complete") {
+                expect(completed.has(entry.sessionId)).toBe(false);
+                completed.add(entry.sessionId);
+            }
         }
+        expect(completed).toEqual(version === 2 ? known : new Set());
         expect(text("Nested answer")).toBe(true);
         expect(childUpdates().some(entry => entry.update.sessionUpdate === "user_message_chunk")).toBe(false);
         // The spawn record holds no prompt, so no sender view exists to name or link.
@@ -290,6 +297,11 @@ describe.each([1, 2] as const)("ACP v%s recorded child replay", version => {
         await flush(h);
         const updates = h.scopedUpdates.slice(before).filter(entry => entry.sessionId === childId);
         expect(JSON.stringify(updates)).not.toContain("BeforeAfter");
+        if (version === 2) {
+            expect(updates.map(entry => entry.update)).toContainEqual({
+                sessionUpdate: "terminal_output_chunk", terminalId: "command", data: Buffer.from("After").toString("base64"),
+            });
+        }
         expect(gap()).toHaveLength(1);
         await expect(JSON.stringify(updates, null, 2)).toMatchFileSnapshot(`data/subagent-replay-v${version}-running-tool.json`);
     });
@@ -343,7 +355,7 @@ describe.each([1, 2] as const)("ACP v%s recorded child replay", version => {
         }));
         await load();
         await flush(h);
-        expect(childUpdates()).toEqual([]);
+        expect(childUpdates().filter(entry => entry.update.sessionUpdate !== "replay_complete")).toEqual([]);
         expect(gap()).toHaveLength(1);
     });
 

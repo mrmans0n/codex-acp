@@ -368,7 +368,7 @@ export class CodexElicitationHandler implements ElicitationHandler {
                 const response = await withSubagentUserAction(params.threadId, () => this.connection.request(
                     acp.methods.client.elicitation.create,
                     this.buildElicitationRequest(params, context),
-                    this.requestOptions(signal),
+                    this.requestOptions(signal, true),
                 ));
                 const result = this.convertElicitationResponse(response, context);
                 if (params.mode === "url" && result.action === "accept") {
@@ -443,9 +443,13 @@ export class CodexElicitationHandler implements ElicitationHandler {
     }
 
     private requestOptions(
-        cancellationSignal: AbortSignal | undefined = this.cancellationSignal
+        cancellationSignal: AbortSignal | undefined = this.cancellationSignal,
+        stopWaiting = false,
     ): acp.SendRequestOptions | undefined {
-        return cancellationSignal ? {cancellationSignal} : undefined;
+        return cancellationSignal ? {
+            cancellationSignal,
+            ...(stopWaiting && AcpV2Connection.of(this.connection) !== null ? {stopWaitingOnCancel: true} : {}),
+        } : undefined;
     }
 
     private async requestUserInputElicitation(
@@ -457,7 +461,7 @@ export class CodexElicitationHandler implements ElicitationHandler {
             return await withSubagentUserAction(params.threadId, () => this.connection.request(
                 acp.methods.client.elicitation.create,
                 request,
-                this.requestOptions(signal),
+                this.requestOptions(signal, true),
             ), params.itemId);
         }
 
