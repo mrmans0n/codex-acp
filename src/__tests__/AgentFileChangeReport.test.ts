@@ -7,9 +7,14 @@ import {
     AGENT_FILE_CHANGE_REPORT_MAX_PATH_LENGTH,
     AGENT_FILE_CHANGE_REPORT_MAX_TOTAL_BYTES,
     AgentFileChangeReportError,
+    agentFileChangeReportMeta,
+    agentFileChangeReportRequestFor,
     captureAgentFileChangeWorkspace,
+    clientRequestsNeutralAgentFileChangeReport,
     createReportedAgentFileChangeReport,
+    createUnavailableAgentFileChangeReport,
     parseAgentFileChangeReportRequest,
+    parseNeutralAgentFileChangeReportRequest,
 } from "../AgentFileChangeReport";
 
 function modified(pathname: string): string {
@@ -54,6 +59,71 @@ describe("agent file-change report", () => {
                 jetbrains: {air: {agentFileChangeReportRequest: request}},
             })).toBeNull();
         }
+    });
+
+    it("accepts a client-neutral request by the rules of the AIR request", () => {
+        expect(parseNeutralAgentFileChangeReportRequest({
+            agentFileChangeReportRequest: {version: 1, requestId: "alas-turn:0123.abc_DEF-9"},
+        })).toEqual({version: 1, requestId: "alas-turn:0123.abc_DEF-9"});
+        expect(parseNeutralAgentFileChangeReportRequest({
+            agentFileChangeReportRequest: {version: 1, requestId: "x".repeat(128)},
+        })).toEqual({version: 1, requestId: "x".repeat(128)});
+    });
+
+    it.each([
+        {name: "an unknown version", request: {version: 2, requestId: "request-id"}},
+        {name: "a string version", request: {version: "1", requestId: "request-id"}},
+        {name: "no version", request: {requestId: "request-id"}},
+        {name: "no request id", request: {version: 1}},
+        {name: "an empty request id", request: {version: 1, requestId: ""}},
+        {name: "a numeric request id", request: {version: 1, requestId: 42}},
+        {name: "a request id with spaces", request: {version: 1, requestId: "contains spaces"}},
+        {name: "a request id with a slash", request: {version: 1, requestId: "session/prompt"}},
+        {name: "an oversized request id", request: {version: 1, requestId: "x".repeat(129)}},
+        {name: "an extra key", request: {version: 1, requestId: "request-id", extra: true}},
+        {name: "literal true", request: true},
+        {name: "an array", request: [{version: 1, requestId: "request-id"}]},
+        {name: "null", request: null},
+    ])("ignores a client-neutral request with $name", ({request}) => {
+        expect(parseNeutralAgentFileChangeReportRequest({agentFileChangeReportRequest: request})).toBeNull();
+    });
+
+    it("reads a request only in the negotiated form", () => {
+        const request = {version: 1, requestId: "request-id"};
+        const neutral = {agentFileChangeReportRequest: request};
+        const air = {jetbrains: {air: {agentFileChangeReportRequest: request}}};
+
+        expect(agentFileChangeReportRequestFor("neutral", neutral)).toEqual(request);
+        expect(agentFileChangeReportRequestFor("neutral", air)).toBeNull();
+        expect(agentFileChangeReportRequestFor("air", air)).toEqual(request);
+        expect(agentFileChangeReportRequestFor("air", neutral)).toBeNull();
+        expect(agentFileChangeReportRequestFor("none", {...neutral, ...air})).toBeNull();
+        expect(agentFileChangeReportRequestFor("neutral", undefined)).toBeNull();
+    });
+
+    it.each([
+        {name: "version 1", declared: {version: 1}, expected: true},
+        {name: "a later version", declared: {version: 2}, expected: true},
+        {name: "version 0", declared: {version: 0}, expected: false},
+        {name: "a fractional version", declared: {version: 1.5}, expected: false},
+        {name: "a string version", declared: {version: "1"}, expected: false},
+        {name: "no version", declared: {}, expected: false},
+        {name: "literal true", declared: true, expected: false},
+        {name: "an array", declared: [{version: 1}], expected: false},
+        {name: "null", declared: null, expected: false},
+    ])("reads the client-neutral opt-in with $name as $expected", ({declared, expected}) => {
+        expect(clientRequestsNeutralAgentFileChangeReport({_meta: {agentFileChangeReport: declared}})).toBe(expected);
+    });
+
+    it("carries the same report object in each form", () => {
+        const report = createUnavailableAgentFileChangeReport("request-id", "cancelled");
+
+        expect(JSON.stringify(agentFileChangeReportMeta("neutral", report))).toBe(
+            '{"agentFileChangeReport":{"version":1,"requestId":"request-id","status":"unavailable","reason":"cancelled"}}',
+        );
+        expect(JSON.stringify(agentFileChangeReportMeta("air", report))).toBe(
+            '{"jetbrains":{"air":{"version":1,"agentFileChangeReport":{"version":1,"requestId":"request-id","status":"unavailable","reason":"cancelled"}}}}',
+        );
     });
 
     it("extracts add, update, delete, rename, and binary paths from an aggregated diff", () => {
