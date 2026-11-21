@@ -1001,6 +1001,50 @@ test("restores the downstream workflow tree while reporting upstream workflow ch
   }
 });
 
+test("keeps the alas workflow tree when a mirrored workflow commit is excluded and an older retention replays", () => {
+  const f = fixture();
+  try {
+    // Upstream pins v1, then bumps it to v2 before the old stable; the new stable changes no workflow.
+    git(f.cwd, "checkout", "-B", "wf-upstream", f.base);
+    mkdirSync(join(f.cwd, ".github/workflows"), {recursive: true});
+    commitFile(f.cwd, ".github/workflows/ci.yml", "uses: action@v1\n", "add workflow");
+    const bump = commitFile(f.cwd, ".github/workflows/ci.yml", "uses: action@v2\n", "bump action to v2");
+    git(f.cwd, "tag", "v3.0.0");
+    commitFile(f.cwd, "stable3.txt", "stable\n", "new stable without workflow changes");
+    git(f.cwd, "tag", "v3.1.0");
+    // alas: an earlier sync retained its v1 pin over the bump, and alas later mirrored the bump.
+    git(f.cwd, "checkout", "-B", "wf-alas", "v3.0.0");
+    commitFile(f.cwd, "downstream.txt", "downstream\n", "downstream patch");
+    commitFile(f.cwd, ".github/workflows/ci.yml", "uses: action@v1\n", "chore: retain downstream workflows for review");
+    const mirror = commitFile(f.cwd, ".github/workflows/ci.yml", "uses: action@v2\n", "ci: bump action to v2");
+    const patch = git(f.cwd, "rev-parse", "HEAD~2");
+    const ledger = {
+      schemaVersion: 2,
+      baseTag: "v3.0.0",
+      patches: [{name: "downstream", commit: patch, upstreamPr: null, files: ["downstream.txt"], tests: ["downstream.test.ts"]}],
+    };
+    const report = buildSyncCandidate({
+      cwd: f.cwd,
+      tagRef: "v3.1.0",
+      baseRef: "v3.0.0",
+      upstreamRef: "wf-upstream",
+      alasRef: "wf-alas",
+      branch: "sync/upstream-3.1.0",
+      syncRefs: [],
+      ledger,
+      expectedPatchIdentities: ledger.patches,
+    });
+    assert.deepEqual(report.workflowChanges, []);
+    assert.deepEqual(report.excludedUpstreamEquivalents, [{commit: mirror, upstreamCommit: bump}]);
+    assert.equal(git(f.cwd, "show", `${report.exactCandidateCommit}:.github/workflows/ci.yml`), "uses: action@v2");
+    assert.equal(git(f.cwd, "rev-parse", `${report.integrationCommit}:.github/workflows`),
+      git(f.cwd, "rev-parse", "wf-alas:.github/workflows"));
+    assert.equal(report.manualReviewReasons.includes("candidate-workflows-differ-from-alas"), false);
+  } finally {
+    rmSync(f.root, {recursive: true, force: true});
+  }
+});
+
 function stackedFixture() {
   const root = mkdtempSync(join(tmpdir(), "alas-sync-stacked-"));
   const cwd = join(root, "repo");
