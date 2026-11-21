@@ -804,11 +804,14 @@ export function buildSyncCandidate({
       !seenLedgerPatches.has(patch.name))
     .map((patch) => patch.name);
 
-  if (workflowChanges.length > 0) restoreWorkflowTree(cwd, alasRef, tagCommit);
-  // The fork's own workflow tree must survive the candidate unchanged whenever the stable delta
-  // touches workflows; reviewed acceptance never imports an upstream workflow edit.
-  const workflowTreeMatchesAlas = workflowChanges.length === 0 ||
-    workflowTree(cwd, "HEAD") === workflowTree(cwd, alasRef);
+  // The fork's own workflow tree must survive the candidate unchanged; reviewed acceptance never
+  // imports an upstream workflow edit. Without a stable workflow delta the replay can still diverge:
+  // an alas commit that mirrors an upstream workflow commit is excluded as upstream-equivalent while an
+  // older review-only retention commit, which pinned the previous value over it, still replays.
+  if (workflowChanges.length > 0 || workflowTree(cwd, "HEAD") !== workflowTree(cwd, alasRef)) {
+    restoreWorkflowTree(cwd, alasRef, tagCommit);
+  }
+  const workflowTreeMatchesAlas = workflowTree(cwd, "HEAD") === workflowTree(cwd, alasRef);
   const workflowChangesAccepted = workflowChanges.length > 0 &&
     forkWorkflowChanges.length === 0 && workflowTreeMatchesAlas &&
     workflowChangesResolved(syncReview, workflowChanges);
