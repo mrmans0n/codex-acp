@@ -240,6 +240,11 @@ import {
     neutralForkPointCapability,
 } from "./SessionFork";
 import {NEUTRAL_DIFF_PATCH_META_KEY, neutralDiffPatchCapability} from "./GitPatch";
+import {
+    NEUTRAL_SESSION_FAILURE_META_KEY,
+    NeutralSessionFailureLedger,
+    neutralSessionFailureCapability,
+} from "./SessionFailureExtension";
 import {SessionIndexService} from "./SessionIndexService";
 import type {SessionIndexTitleState} from "./SessionIndexTitles";
 import {ASYNC_TASK_STOP_METHOD, asyncTaskCapability} from "./async-tasks/AsyncTaskExtension";
@@ -349,6 +354,12 @@ export interface SessionFailure {
     title: string;
     details?: string;
     actions: SessionFailureAction[];
+    /**
+     * The adapter's internal kind of the failure. Only the client-neutral form sends it:
+     * `CodexEventHandler.createSessionFailureMeta` removes it from the AIR record. The event handler sets it on
+     * every record it builds; upstream's AIR-only records have none.
+     */
+    kind?: string;
 }
 
 /**
@@ -426,10 +437,6 @@ const DENY_ALL_ELICITATIONS: ElicitationHandler = {
     handleElicitation: async () => ({action: "cancel", content: null, _meta: null}),
     handleUserInput: async () => ({answers: {}}),
 };
-
-function clientSupportsTypedSessionFailures(capabilities: acp.ClientCapabilities | null): boolean {
-    return clientSupportsAirCapability(capabilities, AIR_SESSION_FAILURE_KEY);
-}
 
 function clientSupportsAgentFileChangeReports(capabilities: acp.ClientCapabilities | null): boolean {
     return clientSupportsAirCapability(capabilities, AIR_AGENT_FILE_CHANGE_REPORT_KEY);
@@ -528,6 +535,7 @@ export class CodexAcpServer {
     private readonly getExitCode: () => number | null;
     private readonly getRecentStderr: () => string;
     private readonly sessionFailureIds: SessionFailureIds;
+    private readonly neutralSessionFailures = new NeutralSessionFailureLedger();
     private availableCommands: CodexCommands;
     private clientInfo: acp.Implementation | null;
     private clientCapabilities: acp.ClientCapabilities | null;
@@ -1038,6 +1046,11 @@ export class CodexAcpServer {
             // so `ClientCapabilities.fromV2` never selects it.
             ...(protocolVersion === 1 && this.capabilities.diffPatchFormat === "neutral" ? {
                 [NEUTRAL_DIFF_PATCH_META_KEY]: neutralDiffPatchCapability(),
+            } : {}),
+            // The client-neutral session failure, see `docs/air-extensions.md`. ACP v2 has its own terminal
+            // failure state, so `ClientCapabilities.fromV2` never selects it.
+            ...(protocolVersion === 1 && this.capabilities.sessionFailureFormat === "neutral" ? {
+                [NEUTRAL_SESSION_FAILURE_META_KEY]: neutralSessionFailureCapability(),
             } : {}),
             // The session index for a client that opted in without AIR, see `docs/air-extensions.md`.
             ...(neutralSessionIndex ? {
@@ -1779,12 +1792,13 @@ export class CodexAcpServer {
                     baselineEventHandler = new CodexEventHandler(
                         this.connection,
                         sessionState,
-                        clientSupportsTypedSessionFailures(this.clientCapabilities),
+                        this.capabilities.sessionFailureFormat,
                         this.sessionFailureIds,
                         sessionState.subagents,
                         false,
                         clientSupportsCompaction(this.clientCapabilities),
                         clientSupportsNotices(this.clientCapabilities),
+                        this.neutralSessionFailures,
                     );
                 }
                 await this.trackCodexForegroundWork(sessionState, event);
@@ -3502,12 +3516,13 @@ export class CodexAcpServer {
         const eventHandler = new CodexEventHandler(
             this.connection,
             sessionState,
-            clientSupportsTypedSessionFailures(this.clientCapabilities),
+            this.capabilities.sessionFailureFormat,
             this.sessionFailureIds,
             sessionState.subagents,
             false,
             clientSupportsCompaction(this.clientCapabilities),
             clientSupportsNotices(this.clientCapabilities),
+            this.neutralSessionFailures,
         );
         const permissionContext = this.permissionLifecycleContext(sessionState).beginPrompt();
         const toolCallRenderer = new AcpToolCallRenderer(this.capabilities);
@@ -5396,12 +5411,13 @@ export class CodexAcpServer {
             const promptEventHandler = new CodexEventHandler(
                 this.connection,
                 sessionState,
-                clientSupportsTypedSessionFailures(this.clientCapabilities),
+                this.capabilities.sessionFailureFormat,
                 this.sessionFailureIds,
                 sessionState.subagents,
                 agentFileChangeReportRequest !== null,
                 clientSupportsCompaction(this.clientCapabilities),
                 clientSupportsNotices(this.clientCapabilities),
+                this.neutralSessionFailures,
             );
             eventHandler = promptEventHandler;
             const permissionLifecycle = this.permissionLifecycleContext(sessionState);
@@ -5872,7 +5888,7 @@ export class CodexAcpServer {
             insertion?.onFailure?.(toV2Failure(err));
             const isUnexpectedFailure = !(err instanceof RequestError);
             if (eventHandler !== null
-                && clientSupportsTypedSessionFailures(this.clientCapabilities)
+                && this.capabilities.sessionFailureFormat !== "none"
                 && (isProcessExit || isUnexpectedFailure)) {
                 eventHandler.recordSyntheticTerminalFailure(
                     isProcessExit ? "transport_lost" : "internal_error",
