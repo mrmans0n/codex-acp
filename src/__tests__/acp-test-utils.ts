@@ -19,7 +19,6 @@ import type {Model, ReasoningEffortOption} from "../app-server/v2";
 import {CodexSubagentEventRouter} from "../subagents/CodexSubagentEventRouter";
 import {CodexEventHandler, SessionFailureIds} from "../CodexEventHandler";
 import {NeutralSessionFailureLedger, type SessionFailureFormat} from "../SessionFailureExtension";
-import type {AccountUpdatedNotification} from "../app-server/v2";
 import {CodexBackgroundTerminalTasks} from "../async-tasks/CodexBackgroundTerminalTasks";
 import {CodexSessionCompactions} from "../CodexSessionCompactions";
 import {CodexSessionToolCalls} from "../CodexSessionToolCalls";
@@ -624,7 +623,6 @@ export function createTestEventHandler(
         sessionFailureFormat?: SessionFailureFormat;
         neutralFailures?: NeutralSessionFailureLedger;
         sessionFailureEpoch?: string;
-        onAccountUpdated?: (notification: AccountUpdatedNotification) => void;
         collectTurnDiffs?: boolean;
     } = {},
 ): CodexEventHandler {
@@ -634,7 +632,6 @@ export function createTestEventHandler(
         options.sessionFailureFormat ?? (options.typedSessionFailures ? "air" : "none"),
         new SessionFailureIds(options.sessionFailureEpoch ?? "test-epoch"),
         sessionState.subagents,
-        options.onAccountUpdated,
         options.collectTurnDiffs ?? false,
         false,
         false,

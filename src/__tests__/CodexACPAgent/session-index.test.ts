@@ -187,7 +187,7 @@ describe("sessionIndex capability negotiation", () => {
         const response = await agent.listSessions({cwd: "/repo/project", _meta: {sessionIndex: {list: {limit: 1}}}});
 
         expect(response.sessions[0]).not.toHaveProperty("_meta");
-        expect(threadList.mock.calls[0]?.[0]).not.toHaveProperty("sortKey");
+        expect(threadList.mock.calls[0]?.[0]).not.toHaveProperty("limit");
         await expect(agent.sessionIndex.rename({sessionId: threadId, title: "A"})).rejects.toMatchObject({code: -32601});
     });
 

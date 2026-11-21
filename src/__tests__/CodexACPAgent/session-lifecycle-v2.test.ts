@@ -815,9 +815,9 @@ describe('Session lifecycle over ACP v2', () => {
         expect(codexRequests.some(({method}) => method === "thread/fork")).toBe(false);
     });
 
-    it('rejects fork of an unknown session, same as v1', async () => {
+    it('rejects fork of an unknown session with its ACP ID', async () => {
         const {connection} = await connectV2Client({
-            failMethod: {method: "thread/fork", error: new Error("Session not found: unknown-source")},
+            failMethod: {method: "thread/fork", error: new Error("no rollout found for thread id unknown-source")},
         });
         closeClient = () => connection.close();
 
@@ -825,7 +825,7 @@ describe('Session lifecycle over ACP v2', () => {
             sessionId: "unknown-source",
             cwd,
             mcpServers: [],
-        }).then(() => null, (err) => ({code: err.code, message: err.message}));
+        }).then(() => null, (err) => ({code: err.code, message: err.message, data: err.data}));
 
         await expect(dump(error)).toMatchFileSnapshot('data/session-lifecycle-v2-fork-unknown-session.json');
     });
