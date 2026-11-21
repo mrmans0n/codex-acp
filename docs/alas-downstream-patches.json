@@ -1,6 +1,6 @@
 {
   "schemaVersion": 2,
-  "baseTag": "v2.8.0",
+  "baseTag": "v2.9.0",
   "patches": [
     {
       "name": "goal-opt-in",
@@ -83,16 +83,17 @@
         "9d2c300ec82da759d3a1606962c04304d2e60fa7",
         "a52405dcabb22bc41b013da4c682ce2cdba31652",
         "fa916afe71557747c2b6c4b4d164ddbf9c807bc2",
-        "8f65eb87351c4937ac883c60723a40922cf1df76"
+        "8f65eb87351c4937ac883c60723a40922cf1df76",
+        "1716ad587dd692b9c6054415d0360b890d637c03"
       ],
       "lastResolution": {
-        "fromTag": "v2.6.0",
-        "toTag": "v2.7.0",
-        "originalCommit": "8f65eb87351c4937ac883c60723a40922cf1df76",
+        "fromTag": "v2.8.0",
+        "toTag": "v2.9.0",
+        "originalCommit": "1716ad587dd692b9c6054415d0360b890d637c03",
         "action": "adapt",
-        "replacementCommit": "1716ad587dd692b9c6054415d0360b890d637c03"
+        "replacementCommit": "b3e574d9b888460f6ee498c206b25c9cfa32635d"
       },
-      "appliedCommit": "1716ad587dd692b9c6054415d0360b890d637c03"
+      "appliedCommit": "b3e574d9b888460f6ee498c206b25c9cfa32635d"
     },
     {
       "name": "session-system-prompt-append",
@@ -161,16 +162,17 @@
         "fc0eb68e9be4d407397cd6bf22620f304afaab96",
         "febcd2b9f8a7c470ce23ba60547be2c1298ff7da",
         "57fdf7972d6414122241b04e0e51398c0a2b536c",
-        "904a70d49d475624477126e3e4bd003a933c44e9"
+        "904a70d49d475624477126e3e4bd003a933c44e9",
+        "4573e4f6ef2f58dc01c5f5a9cabc40679b4bb1d8"
       ],
       "lastResolution": {
-        "fromTag": "v2.7.0",
-        "toTag": "v2.8.0",
-        "originalCommit": "904a70d49d475624477126e3e4bd003a933c44e9",
+        "fromTag": "v2.8.0",
+        "toTag": "v2.9.0",
+        "originalCommit": "4573e4f6ef2f58dc01c5f5a9cabc40679b4bb1d8",
         "action": "adapt",
-        "replacementCommit": "4573e4f6ef2f58dc01c5f5a9cabc40679b4bb1d8"
+        "replacementCommit": "25ed8f51b0e0486209b0e5d35a1f7959768164e2"
       },
-      "appliedCommit": "4573e4f6ef2f58dc01c5f5a9cabc40679b4bb1d8"
+      "appliedCommit": "25ed8f51b0e0486209b0e5d35a1f7959768164e2"
     },
     {
       "name": "neutral-session-index",
@@ -195,16 +197,17 @@
       "retiredCommits": [
         "bf6dd64df0bf990d6528ceaa62c5ba94c8ba9cb0",
         "aff30ea39da255979e31bc18e8868ca9946b40ee",
-        "a1bfcc7e287a6eca4b52875336b720147b65ea5d"
+        "a1bfcc7e287a6eca4b52875336b720147b65ea5d",
+        "688db7ea47cebc7739d07499bfc354f9194051da"
       ],
       "lastResolution": {
-        "fromTag": "v2.5.0",
-        "toTag": "v2.6.0",
-        "originalCommit": "a1bfcc7e287a6eca4b52875336b720147b65ea5d",
+        "fromTag": "v2.8.0",
+        "toTag": "v2.9.0",
+        "originalCommit": "688db7ea47cebc7739d07499bfc354f9194051da",
         "action": "adapt",
-        "replacementCommit": "688db7ea47cebc7739d07499bfc354f9194051da"
+        "replacementCommit": "ccce7b4473982c334854b239d31e75dee3dda212"
       },
-      "appliedCommit": "688db7ea47cebc7739d07499bfc354f9194051da"
+      "appliedCommit": "ccce7b4473982c334854b239d31e75dee3dda212"
     },
     {
       "name": "neutral-codex-hook-review",
@@ -234,16 +237,17 @@
         "4d4340534856c343cb68a295a9d48177cf079ee7",
         "c07bc0f3a802bcbca5f2e17f228643bc873e7c37",
         "2341b05f7b74c45d21746f3ec7a617997a705b3a",
-        "2662df652707ac2c46068669a48737511f6eaf40"
+        "2662df652707ac2c46068669a48737511f6eaf40",
+        "a2b37d3513d138f12c2b79842b54e65bda687621"
       ],
       "lastResolution": {
-        "fromTag": "v2.6.0",
-        "toTag": "v2.7.0",
-        "originalCommit": "2662df652707ac2c46068669a48737511f6eaf40",
+        "fromTag": "v2.8.0",
+        "toTag": "v2.9.0",
+        "originalCommit": "a2b37d3513d138f12c2b79842b54e65bda687621",
         "action": "adapt",
-        "replacementCommit": "a2b37d3513d138f12c2b79842b54e65bda687621"
+        "replacementCommit": "23658664d761aa79ee379540c968deaf0c52944e"
       },
-      "appliedCommit": "a2b37d3513d138f12c2b79842b54e65bda687621"
+      "appliedCommit": "23658664d761aa79ee379540c968deaf0c52944e"
     },
     {
       "name": "neutral-codex-hook-review-execution",
@@ -347,16 +351,17 @@
       "retiredCommits": [
         "fc9a61e080134d623df7e67e8fd8eb8729da875a",
         "b1084b78a9523fcc60645710b288e6a067851f94",
-        "fdcc23cba576cf69aeb098d0b954f5d54cd1546d"
+        "fdcc23cba576cf69aeb098d0b954f5d54cd1546d",
+        "5fe00d9058b415d0a3afc94dc57af16e2f2f7d07"
       ],
       "lastResolution": {
-        "fromTag": "v2.7.0",
-        "toTag": "v2.8.0",
-        "originalCommit": "fdcc23cba576cf69aeb098d0b954f5d54cd1546d",
+        "fromTag": "v2.8.0",
+        "toTag": "v2.9.0",
+        "originalCommit": "5fe00d9058b415d0a3afc94dc57af16e2f2f7d07",
         "action": "adapt",
-        "replacementCommit": "5fe00d9058b415d0a3afc94dc57af16e2f2f7d07"
+        "replacementCommit": "beea5336305d56fb2a9082eb48c217e3a53429de"
       },
-      "appliedCommit": "5fe00d9058b415d0a3afc94dc57af16e2f2f7d07"
+      "appliedCommit": "beea5336305d56fb2a9082eb48c217e3a53429de"
     },
     {
       "name": "neutral-diff-patch",
@@ -427,16 +432,17 @@
       "retiredCommits": [
         "2a1384e5b60358a0da0145c17e467d31485743c2",
         "8aaab396bdeb02f67061d2bf332b67dd4246a6b6",
-        "3f967164f1bbc784f3fb12df223cc5a93589e009"
+        "3f967164f1bbc784f3fb12df223cc5a93589e009",
+        "97fc9ba2d9a952469e5b41647da56848016b605b"
       ],
       "lastResolution": {
-        "fromTag": "v2.7.0",
-        "toTag": "v2.8.0",
-        "originalCommit": "3f967164f1bbc784f3fb12df223cc5a93589e009",
+        "fromTag": "v2.8.0",
+        "toTag": "v2.9.0",
+        "originalCommit": "97fc9ba2d9a952469e5b41647da56848016b605b",
         "action": "adapt",
-        "replacementCommit": "97fc9ba2d9a952469e5b41647da56848016b605b"
+        "replacementCommit": "dec1e1cfbba0d67141ea5c4b361e2a8a8b1c2b2b"
       },
-      "appliedCommit": "97fc9ba2d9a952469e5b41647da56848016b605b"
+      "appliedCommit": "dec1e1cfbba0d67141ea5c4b361e2a8a8b1c2b2b"
     },
     {
       "name": "neutral-agent-file-change-report",
@@ -500,8 +506,8 @@
       "disposition": "active",
       "retiredCommits": [],
       "lastResolution": {
-        "fromTag": "v2.7.0",
-        "toTag": "v2.8.0",
+        "fromTag": "v2.8.0",
+        "toTag": "v2.9.0",
         "originalCommit": "295ebe128a39c2c54be3619106799693f22dd0e5",
         "action": "retain"
       }
@@ -560,8 +566,8 @@
       "disposition": "active",
       "retiredCommits": [],
       "lastResolution": {
-        "fromTag": "v2.7.0",
-        "toTag": "v2.8.0",
+        "fromTag": "v2.8.0",
+        "toTag": "v2.9.0",
         "originalCommit": "ab965a0e99d047da935fed6bc107f8564e3df250",
         "action": "retain"
       }
@@ -590,8 +596,8 @@
       "disposition": "active",
       "retiredCommits": [],
       "lastResolution": {
-        "fromTag": "v2.7.0",
-        "toTag": "v2.8.0",
+        "fromTag": "v2.8.0",
+        "toTag": "v2.9.0",
         "originalCommit": "62ee6fec6365323b79a1ba1212246864491d7d1d",
         "action": "retain"
       }
