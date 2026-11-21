@@ -779,6 +779,7 @@ describe("CodexACPAgent - loadSession", () => {
                         },
                         {
                             type: "mcpToolCall",
+                            environmentId: null,
                             id: "item-mcp-1",
                             server: "github",
                             tool: "search",

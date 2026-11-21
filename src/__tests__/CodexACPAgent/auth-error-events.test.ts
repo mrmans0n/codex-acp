@@ -132,7 +132,7 @@ describe("CodexEventHandler - auth error events", () => {
         const connection = {
             notify: vi.fn(async (_method: unknown, params: {update: unknown}) => updates.push(params.update)),
         } as unknown as AcpClientConnection;
-        const handler = new CodexEventHandler(connection, state, typed, new SessionFailureIds("epoch"), state.subagents, undefined, false, false, false);
+        const handler = new CodexEventHandler(connection, state, typed, new SessionFailureIds("epoch"), state.subagents, false, false, false);
         await handler.handleSessionScopedNotification({
             method: "error",
             params: {
