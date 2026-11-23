@@ -864,6 +864,14 @@ When the client declares `recommendedValue`, a selector with a recommendation ca
 
 Without the capability, the config options keep their old shape and carry no recommendation.
 
+### Client-neutral form
+
+A client that isn't AIR can opt in with `clientCapabilities._meta.recommendedConfigValue: { "version": 1 }`, an object whose `version` is an integer of at least 1, and gets `_meta.recommendedConfigValue: { "version": 1 }` back from `initialize`. ACP v2 ignores the opt-in.
+
+A selector with a recommendation then carries `_meta.recommendedConfigValue: { "version": 1, "value": "medium" }`, under the same rules as above. A client that declares AIR too gets both records.
+
+The client-neutral opt-in adds no `reasoningEfforts` to the model entries: that key stays AIR-only, see [Model reasoning efforts](#model-reasoning-efforts).
+
 ## Model reasoning efforts
 
 The `reasoningEfforts` key lets a client show the efforts of a model before the user selects it.

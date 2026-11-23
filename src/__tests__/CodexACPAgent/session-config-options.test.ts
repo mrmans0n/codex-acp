@@ -233,6 +233,98 @@ describe("Session config options", () => {
         });
     });
 
+    it("recommends through the neutral record without changing the selection, and recomputes effort on a model switch", async () => {
+        const {fast, slow} = buildModels();
+        const {response, codexAcpAgent} = await createSession("fast-model[medium]", [fast, slow], {
+            clientCapabilities: {_meta: {recommendedConfigValue: {version: 1}}},
+        });
+
+        expect(response.configOptions?.find(option => option.id === MODEL_CONFIG_ID)).toMatchObject({
+            currentValue: "fast-model",
+            _meta: {recommendedConfigValue: {version: 1, value: "fast-model"}},
+        });
+        const effort = response.configOptions?.find(option => option.id === REASONING_EFFORT_CONFIG_ID);
+        expect(effort).toMatchObject({
+            currentValue: "medium",
+            _meta: {recommendedConfigValue: {version: 1, value: "medium"}},
+        });
+        expect(effort?._meta).not.toHaveProperty("jetbrains");
+
+        const switched = await codexAcpAgent.setSessionConfigOption({
+            sessionId: "session-id",
+            configId: MODEL_CONFIG_ID,
+            value: "slow-model",
+        });
+        expect(switched.configOptions?.find(option => option.id === MODEL_CONFIG_ID)).toMatchObject({
+            currentValue: "slow-model",
+            _meta: {recommendedConfigValue: {value: "fast-model"}},
+        });
+        expect(switched.configOptions?.find(option => option.id === REASONING_EFFORT_CONFIG_ID)).toHaveProperty(
+            "_meta.recommendedConfigValue.value",
+            "low",
+        );
+    });
+
+    it("keeps the per-model reasoning efforts AIR-only for a client that opts into the neutral record", async () => {
+        const {fast, slow} = buildModels();
+        const {response} = await createSession("fast-model[medium]", [fast, slow], {
+            clientCapabilities: {_meta: {recommendedConfigValue: {version: 1}}},
+        });
+
+        const model = response.configOptions?.find(option => option.id === MODEL_CONFIG_ID);
+        expect(model).toMatchObject({_meta: {recommendedConfigValue: {version: 1, value: "fast-model"}}});
+        expect(model?._meta).not.toHaveProperty("jetbrains");
+        const entries = (model as {options: Array<object>}).options;
+        expect(entries).toHaveLength(2);
+        for (const entry of entries) expect(entry).not.toHaveProperty("_meta");
+    });
+
+    it("sends the per-model reasoning efforts next to both recommendation records to an AIR client that opts in neutrally too", async () => {
+        const {fast, slow} = buildModels();
+        const {response} = await createSession("slow-model[medium]", [fast, slow], {
+            clientCapabilities: {
+                _meta: {
+                    jetbrains: {air: {version: 1, capabilities: ["recommendedValue"]}},
+                    recommendedConfigValue: {version: 1},
+                },
+            },
+        });
+
+        const model = response.configOptions?.find(option => option.id === MODEL_CONFIG_ID);
+        expect(model).toMatchObject({
+            currentValue: "slow-model",
+            _meta: {
+                jetbrains: {air: {version: 1, recommendedValue: "fast-model"}},
+                recommendedConfigValue: {version: 1, value: "fast-model"},
+            },
+        });
+        expect((model as {options: Array<object>}).options).toEqual([
+            expect.objectContaining({
+                value: "fast-model",
+                _meta: {jetbrains: {air: {version: 1, reasoningEfforts: {values: ["low", "medium", "high"], recommended: "medium"}}}},
+            }),
+            expect.objectContaining({
+                value: "slow-model",
+                _meta: {jetbrains: {air: {version: 1, reasoningEfforts: {values: ["low", "medium"], recommended: "low"}}}},
+            }),
+        ]);
+        expect(response.configOptions?.find(option => option.id === REASONING_EFFORT_CONFIG_ID)).toMatchObject({
+            _meta: {
+                jetbrains: {air: {version: 1, recommendedValue: "low"}},
+                recommendedConfigValue: {version: 1, value: "low"},
+            },
+        });
+    });
+
+    it("sends no recommendation to a client that does not opt in", async () => {
+        const {fast, slow} = buildModels();
+        const {response} = await createSession("fast-model[medium]", [fast, slow]);
+
+        for (const id of [MODEL_CONFIG_ID, REASONING_EFFORT_CONFIG_ID]) {
+            expect(response.configOptions?.find(option => option.id === id)?._meta).toBeUndefined();
+        }
+    });
+
     it("omits a model recommendation when the catalog has no default", async () => {
         const {fast, slow} = buildModels();
         fast.isDefault = false;
