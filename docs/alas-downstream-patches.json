@@ -1,6 +1,6 @@
 {
   "schemaVersion": 2,
-  "baseTag": "v2.9.0",
+  "baseTag": "v2.10.0",
   "patches": [
     {
       "name": "goal-opt-in",
@@ -506,8 +506,8 @@
       "disposition": "active",
       "retiredCommits": [],
       "lastResolution": {
-        "fromTag": "v2.8.0",
-        "toTag": "v2.9.0",
+        "fromTag": "v2.9.0",
+        "toTag": "v2.10.0",
         "originalCommit": "295ebe128a39c2c54be3619106799693f22dd0e5",
         "action": "retain"
       }
@@ -533,16 +533,17 @@
       ],
       "disposition": "active",
       "retiredCommits": [
-        "9181cce81f8c737dc1bbe921f964aa31d3ef11b3"
+        "9181cce81f8c737dc1bbe921f964aa31d3ef11b3",
+        "ebc3010ea9675c7e7e8ec51bbf6bd7e55265af79"
       ],
       "lastResolution": {
-        "fromTag": "v2.5.0",
-        "toTag": "v2.6.0",
-        "originalCommit": "9181cce81f8c737dc1bbe921f964aa31d3ef11b3",
+        "fromTag": "v2.9.0",
+        "toTag": "v2.10.0",
+        "originalCommit": "ebc3010ea9675c7e7e8ec51bbf6bd7e55265af79",
         "action": "adapt",
-        "replacementCommit": "ebc3010ea9675c7e7e8ec51bbf6bd7e55265af79"
+        "replacementCommit": "5ace1237e13e82b69ed32172c48ebaf9cf3252fc"
       },
-      "appliedCommit": "ebc3010ea9675c7e7e8ec51bbf6bd7e55265af79"
+      "appliedCommit": "5ace1237e13e82b69ed32172c48ebaf9cf3252fc"
     },
     {
       "name": "neutral-command-presentation",
@@ -566,8 +567,8 @@
       "disposition": "active",
       "retiredCommits": [],
       "lastResolution": {
-        "fromTag": "v2.8.0",
-        "toTag": "v2.9.0",
+        "fromTag": "v2.9.0",
+        "toTag": "v2.10.0",
         "originalCommit": "ab965a0e99d047da935fed6bc107f8564e3df250",
         "action": "retain"
       }
@@ -596,8 +597,8 @@
       "disposition": "active",
       "retiredCommits": [],
       "lastResolution": {
-        "fromTag": "v2.8.0",
-        "toTag": "v2.9.0",
+        "fromTag": "v2.9.0",
+        "toTag": "v2.10.0",
         "originalCommit": "62ee6fec6365323b79a1ba1212246864491d7d1d",
         "action": "retain"
       }
