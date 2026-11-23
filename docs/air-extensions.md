@@ -20,6 +20,7 @@ It describes only this adapter.
 - [Plan content delta and plan review](#plan-content-delta-and-plan-review)
 - [Goal](#goal)
 - [Recommended config values](#recommended-config-values)
+- [Model reasoning efforts](#model-reasoning-efforts)
 - [Async tasks](#async-tasks)
 - [Agent file-change report](#agent-file-change-report)
 - [Session failure](#session-failure)
@@ -225,6 +226,7 @@ The adapter sends these keys only to AIR. "AIR" in the gate column means that th
 | `permission` | `session/request_permission` request `_meta.jetbrains.air` | `{version: 1, title, description?}` | AIR |
 | `permission` | permission option `_meta.jetbrains.air` | `{version: 1, description}` | AIR |
 | `recommendedValue` | `model` and `reasoning_effort` config options, `_meta.jetbrains.air` | option value string | `recommendedValue` |
+| `reasoningEfforts` | entry of the `model` config option, `_meta.jetbrains.air` | `{values, recommended?}` | AIR |
 | `asyncTasks` | `tool_call_update._meta.jetbrains.air` | `{backgrounded: true}` | `asyncTasks` |
 | `agentFileChangeReportRequest` | `session/prompt` request `_meta.jetbrains.air` (client to agent) | `{version: 1, requestId}` | `agentFileChangeReport` |
 | `agentFileChangeReport` | `session_info_update._meta.jetbrains.air` | report object | `agentFileChangeReport` |
@@ -864,6 +866,41 @@ Without the capability, the config options keep their old shape and carry no rec
 A client that isn't AIR can opt in with `clientCapabilities._meta.recommendedConfigValue: { "version": 1 }`, an object whose `version` is an integer of at least 1, and gets `_meta.recommendedConfigValue: { "version": 1 }` back from `initialize`. ACP v2 ignores the opt-in.
 
 A selector with a recommendation then carries `_meta.recommendedConfigValue: { "version": 1, "value": "medium" }`, under the same rules as above. A client that declares AIR too gets both records.
+
+The client-neutral opt-in adds no `reasoningEfforts` to the model entries: that key stays AIR-only, see [Model reasoning efforts](#model-reasoning-efforts).
+
+## Model reasoning efforts
+
+The `reasoningEfforts` key lets a client show the efforts of a model before the user selects it.
+It applies to the entries of the `model` config selector.
+
+The key needs no capability, because it only adds data.
+The adapter sends it to every AIR client. A client that is not AIR gets no `reasoningEfforts` key.
+
+A model entry with efforts carries:
+
+```json
+{
+  "value": "gpt-5.6-luna",
+  "name": "5.6 Luna",
+  "_meta": {
+    "jetbrains": {
+      "air": {
+        "version": 1,
+        "reasoningEfforts": { "values": ["low", "medium", "high", "xhigh"], "recommended": "medium" }
+      }
+    }
+  }
+}
+```
+
+- `values` lists the effort ids of the model in the Codex order. The `reasoning_effort` selector uses the same order.
+- `recommended` is the `defaultReasoningEffort` of the model. The adapter sends it only when `values` contains it.
+- For the current model, `recommended` is the effort that `recommendedValue` names on the `reasoning_effort` selector.
+- An entry of a model without efforts gets no `reasoningEfforts` key.
+- The current model that is not in the Codex catalog gets no `reasoningEfforts` key.
+- The adapter sends the key in every answer that carries config options, in ACP v1 and v2.
+- Subagent model selectors do not carry the key.
 
 ## Async tasks
 

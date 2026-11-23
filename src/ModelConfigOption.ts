@@ -1,7 +1,11 @@
 import type {SessionConfigOption} from "@agentclientprotocol/sdk/unstable";
 import type {ReasoningEffort} from "./app-server";
 import type {Model, ReasoningEffortOption} from "./app-server/v2";
-import {AIR_RECOMMENDED_CONFIG_VALUE_KEY, withAirMeta} from "./AirExtension";
+import {
+    AIR_MODEL_REASONING_EFFORTS_KEY,
+    AIR_RECOMMENDED_CONFIG_VALUE_KEY,
+    withAirMeta,
+} from "./AirExtension";
 import {NEUTRAL_RECOMMENDED_CONFIG_VALUE_META_KEY} from "./permissions/metadata";
 
 export const MODEL_CONFIG_ID = "model";
@@ -34,7 +38,17 @@ export function findSupportedEffort(
     return options.find(o => o.reasoningEffort === effort)?.reasoningEffort;
 }
 
-type ModelOption = { value: string; name: string; description: string | null };
+type ModelOption = { value: string; name: string; description: string | null; _meta?: Record<string, unknown> };
+
+/** The AIR effort list of one model: its efforts in the Codex order, and its default effort when the list has it. */
+function modelReasoningEfforts(model: Model): { values: Array<ReasoningEffort>; recommended?: ReasoningEffort } | null {
+    if (model.supportedReasoningEfforts.length === 0) return null;
+    const recommended = findSupportedEffort(model.supportedReasoningEfforts, model.defaultReasoningEffort);
+    return {
+        values: model.supportedReasoningEfforts.map(option => option.reasoningEffort),
+        ...(recommended ? {recommended} : {}),
+    };
+}
 
 /** The entries of the session `model` option. */
 function modelOptions(availableModels: ReadonlyArray<Model>, currentBaseModelId: string | null): Array<ModelOption> {
@@ -63,13 +77,24 @@ function recommendationMeta(value: string, records: RecommendationRecords): Reco
     };
 }
 
+/**
+ * The session `model` option. With `withReasoningEfforts`, each model entry carries the AIR effort list of the
+ * model in `_meta.jetbrains.air.reasoningEfforts`. An entry of a model without efforts gets no `_meta`.
+ * `records` picks the `_meta` records of the option's recommendation.
+ */
 export function createModelConfigOption(
     availableModels: Array<Model>,
     currentBaseModelId: string,
     recommendedModelId?: string,
+    withReasoningEfforts: boolean = false,
     records: RecommendationRecords = {air: true, neutral: false},
 ): SessionConfigOption {
-    const options = modelOptions(availableModels, currentBaseModelId);
+    const options = modelOptions(availableModels, currentBaseModelId).map(option => {
+        if (!withReasoningEfforts) return option;
+        const model = availableModels.find(candidate => candidate.id === option.value);
+        const efforts = model ? modelReasoningEfforts(model) : null;
+        return efforts ? {...option, _meta: withAirMeta(undefined, AIR_MODEL_REASONING_EFFORTS_KEY, efforts)} : option;
+    });
 
     const recommendation = recommendedModelId && options.some(option => option.value === recommendedModelId)
         ? recommendedModelId
