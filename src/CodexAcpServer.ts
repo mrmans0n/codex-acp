@@ -1,5 +1,6 @@
 import * as acp from "@agentclientprotocol/sdk/unstable";
 import {RequestError, type SessionId, type SessionModeState} from "@agentclientprotocol/sdk/unstable";
+import {SYSTEM_PROMPT_CAPABILITY, withSessionInstructionAppend} from "./SessionInstructions";
 import {CodexEventHandler, type CompletedPlan, failureWasShownAsMessage, SessionFailureIds} from "./CodexEventHandler";
 import {attachmentFileUri, desktopAttachmentHistory} from "./DesktopAttachmentHistory";
 import {CodexApprovalHandler} from "./permissions/CodexApprovalHandler";
@@ -1027,6 +1028,8 @@ export class CodexAcpServer {
             actions: [...GOAL_CONTROL_ACTIONS],
         };
         return {
+            // The downstream session instruction append is an ACP v1 extension, see `docs/system-prompt-extension.md`.
+            ...(protocolVersion === 1 ? {systemPrompt: SYSTEM_PROMPT_CAPABILITY} : {}),
             steering: {
                 supported: true,
             },
@@ -1983,7 +1986,16 @@ export class CodexAcpServer {
         return null;
     }
 
+    /**
+     * The downstream `_meta.systemPrompt.append` of an ACP v1 session request, applied as the standard
+     * append-mode `systemPrompt`. ACP v2 has no such alias. See `docs/system-prompt-extension.md`.
+     */
+    private withV1SessionInstructionAppend<T extends object>(params: T): T {
+        return this.protocolVersion === 1 ? withSessionInstructionAppend(params) : params;
+    }
+
     async loadSession(params: acp.LoadSessionRequest): Promise<LegacyLoadSessionResponse> {
+        params = this.withV1SessionInstructionAppend(params);
         return this.recovery === null
             ? await this.loadSessionOnce(params)
             : await this.recovery.trackOpen(params.sessionId, () => this.loadSessionOnce(params));
@@ -2078,6 +2090,7 @@ export class CodexAcpServer {
     }
 
     async resumeSession(params: WithAcpMcpServers<acp.ResumeSessionRequest>): Promise<LegacyResumeSessionResponse> {
+        params = this.withV1SessionInstructionAppend(params);
         return this.withSystemPromptUpdate(params, async () => this.recovery === null
             ? await this.resumeSessionOnce(params)
             : await this.recovery.trackOpen(params.sessionId, () => this.resumeSessionOnce(params)));
@@ -2254,6 +2267,7 @@ export class CodexAcpServer {
         if (params.cursorId != null && this.isRestrictedChild(params.sessionId)) {
             throw RequestError.invalidParams(undefined, "Subagent sessions have no cursors to fork at");
         }
+        params = this.withV1SessionInstructionAppend(params);
         clientSystemPromptText(params.systemPrompt);
         this.assertInstructionsReady(params.sessionId);
         return this.sessionIndex.forking(params.sessionId, () => this.createFork(params));
@@ -2479,6 +2493,7 @@ export class CodexAcpServer {
     async newSession(
         params: WithAcpMcpServers<acp.NewSessionRequest>,
     ): Promise<LegacyNewSessionResponse> {
+        params = this.withV1SessionInstructionAppend(params);
         if (this.providerUpdate !== null) {
             await this.waitForProviderUpdate();
         }
