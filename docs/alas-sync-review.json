@@ -1,0 +1,399 @@
+{
+  "schemaVersion": 2,
+  "fromTag": "v2.10.0",
+  "toTag": "v2.11.0",
+  "toCommit": "33f613c9e113933253a9f4b28b0fc571007a75d8",
+  "canonicalHead": null,
+  "patches": [
+    {
+      "name": "goal-opt-in",
+      "originalCommit": "97aa595ba69c62e896375ea2442358d45d66af74",
+      "commit": "0baf53fb3da82c6d4a7e99425a24b836f7d871d9",
+      "appliedCommit": "0baf53fb3da82c6d4a7e99425a24b836f7d871d9",
+      "disposition": "active",
+      "patchId": "6269f3d9c1e1d52072099eb637690df4955df940",
+      "classification": "overlap",
+      "overlappingFiles": [
+        "docs/air-extensions.md",
+        "src/CodexAcpServer.ts",
+        "src/CodexEventHandler.ts",
+        "src/__tests__/CodexACPAgent/initialize.test.ts"
+      ],
+      "resolution": {
+        "action": null,
+        "automatic": false,
+        "rationale": "",
+        "tests": []
+      }
+    },
+    {
+      "name": "async-tasks-opt-in",
+      "originalCommit": "16817016d25a9eed9f3dc7cd1cbdf446569e179d",
+      "commit": "ed0e3e28ab7504516b2f10d657fb5f8181a10d37",
+      "appliedCommit": "ed0e3e28ab7504516b2f10d657fb5f8181a10d37",
+      "disposition": "active",
+      "patchId": "7ecbb17adc43b4811fd98cfa53488e04d416d6d0",
+      "classification": "overlap",
+      "overlappingFiles": [
+        "src/CodexAcpServer.ts",
+        "src/__tests__/CodexACPAgent/async-tasks.test.ts",
+        "src/__tests__/CodexACPAgent/initialize.test.ts"
+      ],
+      "resolution": {
+        "action": null,
+        "automatic": false,
+        "rationale": "",
+        "tests": []
+      }
+    },
+    {
+      "name": "goal-before-first-prompt",
+      "originalCommit": "9d2c300ec82da759d3a1606962c04304d2e60fa7",
+      "commit": "b3e574d9b888460f6ee498c206b25c9cfa32635d",
+      "appliedCommit": "b3e574d9b888460f6ee498c206b25c9cfa32635d",
+      "disposition": "active",
+      "patchId": "23e813b995ff1f74603a9358b6b04b229db72cce",
+      "classification": "overlap",
+      "overlappingFiles": [
+        "src/CodexAcpServer.ts"
+      ],
+      "resolution": {
+        "action": null,
+        "automatic": false,
+        "rationale": "",
+        "tests": []
+      }
+    },
+    {
+      "name": "session-system-prompt-append",
+      "originalCommit": "fc0eb68e9be4d407397cd6bf22620f304afaab96",
+      "commit": "25ed8f51b0e0486209b0e5d35a1f7959768164e2",
+      "appliedCommit": "25ed8f51b0e0486209b0e5d35a1f7959768164e2",
+      "disposition": "active",
+      "patchId": "d4891cfc848fceff0d1460598866d6b8f1f2ac4b",
+      "classification": "overlap",
+      "overlappingFiles": [
+        "README.md",
+        "docs/air-extensions.md",
+        "src/CodexAcpClient.ts",
+        "src/CodexAcpServer.ts",
+        "src/__tests__/CodexACPAgent/data/initialize-v1-routed-response.json",
+        "src/__tests__/CodexACPAgent/initialize.test.ts",
+        "src/__tests__/acp-test-utils.ts",
+        "src/__tests__/scenarios/baseline.ts",
+        "src/__tests__/scenarios/data/air/agent-message-and-reasoning.jsonl",
+        "src/__tests__/scenarios/data/air/background-terminal.jsonl",
+        "src/__tests__/scenarios/data/air/collab-agent.jsonl",
+        "src/__tests__/scenarios/data/air/collab-controls.jsonl",
+        "src/__tests__/scenarios/data/air/command-approval.jsonl",
+        "src/__tests__/scenarios/data/air/command-failed.jsonl",
+        "src/__tests__/scenarios/data/air/command-output-stdin.jsonl",
+        "src/__tests__/scenarios/data/air/command-without-streamed-output.jsonl",
+        "src/__tests__/scenarios/data/air/context-compaction.jsonl",
+        "src/__tests__/scenarios/data/air/dynamic-tool.jsonl",
+        "src/__tests__/scenarios/data/air/file-change-approval.jsonl",
+        "src/__tests__/scenarios/data/air/file-changes.jsonl",
+        "src/__tests__/scenarios/data/air/fuzzy-file-search.jsonl",
+        "src/__tests__/scenarios/data/air/goal-update.jsonl",
+        "src/__tests__/scenarios/data/air/guardian-review.jsonl",
+        "src/__tests__/scenarios/data/air/history-replay.jsonl",
+        "src/__tests__/scenarios/data/air/image-generation.jsonl",
+        "src/__tests__/scenarios/data/air/image-view.jsonl",
+        "src/__tests__/scenarios/data/air/late-subagent-update.jsonl",
+        "src/__tests__/scenarios/data/air/mcp-elicitation.jsonl",
+        "src/__tests__/scenarios/data/air/mcp-startup-failure.jsonl",
+        "src/__tests__/scenarios/data/air/mcp-tool-approval.jsonl",
+        "src/__tests__/scenarios/data/air/mcp-tool.jsonl",
+        "src/__tests__/scenarios/data/air/mcp-url-elicitation.jsonl",
+        "src/__tests__/scenarios/data/air/native-subagent-session.jsonl",
+        "src/__tests__/scenarios/data/air/nested-subagent-session.jsonl",
+        "src/__tests__/scenarios/data/air/network-and-sandbox-approval.jsonl",
+        "src/__tests__/scenarios/data/air/plan-deltas-and-turn-plan.jsonl",
+        "src/__tests__/scenarios/data/air/plan-review-permission.jsonl",
+        "src/__tests__/scenarios/data/air/plan-stream.jsonl",
+        "src/__tests__/scenarios/data/air/read-search-list.jsonl",
+        "src/__tests__/scenarios/data/air/subagent-activity.jsonl",
+        "src/__tests__/scenarios/data/air/web-search.jsonl"
+      ],
+      "resolution": {
+        "action": null,
+        "automatic": false,
+        "rationale": "",
+        "tests": []
+      }
+    },
+    {
+      "name": "neutral-session-index",
+      "originalCommit": "bf6dd64df0bf990d6528ceaa62c5ba94c8ba9cb0",
+      "commit": "ccce7b4473982c334854b239d31e75dee3dda212",
+      "appliedCommit": "ccce7b4473982c334854b239d31e75dee3dda212",
+      "disposition": "active",
+      "patchId": "acea102932daec53ef483c2f1ba8cb2fad2bb3ad",
+      "classification": "overlap",
+      "overlappingFiles": [
+        "docs/air-extensions.md",
+        "src/CodexAcpServer.ts",
+        "src/__tests__/CodexACPAgent/initialize.test.ts",
+        "src/__tests__/CodexACPAgent/session-index.test.ts"
+      ],
+      "resolution": {
+        "action": null,
+        "automatic": false,
+        "rationale": "",
+        "tests": []
+      }
+    },
+    {
+      "name": "neutral-codex-hook-review",
+      "originalCommit": "4d4340534856c343cb68a295a9d48177cf079ee7",
+      "commit": "23658664d761aa79ee379540c968deaf0c52944e",
+      "appliedCommit": "23658664d761aa79ee379540c968deaf0c52944e",
+      "disposition": "active",
+      "patchId": "eace90a21521aa465c3e2e062e3f5dc761fd8918",
+      "classification": "overlap",
+      "overlappingFiles": [
+        "docs/air-extensions.md",
+        "src/AcpAgentRouter.ts",
+        "src/CodexAcpServer.ts",
+        "src/CodexAppServerClient.ts",
+        "src/__tests__/CodexACPAgent/initialize.test.ts",
+        "src/__tests__/app-server-recovery/recovery.test.ts"
+      ],
+      "resolution": {
+        "action": null,
+        "automatic": false,
+        "rationale": "",
+        "tests": []
+      }
+    },
+    {
+      "name": "neutral-codex-hook-review-execution",
+      "originalCommit": "960f77945bf94d7cb5fa6ea7fcedb01d210f2ce6",
+      "commit": "85c98719f8dcb8d2fa802dc32a46ca36926dc666",
+      "appliedCommit": "85c98719f8dcb8d2fa802dc32a46ca36926dc666",
+      "disposition": "active",
+      "patchId": "e8a0dfe6d036245afe247fccbf731c4ae31a93c2",
+      "classification": "overlap",
+      "overlappingFiles": [
+        "src/CodexAcpClient.ts",
+        "src/CodexAcpServer.ts",
+        "src/CodexAppServerClient.ts",
+        "src/__tests__/app-server-recovery/recovery.test.ts"
+      ],
+      "resolution": {
+        "action": null,
+        "automatic": false,
+        "rationale": "",
+        "tests": []
+      }
+    },
+    {
+      "name": "async-questions",
+      "originalCommit": "e57bcd768c8cebd1d3d17b840ae0db2e11639615",
+      "commit": "e57bcd768c8cebd1d3d17b840ae0db2e11639615",
+      "appliedCommit": null,
+      "disposition": "dropped",
+      "patchId": "085c003657a8716cee8c6576eead2f6a51f36e05",
+      "classification": "absorbed",
+      "overlappingFiles": [
+        "README.md",
+        "docs/async-questions.md",
+        "src/ACPSessionConnection.ts",
+        "src/CodexAcpServer.ts",
+        "src/CodexAsyncQuestions.ts",
+        "src/CodexEventHandler.ts",
+        "src/__tests__/CodexACPAgent/async-questions.test.ts",
+        "src/__tests__/CodexACPAgent/data/async-questions-v1-answered.json",
+        "src/__tests__/CodexACPAgent/data/async-questions-v1-dropped.json",
+        "src/__tests__/CodexACPAgent/data/async-questions-v1-rejected.json",
+        "src/__tests__/CodexACPAgent/data/async-questions-v2-answered.json",
+        "src/__tests__/CodexACPAgent/data/async-questions-v2-dropped.json",
+        "src/__tests__/CodexACPAgent/data/async-questions-v2-rejected.json",
+        "src/__tests__/CodexACPAgent/data/v2-resume-replay-async-question-answers.json",
+        "src/__tests__/CodexACPAgent/tool-calls-and-messages-v2.test.ts",
+        "src/__tests__/CodexACPAgent/v2-resume-replay.test.ts"
+      ],
+      "resolution": {
+        "action": "drop",
+        "automatic": true,
+        "rationale": "The authenticated prior patch ledger transition retired this patch.",
+        "tests": [
+          "src/__tests__/CodexAsyncQuestions.test.ts",
+          "src/__tests__/CodexACPAgent/async-questions.test.ts",
+          "src/__tests__/CodexACPAgent/agent-message-events.test.ts",
+          "src/__tests__/CodexACPAgent/tool-calls-and-messages-v2.test.ts",
+          "src/__tests__/CodexACPAgent/v2-resume-replay.test.ts"
+        ]
+      }
+    },
+    {
+      "name": "neutral-fork-point",
+      "originalCommit": "fc9a61e080134d623df7e67e8fd8eb8729da875a",
+      "commit": "beea5336305d56fb2a9082eb48c217e3a53429de",
+      "appliedCommit": "beea5336305d56fb2a9082eb48c217e3a53429de",
+      "disposition": "active",
+      "patchId": "cb9e06d2268ae087231ca956ad69524dc4213260",
+      "classification": "overlap",
+      "overlappingFiles": [
+        "docs/air-extensions.md",
+        "src/CodexAcpServer.ts",
+        "src/SessionMetadata.ts",
+        "src/__tests__/CodexACPAgent/initialize.test.ts",
+        "src/__tests__/CodexACPAgent/session-lifecycle-v2.test.ts"
+      ],
+      "resolution": {
+        "action": null,
+        "automatic": false,
+        "rationale": "",
+        "tests": []
+      }
+    },
+    {
+      "name": "neutral-diff-patch",
+      "originalCommit": "4ab2596b598e955944c2c1908a8765f24147c88d",
+      "commit": "af7bb26f2d4f4024d28b033468815e4457a5eced",
+      "appliedCommit": "af7bb26f2d4f4024d28b033468815e4457a5eced",
+      "disposition": "active",
+      "patchId": "dcdbe4f1fe590b498797dcb2a20c58c0524c168f",
+      "classification": "overlap",
+      "overlappingFiles": [
+        "docs/air-extensions.md",
+        "src/CodexAcpServer.ts",
+        "src/__tests__/CodexACPAgent/initialize.test.ts"
+      ],
+      "resolution": {
+        "action": null,
+        "automatic": false,
+        "rationale": "",
+        "tests": []
+      }
+    },
+    {
+      "name": "neutral-session-failure",
+      "originalCommit": "2a1384e5b60358a0da0145c17e467d31485743c2",
+      "commit": "dec1e1cfbba0d67141ea5c4b361e2a8a8b1c2b2b",
+      "appliedCommit": "dec1e1cfbba0d67141ea5c4b361e2a8a8b1c2b2b",
+      "disposition": "active",
+      "patchId": "40efdc34a1801efa329ee4602adf222409c7f054",
+      "classification": "overlap",
+      "overlappingFiles": [
+        "docs/air-extensions.md",
+        "src/CodexAcpServer.ts",
+        "src/CodexEventHandler.ts",
+        "src/__tests__/CodexACPAgent/initialize.test.ts",
+        "src/__tests__/acp-test-utils.ts"
+      ],
+      "resolution": {
+        "action": null,
+        "automatic": false,
+        "rationale": "",
+        "tests": []
+      }
+    },
+    {
+      "name": "neutral-agent-file-change-report",
+      "originalCommit": "a68042507683ef2eb4a6d15eff864300e77d897f",
+      "commit": "f86c114e4450ea20486b805e02171f65affe7cd0",
+      "appliedCommit": "f86c114e4450ea20486b805e02171f65affe7cd0",
+      "disposition": "active",
+      "patchId": "67cec4221998844cfaa7a68cc3daf58872c1c4f6",
+      "classification": "overlap",
+      "overlappingFiles": [
+        "docs/air-extensions.md",
+        "src/CodexAcpServer.ts",
+        "src/__tests__/CodexACPAgent/initialize.test.ts"
+      ],
+      "resolution": {
+        "action": null,
+        "automatic": false,
+        "rationale": "",
+        "tests": []
+      }
+    },
+    {
+      "name": "neutral-permission-presentation",
+      "originalCommit": "295ebe128a39c2c54be3619106799693f22dd0e5",
+      "commit": "295ebe128a39c2c54be3619106799693f22dd0e5",
+      "appliedCommit": null,
+      "disposition": "active",
+      "patchId": "0201bbc425efea65e4f4d4c46cfc16a08fd0439b",
+      "classification": "overlap",
+      "overlappingFiles": [
+        "docs/air-extensions.md",
+        "src/CodexAcpServer.ts",
+        "src/CodexAsyncQuestions.ts",
+        "src/__tests__/CodexACPAgent/initialize.test.ts"
+      ],
+      "resolution": {
+        "action": null,
+        "automatic": false,
+        "rationale": "",
+        "tests": []
+      }
+    },
+    {
+      "name": "neutral-recommended-config-value",
+      "originalCommit": "9181cce81f8c737dc1bbe921f964aa31d3ef11b3",
+      "commit": "5ace1237e13e82b69ed32172c48ebaf9cf3252fc",
+      "appliedCommit": "5ace1237e13e82b69ed32172c48ebaf9cf3252fc",
+      "disposition": "active",
+      "patchId": "e63a12018b6ef6198040e15a522b01813d82056b",
+      "classification": "overlap",
+      "overlappingFiles": [
+        "docs/air-extensions.md",
+        "src/CodexAcpServer.ts",
+        "src/__tests__/CodexACPAgent/initialize.test.ts"
+      ],
+      "resolution": {
+        "action": null,
+        "automatic": false,
+        "rationale": "",
+        "tests": []
+      }
+    },
+    {
+      "name": "neutral-command-presentation",
+      "originalCommit": "ab965a0e99d047da935fed6bc107f8564e3df250",
+      "commit": "ab965a0e99d047da935fed6bc107f8564e3df250",
+      "appliedCommit": null,
+      "disposition": "active",
+      "patchId": "8a4674228da2ea210dab03b65a97250c059719ce",
+      "classification": "overlap",
+      "overlappingFiles": [
+        "docs/air-extensions.md",
+        "src/CodexAcpServer.ts",
+        "src/CodexCommands.ts",
+        "src/__tests__/CodexACPAgent/initialize.test.ts"
+      ],
+      "resolution": {
+        "action": null,
+        "automatic": false,
+        "rationale": "",
+        "tests": []
+      }
+    },
+    {
+      "name": "neutral-prompt-suggestions",
+      "originalCommit": "62ee6fec6365323b79a1ba1212246864491d7d1d",
+      "commit": "62ee6fec6365323b79a1ba1212246864491d7d1d",
+      "appliedCommit": null,
+      "disposition": "active",
+      "patchId": "6a971273078a53bd501e3d25524c202f3fcce45a",
+      "classification": "overlap",
+      "overlappingFiles": [
+        "docs/air-extensions.md",
+        "src/CodexAcpServer.ts",
+        "src/__tests__/CodexACPAgent/initialize.test.ts",
+        "src/__tests__/CodexACPAgent/v2-prompt-harness.ts"
+      ],
+      "resolution": {
+        "action": null,
+        "automatic": false,
+        "rationale": "",
+        "tests": []
+      }
+    }
+  ],
+  "preservedCommits": [],
+  "resolved": false
+}

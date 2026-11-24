@@ -1,0 +1,674 @@
+{
+  "schemaVersion": 2,
+  "baseTag": "v2.10.0",
+  "patches": [
+    {
+      "name": "goal-opt-in",
+      "commit": "97aa595ba69c62e896375ea2442358d45d66af74",
+      "upstreamPr": 583,
+      "files": [
+        "docs/air-extensions.md",
+        "src/CodexAcpServer.ts",
+        "src/CodexEventHandler.ts",
+        "src/ThreadGoalSnapshot.ts",
+        "src/__tests__/CodexACPAgent/initialize.test.ts",
+        "src/__tests__/CodexACPAgent/thread-goal-events.test.ts",
+        "src/tool-calls/ClientCapabilities.ts"
+      ],
+      "tests": [
+        "src/__tests__/CodexACPAgent/initialize.test.ts",
+        "src/__tests__/CodexACPAgent/thread-goal-events.test.ts"
+      ],
+      "disposition": "active",
+      "retiredCommits": [
+        "97aa595ba69c62e896375ea2442358d45d66af74",
+        "b160987ed8496ce18f8a853883184abaed1de478",
+        "d173ce85cc34a2c77bbbfc710c55236f82054d9c"
+      ],
+      "lastResolution": {
+        "fromTag": "v2.6.0",
+        "toTag": "v2.7.0",
+        "originalCommit": "d173ce85cc34a2c77bbbfc710c55236f82054d9c",
+        "action": "adapt",
+        "replacementCommit": "0baf53fb3da82c6d4a7e99425a24b836f7d871d9"
+      },
+      "appliedCommit": "0baf53fb3da82c6d4a7e99425a24b836f7d871d9"
+    },
+    {
+      "name": "async-tasks-opt-in",
+      "commit": "16817016d25a9eed9f3dc7cd1cbdf446569e179d",
+      "upstreamPr": null,
+      "files": [
+        "src/CodexAcpServer.ts",
+        "src/__tests__/CodexACPAgent/async-tasks.test.ts",
+        "src/__tests__/CodexACPAgent/initialize.test.ts",
+        "src/__tests__/tool-calls/tool-call-contract.test.ts",
+        "src/async-tasks/AsyncTaskExtension.ts",
+        "src/async-tasks/CodexBackgroundTerminalTasks.ts",
+        "src/tool-calls/ClientCapabilities.ts"
+      ],
+      "tests": [
+        "src/__tests__/CodexACPAgent/async-tasks.test.ts",
+        "src/__tests__/CodexACPAgent/initialize.test.ts",
+        "src/__tests__/tool-calls/tool-call-contract.test.ts"
+      ],
+      "disposition": "active",
+      "retiredCommits": [
+        "16817016d25a9eed9f3dc7cd1cbdf446569e179d",
+        "9602512a647a7ed4097e8847499443bfec5bc1db",
+        "808ea06d8f1975241f02eb21bb2ffcbb311010b6"
+      ],
+      "lastResolution": {
+        "fromTag": "v2.7.0",
+        "toTag": "v2.8.0",
+        "originalCommit": "808ea06d8f1975241f02eb21bb2ffcbb311010b6",
+        "action": "adapt",
+        "replacementCommit": "ed0e3e28ab7504516b2f10d657fb5f8181a10d37"
+      },
+      "appliedCommit": "ed0e3e28ab7504516b2f10d657fb5f8181a10d37"
+    },
+    {
+      "name": "goal-before-first-prompt",
+      "commit": "9d2c300ec82da759d3a1606962c04304d2e60fa7",
+      "upstreamPr": 584,
+      "files": [
+        "src/CodexAcpServer.ts",
+        "src/__tests__/CodexACPAgent/CodexAcpClient.test.ts"
+      ],
+      "tests": [
+        "src/__tests__/CodexACPAgent/CodexAcpClient.test.ts"
+      ],
+      "disposition": "active",
+      "retiredCommits": [
+        "9d2c300ec82da759d3a1606962c04304d2e60fa7",
+        "a52405dcabb22bc41b013da4c682ce2cdba31652",
+        "fa916afe71557747c2b6c4b4d164ddbf9c807bc2",
+        "8f65eb87351c4937ac883c60723a40922cf1df76",
+        "1716ad587dd692b9c6054415d0360b890d637c03"
+      ],
+      "lastResolution": {
+        "fromTag": "v2.8.0",
+        "toTag": "v2.9.0",
+        "originalCommit": "1716ad587dd692b9c6054415d0360b890d637c03",
+        "action": "adapt",
+        "replacementCommit": "b3e574d9b888460f6ee498c206b25c9cfa32635d"
+      },
+      "appliedCommit": "b3e574d9b888460f6ee498c206b25c9cfa32635d"
+    },
+    {
+      "name": "session-system-prompt-append",
+      "commit": "fc0eb68e9be4d407397cd6bf22620f304afaab96",
+      "upstreamPr": 585,
+      "files": [
+        "README.md",
+        "docs/air-extensions.md",
+        "docs/system-prompt-extension.md",
+        "src/CodexAcpClient.ts",
+        "src/CodexAcpServer.ts",
+        "src/JsonSnapshot.ts",
+        "src/SessionFork.ts",
+        "src/SessionInstructions.ts",
+        "src/__tests__/CodexACPAgent/agent-file-change-report.test.ts",
+        "src/__tests__/CodexACPAgent/data/initialize-v1-routed-response.json",
+        "src/__tests__/CodexACPAgent/initialize.test.ts",
+        "src/__tests__/CodexACPAgent/session-instructions-native.test.ts",
+        "src/__tests__/CodexACPAgent/session-instructions.test.ts",
+        "src/__tests__/SessionInstructions.test.ts",
+        "src/__tests__/acp-test-utils.ts",
+        "src/__tests__/scenarios/baseline.ts",
+        "src/__tests__/scenarios/data/air/agent-message-and-reasoning.jsonl",
+        "src/__tests__/scenarios/data/air/background-terminal.jsonl",
+        "src/__tests__/scenarios/data/air/collab-agent.jsonl",
+        "src/__tests__/scenarios/data/air/collab-controls.jsonl",
+        "src/__tests__/scenarios/data/air/command-approval.jsonl",
+        "src/__tests__/scenarios/data/air/command-failed.jsonl",
+        "src/__tests__/scenarios/data/air/command-output-stdin.jsonl",
+        "src/__tests__/scenarios/data/air/command-without-streamed-output.jsonl",
+        "src/__tests__/scenarios/data/air/context-compaction.jsonl",
+        "src/__tests__/scenarios/data/air/dynamic-tool.jsonl",
+        "src/__tests__/scenarios/data/air/file-change-approval.jsonl",
+        "src/__tests__/scenarios/data/air/file-changes.jsonl",
+        "src/__tests__/scenarios/data/air/fuzzy-file-search.jsonl",
+        "src/__tests__/scenarios/data/air/goal-update.jsonl",
+        "src/__tests__/scenarios/data/air/guardian-review.jsonl",
+        "src/__tests__/scenarios/data/air/history-replay.jsonl",
+        "src/__tests__/scenarios/data/air/image-generation.jsonl",
+        "src/__tests__/scenarios/data/air/image-view.jsonl",
+        "src/__tests__/scenarios/data/air/late-subagent-update.jsonl",
+        "src/__tests__/scenarios/data/air/mcp-elicitation.jsonl",
+        "src/__tests__/scenarios/data/air/mcp-startup-failure.jsonl",
+        "src/__tests__/scenarios/data/air/mcp-tool-approval.jsonl",
+        "src/__tests__/scenarios/data/air/mcp-tool.jsonl",
+        "src/__tests__/scenarios/data/air/mcp-url-elicitation.jsonl",
+        "src/__tests__/scenarios/data/air/native-subagent-session.jsonl",
+        "src/__tests__/scenarios/data/air/nested-subagent-session.jsonl",
+        "src/__tests__/scenarios/data/air/network-and-sandbox-approval.jsonl",
+        "src/__tests__/scenarios/data/air/plan-deltas-and-turn-plan.jsonl",
+        "src/__tests__/scenarios/data/air/plan-review-permission.jsonl",
+        "src/__tests__/scenarios/data/air/plan-stream.jsonl",
+        "src/__tests__/scenarios/data/air/read-search-list.jsonl",
+        "src/__tests__/scenarios/data/air/subagent-activity.jsonl",
+        "src/__tests__/scenarios/data/air/web-search.jsonl"
+      ],
+      "tests": [
+        "src/__tests__/SessionInstructions.test.ts",
+        "src/__tests__/CodexACPAgent/session-instructions.test.ts",
+        "src/__tests__/CodexACPAgent/session-instructions-native.test.ts",
+        "src/__tests__/CodexACPAgent/initialize.test.ts",
+        "src/__tests__/CodexACPAgent/data/initialize-v1-routed-response.json"
+      ],
+      "disposition": "active",
+      "retiredCommits": [
+        "fc0eb68e9be4d407397cd6bf22620f304afaab96",
+        "febcd2b9f8a7c470ce23ba60547be2c1298ff7da",
+        "57fdf7972d6414122241b04e0e51398c0a2b536c",
+        "904a70d49d475624477126e3e4bd003a933c44e9",
+        "4573e4f6ef2f58dc01c5f5a9cabc40679b4bb1d8"
+      ],
+      "lastResolution": {
+        "fromTag": "v2.8.0",
+        "toTag": "v2.9.0",
+        "originalCommit": "4573e4f6ef2f58dc01c5f5a9cabc40679b4bb1d8",
+        "action": "adapt",
+        "replacementCommit": "25ed8f51b0e0486209b0e5d35a1f7959768164e2"
+      },
+      "appliedCommit": "25ed8f51b0e0486209b0e5d35a1f7959768164e2"
+    },
+    {
+      "name": "neutral-session-index",
+      "commit": "bf6dd64df0bf990d6528ceaa62c5ba94c8ba9cb0",
+      "upstreamPr": null,
+      "files": [
+        "docs/air-extensions.md",
+        "src/CodexAcpServer.ts",
+        "src/SessionIndex.ts",
+        "src/SessionIndexService.ts",
+        "src/SessionListSubscriptions.ts",
+        "src/__tests__/CodexACPAgent/initialize.test.ts",
+        "src/__tests__/CodexACPAgent/session-index.test.ts",
+        "src/__tests__/tool-calls/tool-call-contract.test.ts"
+      ],
+      "tests": [
+        "src/__tests__/CodexACPAgent/session-index.test.ts",
+        "src/__tests__/CodexACPAgent/initialize.test.ts",
+        "src/__tests__/tool-calls/tool-call-contract.test.ts"
+      ],
+      "disposition": "active",
+      "retiredCommits": [
+        "bf6dd64df0bf990d6528ceaa62c5ba94c8ba9cb0",
+        "aff30ea39da255979e31bc18e8868ca9946b40ee",
+        "a1bfcc7e287a6eca4b52875336b720147b65ea5d",
+        "688db7ea47cebc7739d07499bfc354f9194051da"
+      ],
+      "lastResolution": {
+        "fromTag": "v2.8.0",
+        "toTag": "v2.9.0",
+        "originalCommit": "688db7ea47cebc7739d07499bfc354f9194051da",
+        "action": "adapt",
+        "replacementCommit": "ccce7b4473982c334854b239d31e75dee3dda212"
+      },
+      "appliedCommit": "ccce7b4473982c334854b239d31e75dee3dda212"
+    },
+    {
+      "name": "neutral-codex-hook-review",
+      "commit": "4d4340534856c343cb68a295a9d48177cf079ee7",
+      "upstreamPr": null,
+      "files": [
+        "docs/air-extensions.md",
+        "docs/codex-hook-review.md",
+        "src/AcpAgentRouter.ts",
+        "src/CodexAcpServer.ts",
+        "src/CodexAppServerClient.ts",
+        "src/CodexHookReview.ts",
+        "src/CodexHookTrust.ts",
+        "src/app-server-recovery/AppServerRecovery.ts",
+        "src/index.ts",
+        "src/__tests__/CodexACPAgent/initialize.test.ts",
+        "src/__tests__/app-server-recovery/recovery.test.ts",
+        "src/__tests__/scenarios/client-profiles.test.ts"
+      ],
+      "tests": [
+        "src/__tests__/CodexACPAgent/initialize.test.ts",
+        "src/__tests__/app-server-recovery/recovery.test.ts",
+        "src/__tests__/scenarios/client-profiles.test.ts"
+      ],
+      "disposition": "active",
+      "retiredCommits": [
+        "4d4340534856c343cb68a295a9d48177cf079ee7",
+        "c07bc0f3a802bcbca5f2e17f228643bc873e7c37",
+        "2341b05f7b74c45d21746f3ec7a617997a705b3a",
+        "2662df652707ac2c46068669a48737511f6eaf40",
+        "a2b37d3513d138f12c2b79842b54e65bda687621"
+      ],
+      "lastResolution": {
+        "fromTag": "v2.8.0",
+        "toTag": "v2.9.0",
+        "originalCommit": "a2b37d3513d138f12c2b79842b54e65bda687621",
+        "action": "adapt",
+        "replacementCommit": "23658664d761aa79ee379540c968deaf0c52944e"
+      },
+      "appliedCommit": "23658664d761aa79ee379540c968deaf0c52944e"
+    },
+    {
+      "name": "neutral-codex-hook-review-execution",
+      "commit": "960f77945bf94d7cb5fa6ea7fcedb01d210f2ce6",
+      "upstreamPr": null,
+      "files": [
+        "docs/codex-hook-review.md",
+        "src/AcpExtensions.ts",
+        "src/CodexAcpClient.ts",
+        "src/CodexAcpServer.ts",
+        "src/CodexAppServerClient.ts",
+        "src/CodexHookReview.ts",
+        "src/GoalExtension.ts",
+        "src/__tests__/app-server-recovery/recovery.test.ts"
+      ],
+      "tests": [
+        "src/__tests__/app-server-recovery/recovery.test.ts"
+      ],
+      "disposition": "active",
+      "retiredCommits": [
+        "960f77945bf94d7cb5fa6ea7fcedb01d210f2ce6",
+        "c0e41b9a03a5847aa4ee01198bc9535224840edd",
+        "78e7be64310b5894c9248ba5049566083b20a52f"
+      ],
+      "lastResolution": {
+        "fromTag": "v2.5.0",
+        "toTag": "v2.6.0",
+        "originalCommit": "78e7be64310b5894c9248ba5049566083b20a52f",
+        "action": "adapt",
+        "replacementCommit": "85c98719f8dcb8d2fa802dc32a46ca36926dc666"
+      },
+      "appliedCommit": "85c98719f8dcb8d2fa802dc32a46ca36926dc666"
+    },
+    {
+      "name": "async-questions",
+      "commit": "e57bcd768c8cebd1d3d17b840ae0db2e11639615",
+      "upstreamPr": 707,
+      "files": [
+        "README.md",
+        "docs/async-questions.md",
+        "src/ACPSessionConnection.ts",
+        "src/CodexAcpServer.ts",
+        "src/CodexAsyncQuestions.ts",
+        "src/CodexElicitationHandler.ts",
+        "src/CodexEventHandler.ts",
+        "src/__tests__/CodexACPAgent/agent-message-events.test.ts",
+        "src/__tests__/CodexACPAgent/async-questions.test.ts",
+        "src/__tests__/CodexACPAgent/data/agent-message-without-deltas.json",
+        "src/__tests__/CodexACPAgent/data/async-questions-v1-answered.json",
+        "src/__tests__/CodexACPAgent/data/async-questions-v1-dropped.json",
+        "src/__tests__/CodexACPAgent/data/async-questions-v1-rejected.json",
+        "src/__tests__/CodexACPAgent/data/async-questions-v2-answered.json",
+        "src/__tests__/CodexACPAgent/data/async-questions-v2-dropped.json",
+        "src/__tests__/CodexACPAgent/data/async-questions-v2-rejected.json",
+        "src/__tests__/CodexACPAgent/data/tool-calls-and-messages-v2-without-deltas.json",
+        "src/__tests__/CodexACPAgent/data/v1-load-session-async-question-answers.json",
+        "src/__tests__/CodexACPAgent/data/v2-resume-replay-async-question-answers.json",
+        "src/__tests__/CodexACPAgent/tool-calls-and-messages-v2.test.ts",
+        "src/__tests__/CodexACPAgent/v2-resume-replay.test.ts",
+        "src/__tests__/CodexAsyncQuestions.test.ts"
+      ],
+      "tests": [
+        "src/__tests__/CodexAsyncQuestions.test.ts",
+        "src/__tests__/CodexACPAgent/async-questions.test.ts",
+        "src/__tests__/CodexACPAgent/agent-message-events.test.ts",
+        "src/__tests__/CodexACPAgent/tool-calls-and-messages-v2.test.ts",
+        "src/__tests__/CodexACPAgent/v2-resume-replay.test.ts"
+      ],
+      "disposition": "dropped",
+      "retiredCommits": [
+        "e57bcd768c8cebd1d3d17b840ae0db2e11639615"
+      ],
+      "lastResolution": {
+        "fromTag": "v2.5.0",
+        "toTag": "v2.6.0",
+        "originalCommit": "e57bcd768c8cebd1d3d17b840ae0db2e11639615",
+        "action": "drop"
+      }
+    },
+    {
+      "name": "neutral-fork-point",
+      "commit": "fc9a61e080134d623df7e67e8fd8eb8729da875a",
+      "upstreamPr": null,
+      "files": [
+        "docs/air-extensions.md",
+        "src/CodexAcpServer.ts",
+        "src/SessionFork.ts",
+        "src/SessionMetadata.ts",
+        "src/__tests__/CodexACPAgent/CodexAcpClient.test.ts",
+        "src/__tests__/CodexACPAgent/initialize.test.ts",
+        "src/__tests__/CodexACPAgent/session-fork.test.ts",
+        "src/__tests__/CodexACPAgent/session-lifecycle-v2.test.ts"
+      ],
+      "tests": [
+        "src/__tests__/CodexACPAgent/CodexAcpClient.test.ts",
+        "src/__tests__/CodexACPAgent/initialize.test.ts",
+        "src/__tests__/CodexACPAgent/session-fork.test.ts",
+        "src/__tests__/CodexACPAgent/session-lifecycle-v2.test.ts"
+      ],
+      "disposition": "active",
+      "retiredCommits": [
+        "fc9a61e080134d623df7e67e8fd8eb8729da875a",
+        "b1084b78a9523fcc60645710b288e6a067851f94",
+        "fdcc23cba576cf69aeb098d0b954f5d54cd1546d",
+        "5fe00d9058b415d0a3afc94dc57af16e2f2f7d07"
+      ],
+      "lastResolution": {
+        "fromTag": "v2.8.0",
+        "toTag": "v2.9.0",
+        "originalCommit": "5fe00d9058b415d0a3afc94dc57af16e2f2f7d07",
+        "action": "adapt",
+        "replacementCommit": "beea5336305d56fb2a9082eb48c217e3a53429de"
+      },
+      "appliedCommit": "beea5336305d56fb2a9082eb48c217e3a53429de"
+    },
+    {
+      "name": "neutral-diff-patch",
+      "commit": "4ab2596b598e955944c2c1908a8765f24147c88d",
+      "upstreamPr": null,
+      "files": [
+        "docs/air-extensions.md",
+        "src/CodexAcpServer.ts",
+        "src/GitPatch.ts",
+        "src/__tests__/CodexACPAgent/file-change-events.test.ts",
+        "src/__tests__/CodexACPAgent/initialize-v2.test.ts",
+        "src/__tests__/CodexACPAgent/initialize.test.ts",
+        "src/__tests__/CodexACPAgent/load-session.test.ts",
+        "src/__tests__/tool-calls/tool-call-contract.test.ts",
+        "src/tool-calls/ClientCapabilities.ts",
+        "src/tool-calls/reporters/FileChangeReporter.ts"
+      ],
+      "tests": [
+        "src/__tests__/CodexACPAgent/file-change-events.test.ts",
+        "src/__tests__/CodexACPAgent/initialize-v2.test.ts",
+        "src/__tests__/CodexACPAgent/initialize.test.ts",
+        "src/__tests__/CodexACPAgent/load-session.test.ts",
+        "src/__tests__/tool-calls/tool-call-contract.test.ts"
+      ],
+      "disposition": "active",
+      "retiredCommits": [
+        "4ab2596b598e955944c2c1908a8765f24147c88d",
+        "c51a9ec2ff2c880668c7b680622533fa1d241364"
+      ],
+      "lastResolution": {
+        "fromTag": "v2.7.0",
+        "toTag": "v2.8.0",
+        "originalCommit": "c51a9ec2ff2c880668c7b680622533fa1d241364",
+        "action": "adapt",
+        "replacementCommit": "af7bb26f2d4f4024d28b033468815e4457a5eced"
+      },
+      "appliedCommit": "af7bb26f2d4f4024d28b033468815e4457a5eced"
+    },
+    {
+      "name": "neutral-session-failure",
+      "commit": "2a1384e5b60358a0da0145c17e467d31485743c2",
+      "upstreamPr": null,
+      "files": [
+        "docs/air-extensions.md",
+        "src/CodexAcpServer.ts",
+        "src/CodexEventHandler.ts",
+        "src/SessionFailureExtension.ts",
+        "src/__tests__/CodexACPAgent/auth-error-events.test.ts",
+        "src/__tests__/CodexACPAgent/initialize-v2.test.ts",
+        "src/__tests__/CodexACPAgent/initialize.test.ts",
+        "src/__tests__/CodexACPAgent/session-notices.test.ts",
+        "src/__tests__/CodexACPAgent/structured-failures-v2.test.ts",
+        "src/__tests__/CodexACPAgent/typed-session-failure-wire.test.ts",
+        "src/__tests__/acp-test-utils.ts",
+        "src/__tests__/tool-calls/tool-call-contract.test.ts",
+        "src/tool-calls/ClientCapabilities.ts"
+      ],
+      "tests": [
+        "src/__tests__/CodexACPAgent/auth-error-events.test.ts",
+        "src/__tests__/CodexACPAgent/initialize-v2.test.ts",
+        "src/__tests__/CodexACPAgent/initialize.test.ts",
+        "src/__tests__/CodexACPAgent/session-notices.test.ts",
+        "src/__tests__/CodexACPAgent/structured-failures-v2.test.ts",
+        "src/__tests__/CodexACPAgent/typed-session-failure-wire.test.ts",
+        "src/__tests__/tool-calls/tool-call-contract.test.ts"
+      ],
+      "disposition": "active",
+      "retiredCommits": [
+        "2a1384e5b60358a0da0145c17e467d31485743c2",
+        "8aaab396bdeb02f67061d2bf332b67dd4246a6b6",
+        "3f967164f1bbc784f3fb12df223cc5a93589e009",
+        "97fc9ba2d9a952469e5b41647da56848016b605b"
+      ],
+      "lastResolution": {
+        "fromTag": "v2.8.0",
+        "toTag": "v2.9.0",
+        "originalCommit": "97fc9ba2d9a952469e5b41647da56848016b605b",
+        "action": "adapt",
+        "replacementCommit": "dec1e1cfbba0d67141ea5c4b361e2a8a8b1c2b2b"
+      },
+      "appliedCommit": "dec1e1cfbba0d67141ea5c4b361e2a8a8b1c2b2b"
+    },
+    {
+      "name": "neutral-agent-file-change-report",
+      "commit": "a68042507683ef2eb4a6d15eff864300e77d897f",
+      "upstreamPr": null,
+      "files": [
+        "docs/air-extensions.md",
+        "src/AgentFileChangeReport.ts",
+        "src/CodexAcpServer.ts",
+        "src/__tests__/AgentFileChangeReport.test.ts",
+        "src/__tests__/CodexACPAgent/agent-file-change-report.test.ts",
+        "src/__tests__/CodexACPAgent/initialize-v2.test.ts",
+        "src/__tests__/CodexACPAgent/initialize.test.ts",
+        "src/__tests__/tool-calls/tool-call-contract.test.ts",
+        "src/tool-calls/ClientCapabilities.ts"
+      ],
+      "tests": [
+        "src/__tests__/AgentFileChangeReport.test.ts",
+        "src/__tests__/CodexACPAgent/agent-file-change-report.test.ts",
+        "src/__tests__/CodexACPAgent/initialize-v2.test.ts",
+        "src/__tests__/CodexACPAgent/initialize.test.ts",
+        "src/__tests__/tool-calls/tool-call-contract.test.ts"
+      ],
+      "disposition": "active",
+      "retiredCommits": [
+        "a68042507683ef2eb4a6d15eff864300e77d897f",
+        "95fb2c8e1fb83c98deb0f3c4bc6bda2d2807b95b"
+      ],
+      "lastResolution": {
+        "fromTag": "v2.7.0",
+        "toTag": "v2.8.0",
+        "originalCommit": "95fb2c8e1fb83c98deb0f3c4bc6bda2d2807b95b",
+        "action": "adapt",
+        "replacementCommit": "f86c114e4450ea20486b805e02171f65affe7cd0"
+      },
+      "appliedCommit": "f86c114e4450ea20486b805e02171f65affe7cd0"
+    },
+    {
+      "name": "neutral-permission-presentation",
+      "commit": "295ebe128a39c2c54be3619106799693f22dd0e5",
+      "upstreamPr": null,
+      "files": [
+        "docs/air-extensions.md",
+        "src/CodexAcpServer.ts",
+        "src/CodexAsyncQuestions.ts",
+        "src/CodexElicitationHandler.ts",
+        "src/__tests__/CodexACPAgent/approval-events.test.ts",
+        "src/__tests__/CodexACPAgent/elicitation-events.test.ts",
+        "src/__tests__/CodexACPAgent/initialize-v2.test.ts",
+        "src/__tests__/CodexACPAgent/initialize.test.ts",
+        "src/permissions/mcp.ts",
+        "src/permissions/metadata.ts",
+        "src/tool-calls/ClientCapabilities.ts"
+      ],
+      "tests": [
+        "src/__tests__/CodexACPAgent/approval-events.test.ts",
+        "src/__tests__/CodexACPAgent/elicitation-events.test.ts",
+        "src/__tests__/CodexACPAgent/initialize-v2.test.ts",
+        "src/__tests__/CodexACPAgent/initialize.test.ts"
+      ],
+      "disposition": "active",
+      "retiredCommits": [],
+      "lastResolution": {
+        "fromTag": "v2.9.0",
+        "toTag": "v2.10.0",
+        "originalCommit": "295ebe128a39c2c54be3619106799693f22dd0e5",
+        "action": "retain"
+      }
+    },
+    {
+      "name": "neutral-recommended-config-value",
+      "commit": "9181cce81f8c737dc1bbe921f964aa31d3ef11b3",
+      "upstreamPr": null,
+      "files": [
+        "docs/air-extensions.md",
+        "src/CodexAcpServer.ts",
+        "src/ModelConfigOption.ts",
+        "src/__tests__/CodexACPAgent/initialize-v2.test.ts",
+        "src/__tests__/CodexACPAgent/initialize.test.ts",
+        "src/__tests__/CodexACPAgent/session-config-options.test.ts",
+        "src/permissions/metadata.ts",
+        "src/tool-calls/ClientCapabilities.ts"
+      ],
+      "tests": [
+        "src/__tests__/CodexACPAgent/initialize-v2.test.ts",
+        "src/__tests__/CodexACPAgent/initialize.test.ts",
+        "src/__tests__/CodexACPAgent/session-config-options.test.ts"
+      ],
+      "disposition": "active",
+      "retiredCommits": [
+        "9181cce81f8c737dc1bbe921f964aa31d3ef11b3",
+        "ebc3010ea9675c7e7e8ec51bbf6bd7e55265af79"
+      ],
+      "lastResolution": {
+        "fromTag": "v2.9.0",
+        "toTag": "v2.10.0",
+        "originalCommit": "ebc3010ea9675c7e7e8ec51bbf6bd7e55265af79",
+        "action": "adapt",
+        "replacementCommit": "5ace1237e13e82b69ed32172c48ebaf9cf3252fc"
+      },
+      "appliedCommit": "5ace1237e13e82b69ed32172c48ebaf9cf3252fc"
+    },
+    {
+      "name": "neutral-command-presentation",
+      "commit": "ab965a0e99d047da935fed6bc107f8564e3df250",
+      "upstreamPr": null,
+      "files": [
+        "docs/air-extensions.md",
+        "src/CodexAcpServer.ts",
+        "src/CodexCommands.ts",
+        "src/__tests__/CodexACPAgent/CodexAcpClient.test.ts",
+        "src/__tests__/CodexACPAgent/initialize-v2.test.ts",
+        "src/__tests__/CodexACPAgent/initialize.test.ts",
+        "src/permissions/metadata.ts",
+        "src/tool-calls/ClientCapabilities.ts"
+      ],
+      "tests": [
+        "src/__tests__/CodexACPAgent/CodexAcpClient.test.ts",
+        "src/__tests__/CodexACPAgent/initialize-v2.test.ts",
+        "src/__tests__/CodexACPAgent/initialize.test.ts"
+      ],
+      "disposition": "active",
+      "retiredCommits": [],
+      "lastResolution": {
+        "fromTag": "v2.9.0",
+        "toTag": "v2.10.0",
+        "originalCommit": "ab965a0e99d047da935fed6bc107f8564e3df250",
+        "action": "retain"
+      }
+    },
+    {
+      "name": "neutral-prompt-suggestions",
+      "commit": "62ee6fec6365323b79a1ba1212246864491d7d1d",
+      "upstreamPr": null,
+      "files": [
+        "docs/air-extensions.md",
+        "src/CodexAcpServer.ts",
+        "src/PromptSuggestionGenerator.ts",
+        "src/__tests__/CodexACPAgent/initialize-v2.test.ts",
+        "src/__tests__/CodexACPAgent/initialize.test.ts",
+        "src/__tests__/CodexACPAgent/prompt-suggestions.test.ts",
+        "src/__tests__/CodexACPAgent/v2-prompt-harness.ts",
+        "src/__tests__/PromptSuggestionGenerator.test.ts",
+        "src/tool-calls/ClientCapabilities.ts"
+      ],
+      "tests": [
+        "src/__tests__/CodexACPAgent/initialize-v2.test.ts",
+        "src/__tests__/CodexACPAgent/initialize.test.ts",
+        "src/__tests__/CodexACPAgent/prompt-suggestions.test.ts",
+        "src/__tests__/PromptSuggestionGenerator.test.ts"
+      ],
+      "disposition": "active",
+      "retiredCommits": [],
+      "lastResolution": {
+        "fromTag": "v2.9.0",
+        "toTag": "v2.10.0",
+        "originalCommit": "62ee6fec6365323b79a1ba1212246864491d7d1d",
+        "action": "retain"
+      }
+    }
+  ],
+  "retiredCommits": [
+    "80d0acaeba53523cbcde1d54d0cd4179ebda128c",
+    "e4a8efbd0506ddb742db99a8f0423c5434c9ffca",
+    "6c5fe81ae35e7541910ea0e4149557ecf6ee4f5c",
+    "ae18089597602b1f8560d663905b22a1fb398348",
+    "4c365fb299c869bd0809c394cab89c762a539571",
+    "75a64c60badfcbe6cde31e269a85a29a45d96f85",
+    "efa92962f0d972680b7a1e3e60df608e64ebc5a2",
+    "a672b73fdc1db8778b0609d060c2179d7c23032d",
+    "8b601c3f7c7474d0ee987b95f95f424d55c7e144",
+    "0191d4ab454171c54527da1da78a828ffbe5445a",
+    "fd8a43cebc5d9328dcbc5600c3c7ccb396494a5e"
+  ],
+  "preservedTransitions": [],
+  "downstreamTransitions": [
+    {
+      "fromTag": "v2.2.2",
+      "toTag": "v2.3.0",
+      "commit": "80d0acaeba53523cbcde1d54d0cd4179ebda128c",
+      "subject": "build: prepare Alas downstream package metadata",
+      "patchId": "3af45780c60446d436598117d0c1c04e3452b99f",
+      "equivalentCommits": [
+        "e4a8efbd0506ddb742db99a8f0423c5434c9ffca"
+      ],
+      "action": "adapt",
+      "replacementCommit": "d4ce188f0cfb7573de0e15c1d4498d7dcb02119d"
+    },
+    {
+      "fromTag": "v2.2.2",
+      "toTag": "v2.3.0",
+      "commit": "6c5fe81ae35e7541910ea0e4149557ecf6ee4f5c",
+      "subject": "ci: harden downstream fork maintenance",
+      "patchId": "891e348aa17c0fa1fad597ffd47511dcdcd42b36",
+      "equivalentCommits": [
+        "ae18089597602b1f8560d663905b22a1fb398348"
+      ],
+      "action": "adapt",
+      "replacementCommit": "0e05e3f8f6b92c9d9782f6f18d6ed73c1891c836"
+    },
+    {
+      "fromTag": "v2.2.2",
+      "toTag": "v2.3.0",
+      "commit": "4c365fb299c869bd0809c394cab89c762a539571",
+      "subject": "fix: harden stable fork synchronization",
+      "patchId": "29e653cde6f2978b7e4895a5cda5e1b5131aac44",
+      "equivalentCommits": [
+        "75a64c60badfcbe6cde31e269a85a29a45d96f85"
+      ],
+      "action": "adapt",
+      "replacementCommit": "c00a789019d8fd6db7cf5146d536cb75ad0960e8"
+    },
+    {
+      "fromTag": "v2.7.0",
+      "toTag": "v2.8.0",
+      "commit": "efa92962f0d972680b7a1e3e60df608e64ebc5a2",
+      "subject": "chore: retain downstream workflows for review",
+      "patchId": "3b769ea277fea239216370bcccb3c00532bbbf94",
+      "equivalentCommits": [
+        "a672b73fdc1db8778b0609d060c2179d7c23032d",
+        "8b601c3f7c7474d0ee987b95f95f424d55c7e144",
+        "0191d4ab454171c54527da1da78a828ffbe5445a",
+        "fd8a43cebc5d9328dcbc5600c3c7ccb396494a5e"
+      ],
+      "action": "adapt",
+      "replacementCommit": "5bd3d59676f4d2e913e0e4d91414f1cea96e9361"
+    }
+  ]
+}
