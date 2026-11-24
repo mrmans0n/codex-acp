@@ -294,6 +294,7 @@ import {
     NEUTRAL_PERMISSION_PRESENTATION_META_KEY,
     NEUTRAL_QUESTION_CUSTOM_ANSWER_META_KEY,
     NEUTRAL_RECOMMENDED_CONFIG_VALUE_META_KEY,
+    NEUTRAL_COMMAND_PRESENTATION_META_KEY,
     neutralPresentationCapability,
 } from "./permissions/metadata";
 
@@ -1099,6 +1100,9 @@ export class CodexAcpServer {
             } : {}),
             ...(this.capabilities.neutralRecommendedConfigValue ? {
                 [NEUTRAL_RECOMMENDED_CONFIG_VALUE_META_KEY]: neutralPresentationCapability(),
+            } : {}),
+            ...(this.capabilities.neutralCommandPresentation ? {
+                [NEUTRAL_COMMAND_PRESENTATION_META_KEY]: neutralPresentationCapability(),
             } : {}),
             // The session index for a client that opted in without AIR, see `docs/air-extensions.md`.
             ...(neutralSessionIndex ? {
@@ -2580,7 +2584,7 @@ export class CodexAcpServer {
         const {configOptions} = await this.sessionOptions(params);
         return {
             ...(configOptions && {configOptions: toV2ConfigOptions(configOptions)}),
-            availableCommands: toV2AvailableCommands(this.availableCommands.getBuiltinCommands(this.capabilities.airClient)),
+            availableCommands: toV2AvailableCommands(this.availableCommands.getBuiltinCommands(this.capabilities)),
         };
     }
 
