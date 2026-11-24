@@ -279,6 +279,9 @@ const REVIEWED_LEDGER_PATH_EXTENSIONS = Object.freeze({
   "session-system-prompt-append": ["src/__tests__/CodexACPAgent/data/initialize-v1-routed-response.json"],
   // v2.3.0 (#620) moved ACP extension routing, including _codex/hooks/trust, into AcpAgentRouter.ts.
   "neutral-codex-hook-review": ["src/AcpAgentRouter.ts"],
+  // v2.12.0 (#744) renamed CodexBackgroundTerminalTasks.ts, which carries the provider-neutral spawn
+  // marker gate, to CodexBackgroundTasks.ts.
+  "async-tasks-opt-in": ["src/async-tasks/CodexBackgroundTasks.ts"],
 });
 
 test("the committed ledger matches the exact downstream patch commits plus reviewed path extensions", () => {
