@@ -1,6 +1,8 @@
 import {describe, expect, it, vi} from "vitest";
 import {createCodexMockTestFixture, createTestModel} from "../acp-test-utils";
 import type {McpStartupResult} from "../../mcp/McpStartupTracker";
+import type {Thread, ThreadItem, Turn} from "../../app-server/v2";
+import {connectSession, createThread, createTurn, sessionId, userMessageItem, type PromptSession} from "./v2-prompt-harness";
 
 describe("ACP session fork", () => {
     it("creates and installs a forked session", async () => {
@@ -42,7 +44,7 @@ describe("ACP session fork", () => {
             sessionId: "source-id",
             cwd: "/workspace",
             mcpServers: [],
-        }, expect.any(Function), expect.any(Function), undefined);
+        }, expect.any(Function), expect.any(Function), undefined, expect.any(Function));
         // Regression pin: v1 must keep sending `modes` (v2 drops it via `forkSessionV2`).
         expect(response.modes).toBeDefined();
     });
@@ -153,3 +155,57 @@ function deferred<T>(): {promise: Promise<T>, resolve: (value: T) => void} {
     });
     return {promise, resolve};
 }
+
+describe.each([1, 2] as const)("client-neutral fork point with session cursors, ACP v%s", version => {
+    const agentItem: ThreadItem = {type: "agentMessage", id: "agent-2", text: "Answer", phase: null, memoryCitation: null, moderation: null, delivery: null, questions: null};
+    const turn = (id: string, items: ThreadItem[]): Turn => ({...createTurn("completed", id), itemsView: "summary", items});
+    const turns: Turn[] = [
+        turn("turn-1", [userMessageItem("c1", "First")]),
+        turn("turn-2", [userMessageItem("c2", "Second"), agentItem]),
+        turn("turn-3", [userMessageItem("c3", "Third")]),
+    ];
+    let client: PromptSession;
+    let forkParams: unknown[];
+
+    async function connect() {
+        const forkPoint = {_meta: {forkPoint: {version: 1}}};
+        client = await connectSession(version, version === 1
+            ? {v1ClientCapabilities: {session: {cursors: {}}, ...forkPoint} as never}
+            : {clientCapabilities: forkPoint});
+        forkParams = [];
+        client.setCodexResponse("thread/turns/list", async () => ({data: turns, nextCursor: null}));
+        client.setCodexResponse("thread/read", async () => ({thread: {...createThread(), turns}}));
+        client.setCodexResponse("thread/fork", async params => {
+            forkParams.push(params);
+            const thread: Thread = createThread();
+            return {thread: {...thread, id: "fork-1", sessionId: "fork-1"}, model: "gpt-5", modelProvider: "openai", reasoningEffort: "medium", serviceTier: null};
+        });
+    }
+
+    const fork = (extra: Record<string, unknown>) => client.request("session/fork", {sessionId, cwd: "/workspace", mcpServers: [], ...extra});
+
+    it("rejects a cursorId together with the client-neutral fork point", async () => {
+        await connect();
+        try {
+            await expect(fork({cursorId: "before:turn-3", _meta: {forkPoint: {messageId: "agent-2"}}}))
+                .rejects.toMatchObject({code: -32602});
+            expect(forkParams).toEqual([]);
+        } finally {
+            client.connection.close();
+        }
+    });
+
+    it("keeps the fork at a cursor and at a fork point apart for an opted-in client", async () => {
+        await connect();
+        try {
+            const atCursor = await fork({cursorId: "before:turn-3"});
+            const atMessage = await fork({_meta: {forkPoint: {messageId: "agent-2"}}});
+
+            expect(atCursor._meta).toBeUndefined();
+            expect(atMessage._meta).toEqual({forkPoint: {boundary: "turn", messageId: "agent-2", turnId: "turn-2", lastItemId: "agent-2", matchedBy: "id"}});
+            expect(forkParams).toHaveLength(2);
+        } finally {
+            client.connection.close();
+        }
+    });
+});

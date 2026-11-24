@@ -8,6 +8,8 @@ import type {Model, Turn} from "./app-server/v2";
 import type {SessionMetadata} from "./SessionMetadata";
 import type {AcpMcpServer, WithAcpMcpServers} from "./McpServerConfig";
 import type {SessionInstructions} from "./ClientSystemPrompt";
+import type {CursorTurn} from "./SessionCursors";
+import {isRewindableThread} from "./SessionRewind";
 import {renderFileCitations} from "./CodexFileCitations";
 
 /** The top-level `_meta` key of the client-neutral fork point, see `docs/air-extensions.md`. */
@@ -74,6 +76,8 @@ export type SessionForkDependencies = {
     releaseFailedFork(threadId: string): Promise<void>;
     /** `thread/fork` answered with the thread of the fork. */
     forkCreated(threadId: string): void;
+    /** Finds the turns around the cursor of a fork at a session cursor. */
+    resolveCursorTurn(sessionId: string, cursorId: string): Promise<CursorTurn>;
 };
 
 export async function forkSession(
@@ -84,8 +88,7 @@ export async function forkSession(
 ): Promise<SessionMetadata> {
     const forkPoint = readForkPoint(request._meta);
     await dependencies.refreshSkills(request.cwd, additionalDirectories);
-    const match = forkPoint ? await resolveForkPoint(request, forkPoint, dependencies.codexClient) : undefined;
-    const lastTurnId = match?.turnId;
+    const {lastTurnId, match} = await resolveForkTurn(request, forkPoint, dependencies);
     const {config, skippedMcpServers, defaultPermissionProfileId: _defaultPermissionProfileId, ...permissionProfileMetadata} = await dependencies.createSessionConfig(
         request.cwd,
         additionalDirectories,
@@ -122,6 +125,7 @@ export async function forkSession(
         additionalDirectories,
         skippedMcpServers,
         activePermissionProfileId: response.activePermissionProfile?.id ?? null,
+        rewindable: isRewindableThread(response.thread),
         ...permissionProfileMetadata,
         ...(instructions ? {instructions} : {}),
         ...(forkPoint?.kind === "neutral" && match ? {
@@ -148,6 +152,29 @@ function readForkPoint(meta?: Record<string, unknown> | null): ForkPointRequest 
     if (hasNeutralForkPoint(meta)) return {kind: "neutral", ...readNeutralForkPoint(meta![NEUTRAL_FORK_POINT_META_KEY])};
     const air = readAirForkPoint(meta);
     return air ? {kind: "air", ...air} : undefined;
+}
+
+/**
+ * The last turn that a fork keeps: the turn before a standard `cursorId`'s turn, or the turn that holds a fork point's
+ * message. A fork takes one of them, never both.
+ */
+async function resolveForkTurn(
+    request: Pick<acp.ForkSessionRequest, "sessionId" | "cwd" | "cursorId">,
+    forkPoint: ForkPointRequest | undefined,
+    dependencies: Pick<SessionForkDependencies, "codexClient" | "resolveCursorTurn">,
+): Promise<{lastTurnId?: string; match?: ForkPointMatch}> {
+    if (request.cursorId != null) {
+        if (forkPoint) {
+            throw RequestError.invalidParams(undefined, forkPoint.kind === "air"
+                ? "A fork takes either a cursorId or an AIR fork point, not both"
+                : "A fork takes either a cursorId or a fork point, not both");
+        }
+        // The fork keeps the turns before the cursor's turn: `lastTurnId` is the last turn that stays.
+        return {lastTurnId: (await dependencies.resolveCursorTurn(request.sessionId, request.cursorId)).previousTurnId};
+    }
+    if (!forkPoint) return {};
+    const match = await resolveForkPoint(request, forkPoint, dependencies.codexClient);
+    return {lastTurnId: match.turnId, match};
 }
 
 async function resolveForkPoint(

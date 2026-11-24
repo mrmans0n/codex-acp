@@ -231,7 +231,7 @@ export class CodexCommands {
      * AIR gets a command action in `_meta.jetbrains.air.commandAction`, and a client that opted into the
      * client-neutral form gets it in `_meta.commandPresentation.action`.
      */
-    private getBuiltinCommands(capabilities: ClientCapabilities): AvailableCommand[] {
+    getBuiltinCommands(capabilities: ClientCapabilities): AvailableCommand[] {
         const commandAction = (action: Record<string, unknown>) => {
             const meta = {
                 ...airOnlyMeta(capabilities.airClient, AIR_COMMAND_ACTION_KEY, action),

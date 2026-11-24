@@ -4,7 +4,7 @@ import type {ThreadItem} from "../../app-server/v2";
 import {ACPSessionConnection, type UpdateSessionEvent} from "../../ACPSessionConnection";
 import {CodexAppServerClient} from "../../CodexAppServerClient";
 import type {CodexConnection} from "../../CodexJsonRpcConnection";
-import {CodexBackgroundTerminalTasks} from "../../async-tasks/CodexBackgroundTerminalTasks";
+import {CodexBackgroundTasks} from "../../async-tasks/CodexBackgroundTasks";
 import {ASYNC_TASK_STOP_METHOD} from "../../async-tasks/AsyncTaskExtension";
 import {CodexSubagentEventRouter} from "../../subagents/CodexSubagentEventRouter";
 import type {
@@ -17,6 +17,7 @@ import {
     setupPromptAndSendNotifications,
     deferred,
 } from "../acp-test-utils";
+import {connectSession} from "./v2-prompt-harness";
 
 type CommandExecutionItem = Extract<ThreadItem, {type: "commandExecution"}>;
 
@@ -31,7 +32,7 @@ describe("Codex background terminal tasks", () => {
         });
         const sessionState = createTestSessionState({sessionId: "thread-1"});
         sessionState.asyncTasks = (fixture.getCodexAcpAgent() as unknown as {
-            createAsyncTasks(sessionId: string): CodexBackgroundTerminalTasks;
+            createAsyncTasks(sessionId: string): CodexBackgroundTasks;
         }).createAsyncTasks(sessionState.sessionId);
         // @ts-expect-error - register the local session for session-generation checks
         fixture.getCodexAcpAgent().sessions.set(sessionState.sessionId, sessionState);
@@ -62,6 +63,28 @@ describe("Codex background terminal tasks", () => {
                     _meta: {jetbrains: {air: {asyncTasks: {backgrounded: true}}}},
                 })]));
         });
+    });
+
+    it("keeps the async-task extension for a client that opts in on ACP v1", async () => {
+        let agent: unknown;
+        await connectSession(1, {
+            v1ClientCapabilities: {_meta: {"async-tasks": true}},
+            onAgent: created => { agent = created; },
+        });
+
+        expect((agent as {createAsyncTasks(sessionId: string): CodexBackgroundTasks})
+            .createAsyncTasks("thread-1").enabled).toBe(true);
+    });
+
+    it("leaves ACP v2 background work to standard terminals, as upstream does for AIR", async () => {
+        let agent: unknown;
+        await connectSession(2, {
+            clientCapabilities: {_meta: {jetbrains: {air: {version: 1, capabilities: ["asyncTasks"]}}}},
+            onAgent: created => { agent = created; },
+        });
+
+        expect((agent as {createAsyncTasks(sessionId: string): CodexBackgroundTasks})
+            .createAsyncTasks("thread-1").enabled).toBe(false);
     });
 
     it("publishes a background terminal as a task linked to its command", async () => {
@@ -290,7 +313,7 @@ describe("Codex background terminal tasks", () => {
         }) as unknown as CodexConnection["process"];
         const fixture = createCodexMockTestFixture(undefined, process);
         const sessionState = createTestSessionState({sessionId: "thread-1"});
-        sessionState.asyncTasks = new CodexBackgroundTerminalTasks(
+        sessionState.asyncTasks = new CodexBackgroundTasks(
             true,
             sessionState.sessionId,
             fixture.getCodexAppServerClient(),
@@ -501,7 +524,7 @@ describe("Codex background terminal tasks", () => {
         const sessionState = createTestSessionState({sessionId: "thread-1"});
         const session = new ACPSessionConnection(fixture.getAcpConnection(), sessionState.sessionId);
         sessionState.subagents = new CodexSubagentEventRouter(sessionState.sessionId, true, session, () => {}, () => ({currentModel: null, availableModels: []}));
-        sessionState.asyncTasks = new CodexBackgroundTerminalTasks(
+        sessionState.asyncTasks = new CodexBackgroundTasks(
             true,
             sessionState.sessionId,
             fixture.getCodexAppServerClient(),
@@ -602,7 +625,7 @@ function createFixture(
         updates,
         list,
         terminate,
-        tasks: new CodexBackgroundTerminalTasks(enabled, "thread-1", appServer, session),
+        tasks: new CodexBackgroundTasks(enabled, "thread-1", appServer, session),
     };
 }
 

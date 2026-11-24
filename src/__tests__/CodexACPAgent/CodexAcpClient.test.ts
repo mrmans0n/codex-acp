@@ -15,6 +15,7 @@ import {
 } from "../acp-test-utils";
 import type {ServerNotification} from "../../app-server";
 import type {SessionState} from "../../CodexAcpServer";
+import type {CodexAcpClient} from "../../CodexAcpClient";
 import {AgentMode} from "../../AgentMode";
 import type {Model, ReviewStartResponse, ThreadGoal, TurnCompletedNotification, TurnStartParams} from "../../app-server/v2";
 import type {RateLimitsMap} from "../../RateLimitsMap";
@@ -28,7 +29,11 @@ import {
     requestsOf as requestsOfRecoveryServer,
 } from "../app-server-recovery/recovery-fixture";
 import {
+    codexResponse as harnessCodexResponse,
     connectSession,
+    createThread as createHarnessThread,
+    createTurn as createHarnessTurn,
+    userMessageItem as harnessUserMessageItem,
     cwd as harnessCwd,
     itemStarted as harnessItemStarted,
     sessionId as harnessSessionId,
@@ -3842,6 +3847,56 @@ describe('ACP server test', { timeout: 40_000 }, () => {
                 content: expect.objectContaining({text: "Working on it"}),
             }),
         ]));
+    });
+
+    it('refuses a goal set whose pre-prompt subscription settles after a rewind began', async () => {
+        const turns = [
+            {...createHarnessTurn("completed", "turn-1"), itemsView: "summary" as const, items: [harnessUserMessageItem("c1", "First")]},
+            {...createHarnessTurn("completed", "turn-2"), itemsView: "summary" as const, items: [harnessUserMessageItem("c2", "Second")]},
+        ];
+        let finishRevert: () => void = () => {};
+        const reverting = new Promise<void>(resolve => { finishRevert = resolve; });
+        const reverts: unknown[] = [];
+        const client = await connectSession(1, {
+            v1ClientCapabilities: {session: {cursors: {}}, _meta: {jetbrains: {air: {version: 1, capabilities: ["sessionRewind"]}}}} as never,
+            codexResponses: {
+                "thread/start": async () => ({
+                    ...(harnessCodexResponse("thread/start") as object),
+                    thread: {...createHarnessThread(), historyMode: "paginated"},
+                }),
+                "thread/turns/list": async () => ({data: turns, nextCursor: null}),
+                "thread/revert": async params => {
+                    reverts.push(params);
+                    await reverting;
+                    return {thread: createHarnessThread(), turnsBackwardsCursor: null, itemsBackwardsCursor: null};
+                },
+            },
+        });
+        try {
+            const codexAcpClient = (client.agent as unknown as {codexAcpClient: CodexAcpClient}).codexAcpClient;
+            const setGoal = vi.spyOn(codexAcpClient, "setGoal").mockResolvedValue(undefined as never);
+            let releaseSubscription: () => void = () => {};
+            const subscriptionHeld = new Promise<void>(resolve => { releaseSubscription = resolve; });
+            const subscribe = codexAcpClient.subscribeToSessionEvents.bind(codexAcpClient);
+            const subscribeSpy = vi.spyOn(codexAcpClient, "subscribeToSessionEvents")
+                .mockImplementation(async (...args: Parameters<CodexAcpClient["subscribeToSessionEvents"]>) => {
+                    await subscriptionHeld;
+                    return subscribe(...args);
+                });
+
+            const goal = client.request("_session/goal", {sessionId: harnessSessionId, action: "set", objective: "Ship"});
+            await vi.waitFor(() => expect(subscribeSpy).toHaveBeenCalled());
+            const rewinding = client.request("_session/rewind", {sessionId: harnessSessionId, cursorId: "before:turn-2"});
+            await vi.waitFor(() => expect(reverts).toHaveLength(1));
+            releaseSubscription();
+
+            await expect(goal).rejects.toMatchObject({code: -32600});
+            expect(setGoal).not.toHaveBeenCalled();
+            finishRevert();
+            await expect(rewinding).resolves.toEqual({rewound: true});
+        } finally {
+            client.connection.close();
+        }
     });
 
     it('forwards goal work set before the first prompt again after the app-server restarted', async () => {
