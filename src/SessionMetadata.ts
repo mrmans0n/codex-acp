@@ -9,6 +9,7 @@ import type {
     ThreadStatus,
 } from "./app-server/v2";
 import type {SessionInstructions} from "./ClientSystemPrompt";
+import type {ForkPointResult} from "./SessionFork";
 import type {McpStartupFailure} from "./mcp/McpStartupTracker";
 
 export type SessionOptionMetadata = {
@@ -33,6 +34,8 @@ export type SessionMetadata = SessionOptionMetadata & {
     sessionTitle?: string | null,
     /** Whether `thread/revert` takes the thread, see `isRewindableThread`. */
     rewindable?: boolean,
+    /** The fork point that a client-neutral `session/fork` resolved. */
+    forkPoint?: ForkPointResult,
 }
 
 export type SessionMetadataWithThread = SessionMetadata & {
