@@ -169,6 +169,7 @@ export class AsyncQuestionElicitations {
         private readonly sessionId: string,
         private readonly clientCapabilities: acp.ClientCapabilities | null,
         private readonly client: AsyncQuestionClient,
+        private readonly neutralCustomAnswer = false,
     ) {}
 
     /** Opens the questions of a completed async message without waiting for an answer. */
@@ -203,7 +204,7 @@ export class AsyncQuestionElicitations {
             mode: "form",
             message: "Codex keeps working while you answer. Your answer continues the conversation.",
             // Questions are answered independently, as in Codex.
-            requestedSchema: buildUserInputSchema(questions, this.clientCapabilities, false),
+            requestedSchema: buildUserInputSchema(questions, this.clientCapabilities, false, this.neutralCustomAnswer),
             _meta: {codex: {delivery: "async"}},
         };
         void this.client.createElicitation(request, pending.signal).then(
