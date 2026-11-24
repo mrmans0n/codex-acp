@@ -17,6 +17,7 @@ import {
     setupPromptAndSendNotifications,
     deferred,
 } from "../acp-test-utils";
+import {connectSession} from "./v2-prompt-harness";
 
 type CommandExecutionItem = Extract<ThreadItem, {type: "commandExecution"}>;
 
@@ -26,16 +27,13 @@ describe("Codex background terminal tasks", () => {
         await fixture.getCodexAcpAgent().initialize({
             protocolVersion: 1,
             clientCapabilities: {
-                _meta: {jetbrains: {air: {version: 1, capabilities: ["asyncTasks"]}}},
+                _meta: {goal: {}, "async-tasks": true},
             },
         });
         const sessionState = createTestSessionState({sessionId: "thread-1"});
-        sessionState.asyncTasks = new CodexBackgroundTasks(
-            true,
-            sessionState.sessionId,
-            fixture.getCodexAppServerClient(),
-            new ACPSessionConnection(fixture.getAcpConnection(), sessionState.sessionId),
-        );
+        sessionState.asyncTasks = (fixture.getCodexAcpAgent() as unknown as {
+            createAsyncTasks(sessionId: string): CodexBackgroundTasks;
+        }).createAsyncTasks(sessionState.sessionId);
         // @ts-expect-error - register the local session for session-generation checks
         fixture.getCodexAcpAgent().sessions.set(sessionState.sessionId, sessionState);
         const rawCommand = "/bin/zsh -lc 'npm run build'";
@@ -57,7 +55,36 @@ describe("Codex background terminal tasks", () => {
                 name: "npm run build",
                 toolCallId: "command-1",
             })]);
+            expect(fixture.getAcpConnectionEvents([])
+                .filter(event => event.method === "sessionUpdate")
+                .map(event => event.args[0].update)
+                .filter(update => update.sessionUpdate === "tool_call_update"))
+                .not.toEqual(expect.arrayContaining([expect.objectContaining({
+                    _meta: {jetbrains: {air: {asyncTasks: {backgrounded: true}}}},
+                })]));
         });
+    });
+
+    it("keeps the async-task extension for a client that opts in on ACP v1", async () => {
+        let agent: unknown;
+        await connectSession(1, {
+            v1ClientCapabilities: {_meta: {"async-tasks": true}},
+            onAgent: created => { agent = created; },
+        });
+
+        expect((agent as {createAsyncTasks(sessionId: string): CodexBackgroundTasks})
+            .createAsyncTasks("thread-1").enabled).toBe(true);
+    });
+
+    it("leaves ACP v2 background work to standard terminals, as upstream does for AIR", async () => {
+        let agent: unknown;
+        await connectSession(2, {
+            clientCapabilities: {_meta: {jetbrains: {air: {version: 1, capabilities: ["asyncTasks"]}}}},
+            onAgent: created => { agent = created; },
+        });
+
+        expect((agent as {createAsyncTasks(sessionId: string): CodexBackgroundTasks})
+            .createAsyncTasks("thread-1").enabled).toBe(false);
     });
 
     it("publishes a background terminal as a task linked to its command", async () => {
@@ -364,8 +391,12 @@ describe("Codex background terminal tasks", () => {
             .toEqual([expect.objectContaining({state: "completed"})]);
     });
 
-    it("routes the AIR stop request to the session task runtime", async () => {
+    it("routes the provider-neutral async-task stop request to the session task runtime", async () => {
         const fixture = createCodexMockTestFixture();
+        await fixture.getCodexAcpAgent().initialize({
+            protocolVersion: 1,
+            clientCapabilities: {_meta: {"async-tasks": true}},
+        });
         const sessionState = createTestSessionState({sessionId: "thread-1"});
         const stop = vi.spyOn(sessionState.asyncTasks, "stop").mockResolvedValue(true);
         // @ts-expect-error - register the local session for the extension request path
