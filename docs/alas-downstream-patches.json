@@ -44,6 +44,7 @@
         "src/__tests__/CodexACPAgent/initialize.test.ts",
         "src/__tests__/tool-calls/tool-call-contract.test.ts",
         "src/async-tasks/AsyncTaskExtension.ts",
+        "src/async-tasks/CodexBackgroundTasks.ts",
         "src/async-tasks/CodexBackgroundTerminalTasks.ts",
         "src/tool-calls/ClientCapabilities.ts"
       ],
