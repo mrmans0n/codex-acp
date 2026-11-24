@@ -12,6 +12,11 @@ import {
 import {type AgentFileChangeReportFormat, clientRequestsNeutralAgentFileChangeReport} from "../AgentFileChangeReport";
 import {clientRequestsNeutralDiffPatch} from "../GitPatch";
 import {clientRequestsNeutralSessionFailure, type SessionFailureFormat} from "../SessionFailureExtension";
+import {
+    clientRequestsNeutralPresentation,
+    NEUTRAL_PERMISSION_PRESENTATION_META_KEY,
+    NEUTRAL_QUESTION_CUSTOM_ANSWER_META_KEY,
+} from "../permissions/metadata";
 
 /** The `_meta` key of a command output chunk. */
 type TerminalOutputKey = "terminal_output" | "terminal_output_delta";
@@ -45,6 +50,8 @@ type ClientCapabilityValues = {
     readonly sessionFailureFormat: SessionFailureFormat;
     readonly agentFileChangeReportFormat: AgentFileChangeReportFormat;
     readonly permissionPromptFields: boolean;
+    readonly neutralPermissionPresentation: boolean;
+    readonly neutralQuestionCustomAnswer: boolean;
 };
 
 /**
@@ -68,6 +75,8 @@ export class ClientCapabilities {
         sessionFailureFormat: "none",
         agentFileChangeReportFormat: "none",
         permissionPromptFields: false,
+        neutralPermissionPresentation: false,
+        neutralQuestionCustomAnswer: false,
     });
 
     /** The client declares `_meta.jetbrains.air`. */
@@ -90,6 +99,10 @@ export class ClientCapabilities {
     readonly agentFileChangeReportFormat: AgentFileChangeReportFormat;
     /** A permission request has its own `title` and `description` (ACP v2). */
     readonly permissionPromptFields: boolean;
+    /** The client gets the permission presentation in `_meta.permissionPresentation`. Only ACP v1 reads the opt-in. */
+    readonly neutralPermissionPresentation: boolean;
+    /** A question's note field carries `_meta.questionCustomAnswer`. Only ACP v1 reads the opt-in. */
+    readonly neutralQuestionCustomAnswer: boolean;
 
     private constructor(values: ClientCapabilityValues) {
         this.airClient = values.airClient;
@@ -104,6 +117,8 @@ export class ClientCapabilities {
         this.sessionFailureFormat = values.sessionFailureFormat;
         this.agentFileChangeReportFormat = values.agentFileChangeReportFormat;
         this.permissionPromptFields = values.permissionPromptFields;
+        this.neutralPermissionPresentation = values.neutralPermissionPresentation;
+        this.neutralQuestionCustomAnswer = values.neutralQuestionCustomAnswer;
     }
 
     static from(capabilities: acp.ClientCapabilities | null | undefined): ClientCapabilities {
@@ -136,6 +151,8 @@ export class ClientCapabilities {
                 ? "neutral"
                 : clientSupportsAirCapability(capabilities, AIR_AGENT_FILE_CHANGE_REPORT_KEY) ? "air" : "none",
             permissionPromptFields: false,
+            neutralPermissionPresentation: clientRequestsNeutralPresentation(capabilities, NEUTRAL_PERMISSION_PRESENTATION_META_KEY),
+            neutralQuestionCustomAnswer: clientRequestsNeutralPresentation(capabilities, NEUTRAL_QUESTION_CUSTOM_ANSWER_META_KEY),
         });
     }
 
@@ -165,6 +182,9 @@ export class ClientCapabilities {
                 ? "air"
                 : "none",
             permissionPromptFields: true,
+            // A v2 request has its own title and description, so v2 ignores both client-neutral opt-ins.
+            neutralPermissionPresentation: false,
+            neutralQuestionCustomAnswer: false,
         });
     }
 
