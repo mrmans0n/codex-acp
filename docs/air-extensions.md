@@ -62,7 +62,7 @@ Only these differences are allowed:
 - Bug fixes: a unique MCP startup tool call id, the result of a dynamic tool in `content`,
   no output after a tool call ended, a terminal status for a replayed image generation,
   and the command as the title of a command approval.
-- Feature changes for every client: the `/mcp` command has a new description and an input hint; initialization advertises the opt-in [system prompt append extension](system-prompt-extension.md).
+- Feature changes for every client: the `/mcp` command has a new description and an input hint.
   The adapter advertises [`auth.status`](auth-status.md) and sends `auth/status_update` alongside the legacy `_auth/status_update`.
   Session `configOptions` list model, reasoning effort, fast mode, permissions mode, and collaboration mode
   in that order, omitting unavailable options.
@@ -186,9 +186,6 @@ The goal extension has no client capability.
 The agent advertises the `goal` object, and the client uses the control method when it wants to.
 
 ### Hook trust
-
-Clients that are not AIR can opt into [process-bound hook review](codex-hook-review.md) without changing their identity or tool/subagent contract.
-
 
 The adapter passes `CODEX_CONFIG.hooks` to Codex App Server at startup as a TOML override and removes them from the later thread config.
 This lets AIR review the same process that will open the session. The adapter keeps other session config fields unchanged.
@@ -381,7 +378,6 @@ It applies to an ACP `diff` content block.
 The adapter uses patch mode only when the client declares `diffPatch`.
 The agent advertises `diffPatch` to AIR.
 Without the client declaration, the adapter sends the standard `oldText` and `newText` values.
-A client that is not AIR can opt in without the AIR namespace, see [Client-neutral diff patch](#client-neutral-diff-patch).
 
 ### Diff content
 
@@ -474,46 +470,6 @@ It drops the file headers that Codex supplied, so that all headers name the same
 It builds one full-file patch for an addition or a deletion from the content that Codex supplied.
 The adapter applies this mode to live file changes and to replayed session history.
 It does not read the current file when it can forward a provider patch.
-
-### Client-neutral diff patch
-
-A client that is not AIR can get the same patches without the `_meta.jetbrains.air` namespace.
-It opts in with `initialize.clientCapabilities._meta`:
-
-```json
-{ "diffPatch": { "version": 1 } }
-```
-
-- Accepted only when `diffPatch` is an object whose `version` is an integer of at least 1. Anything else
-  enables nothing.
-- The opt-in is an ACP v1 extension. The `initialize` answer of an opted-in client has the top-level
-  `_meta.diffPatch: {"version": 1, "format": "git_patch"}`.
-- ACP v2 ignores the opt-in: a v2 diff carries its own Git patch.
-
-Each patch block then carries the payload in its top-level `_meta.diffPatch`, next to `_meta.kind`:
-
-```json
-{
-  "type": "diff",
-  "path": "/workspace/src/App.ts",
-  "oldText": null,
-  "newText": "",
-  "_meta": {
-    "kind": "update",
-    "diffPatch": {
-      "version": 1,
-      "format": "git_patch",
-      "text": "diff --git a/workspace/src/App.ts b/workspace/src/App.ts\n--- a/workspace/src/App.ts\n+++ b/workspace/src/App.ts\n@@ -1 +1 @@\n-old\n+new\n"
-    }
-  }
-}
-```
-
-- The fields, the patch rules, the placeholders, the [fallback](#fallback) and the [Codex behavior](#codex-behavior)
-  are those of the AIR form. Only the location of the payload differs.
-- A client that declares both the AIR `diffPatch` capability and the client-neutral opt-in gets only the
-  client-neutral form. Its AIR capability list still names `diffPatch`.
-- AIR clients that do not send the client-neutral opt-in get the AIR form, unchanged.
 
 ## Permission presentation
 
@@ -699,34 +655,6 @@ The active permission surface is the app-server v2 request methods:
 
 The deprecated `execCommandApproval` and `applyPatchApproval` methods are not a second permission pipeline.
 
-### Client-neutral permission presentation
-
-Any client can get the same records at top-level `_meta.permissionPresentation` in place of `_meta.jetbrains.air.permission`, on the request and on an MCP elicitation option.
-It opts in at `initialize` with `clientCapabilities._meta.permissionPresentation: { "version": 1 }`.
-Only an object whose `version` is an integer of at least 1 opts in; `true`, a string, an array, `null`, a missing `version`, `0` or a fraction enables nothing.
-The `initialize` response of an opted-in client carries `_meta.permissionPresentation: { "version": 1 }`, under ACP v1 only.
-
-- The fields and the safety rules are those of the AIR record. The record is a display hint, and the option ids and decisions do not change.
-- The client keeps the request tool call of a client that is not AIR.
-- A client that declares AIR too gets both forms.
-- ACP v2 ignores the opt-in: a v2 request has its own `title` and `description`.
-
-### Client-neutral question custom answer
-
-Any client can get an explicit link from a `request_user_input` note field to its question.
-It opts in at `initialize` with `clientCapabilities._meta.questionCustomAnswer: { "version": 1 }`, under the same rule.
-The `initialize` response of an opted-in client carries `_meta.questionCustomAnswer: { "version": 1 }`, under ACP v1 only.
-The note field of a question then also carries, in the blocking and the async form:
-
-```json
-{ "version": 1, "questionId": "<question field key>" }
-```
-
-- `questionId` names the field of the question. A note id can gain a suffix on a collision, so a client must never derive the link from the field key or the label.
-- The rest of the form and the reading of the response stay as they are for a client that is not AIR, including the `None of the above` option. The AIR typed answer stays AIR only.
-- An MCP form elicitation gets no marker from the adapter.
-- ACP v2 ignores the opt-in.
-
 ## Plan content delta and plan review
 
 ### Plan stream
@@ -774,9 +702,7 @@ The final update of that tool call puts the decision text in `rawOutput`.
 The goal extension exposes a long-running, session-scoped objective.
 It is shaped like a possible future first-class ACP API.
 The adapter sends no other goal key.
-AIR gets the goal capability and snapshots as before.
-A client that is not AIR can opt in by declaring `clientCapabilities._meta.goal: {}`.
-The opt-in is an ACP v1 extension: on ACP v2 only AIR gets the goal capability and snapshots.
+Only AIR gets the goal capability and the goal snapshots.
 Another client gets no goal key and no `session_info_update` for a goal.
 
 ### Capability
@@ -789,8 +715,6 @@ The `initialize` response advertises the goal support:
 
 `actions` is the subset of `set`, `pause`, `resume`, and `clear` that the adapter supports.
 A client must not assume support for an action that is not advertised.
-AIR receives the capability in `_meta.jetbrains.air.goal`.
-An opted-in client that is not AIR receives it in `_meta.goal`.
 
 ### Control request
 
@@ -801,8 +725,7 @@ The adapter still accepts `_codex/session/goal_control` as a legacy alias. It do
 
 ### Session state
 
-The adapter publishes the current snapshot in `session_info_update._meta.jetbrains.air.goal` for AIR
-and `session_info_update._meta.goal` for an opted-in client that is not AIR.
+The adapter publishes the current snapshot in `session_info_update._meta.jetbrains.air.goal`.
 Clearing a goal publishes `goal: null`.
 
 ```json
@@ -861,14 +784,6 @@ When the client declares `recommendedValue`, a selector with a recommendation ca
 
 Without the capability, the config options keep their old shape and carry no recommendation.
 
-### Client-neutral form
-
-A client that isn't AIR can opt in with `clientCapabilities._meta.recommendedConfigValue: { "version": 1 }`, an object whose `version` is an integer of at least 1, and gets `_meta.recommendedConfigValue: { "version": 1 }` back from `initialize`. ACP v2 ignores the opt-in.
-
-A selector with a recommendation then carries `_meta.recommendedConfigValue: { "version": 1, "value": "medium" }`, under the same rules as above. A client that declares AIR too gets both records.
-
-The client-neutral opt-in adds no `reasoningEfforts` to the model entries: that key stays AIR-only, see [Model reasoning efforts](#model-reasoning-efforts).
-
 ## Model reasoning efforts
 
 The `reasoningEfforts` key lets a client show the efforts of a model before the user selects it.
@@ -905,8 +820,10 @@ A model entry with efforts carries:
 ## Async tasks
 
 Codex app-server owns shell commands that keep running after their tool call.
-The adapter exposes them as async tasks when the client declares `asyncTasks`.
-Without the capability, the adapter sends no async task update.
+The legacy Air extension exposes them as async tasks when the client declares `asyncTasks`.
+Without the capability, the adapter sends no legacy async task update.
+ACP v1 uses `async_task_spawned`, `async_task_progress`, and `async_task_state_update`.
+ACP v2 uses standard terminals and background snapshots. See [background work](background-work.md).
 
 ### Lifecycle
 
@@ -942,7 +859,6 @@ It returns `{ "stopped": true }` after app-server accepts the termination.
 
 Standard ACP describes a change from one tool call. It has no complete file list for one prompt turn.
 The version 1 `agentFileChangeReport` extension adds that list.
-A client that is not AIR can opt in without the AIR namespace, see [Client-neutral agent file-change report](#client-neutral-agent-file-change-report).
 
 ### Request
 
@@ -1016,57 +932,6 @@ The client must match the request id.
 It must ignore a duplicate, stale, malformed, or unavailable report.
 Rollback is outside this extension. The adapter advertises no `undo` or `rollback` command.
 
-### Client-neutral agent file-change report
-
-A client that is not AIR can get the same report without the `_meta.jetbrains.air` namespace.
-It opts in with `initialize.clientCapabilities._meta`:
-
-```json
-{ "agentFileChangeReport": { "version": 1 } }
-```
-
-- Accepted only when `agentFileChangeReport` is an object whose `version` is an integer of at least 1. Anything else
-  enables nothing.
-- The opt-in is an ACP v1 extension. The `initialize` answer of an opted-in client has the top-level
-  `_meta.agentFileChangeReport: {"version": 1}`.
-- ACP v2 ignores the opt-in.
-
-The client asks for a report with the top-level `_meta` of `session/prompt`:
-
-```json
-{ "_meta": { "agentFileChangeReportRequest": { "version": 1, "requestId": "a-unique-request-id" } } }
-```
-
-The [request](#request) rules apply: a malformed request is ignored.
-The adapter retains the turn diffs of a prompt only when it has a valid request.
-
-The report goes in the top-level `_meta.agentFileChangeReport` of the `session_info_update`:
-
-```json
-{
-  "sessionUpdate": "session_info_update",
-  "_meta": {
-    "agentFileChangeReport": {
-      "version": 1,
-      "requestId": "a-unique-request-id",
-      "status": "reported",
-      "paths": ["/workspace/src/App.ts"],
-      "declaredComplete": false,
-      "truncated": false,
-      "uncertainty": "Codex turn diffs may omit same-content renames and changes made outside apply_patch, including shell commands, version-control commands, generators, and child processes."
-    }
-  }
-}
-```
-
-The report object, its limits, its timing, the [Codex source](#codex-source) and the [unavailable reasons](#unavailable-report) are those of the AIR form.
-
-- A client that declares both the AIR `agentFileChangeReport` capability and the client-neutral opt-in gets only the
-  client-neutral form: the adapter reads only the top-level request and ignores one in the AIR namespace.
-  Its AIR capability list still names `agentFileChangeReport`.
-- AIR clients that do not send the client-neutral opt-in use the AIR form, unchanged. They get no report for a
-  top-level request.
-
 ## Session failure
 
 The `sessionFailure` extension sends warnings and errors as durable transcript entries.
@@ -1082,8 +947,6 @@ JSON-RPC errors, `Warning:` and `Config warning:` text chunks, and `session_info
 A client can also declare the ACP `clientCapabilities.session.notices`.
 Then a `warning`, `configWarning`, or `deprecationNotice` notification goes out as an ACP `notice` session update.
 It does not go out as a `sessionFailure` record. Errors still use `sessionFailure`.
-
-A client that is not AIR can opt in without the AIR namespace, see [Client-neutral session failure](#client-neutral-session-failure).
 
 ### Record
 
@@ -1180,86 +1043,23 @@ A retry warning stops being active when Codex produces turn content again.
 A successful turn ends an active warning of that turn.
 Recovery never removes the transcript record.
 
-### Client-neutral session failure
-
-A client that is not AIR can get the same typed lane without the `_meta.jetbrains.air` namespace.
-It opts in with `initialize.clientCapabilities._meta`:
-
-```json
-{ "sessionFailure": { "version": 1 } }
-```
-
-- Accepted only when `sessionFailure` is an object whose `version` is an integer of at least 1. Anything else
-  enables nothing.
-- The opt-in is an ACP v1 extension. The `initialize` answer of an opted-in client has the top-level
-  `_meta.sessionFailure: {"version": 1}`.
-- ACP v2 ignores the opt-in: a v2 terminal failure is reported with `state_update.error`.
-
-The opt-in selects the whole lane, not just where the record goes. The [delivery](#delivery), the identity,
-the [categories and actions](#categories-and-actions), the [title and details](#title-and-details), the
-[recovery](#recovery) and the `session.notices` rule are those of the AIR form. In particular:
-
-- A terminal failure of the running turn ends the prompt with `stopReason: end_turn` and the record, not with agent
-  text or a JSON-RPC error. A prompt that failed because the Codex process exited or the adapter failed
-  unexpectedly does the same.
-- Records replace `_meta.codex.error`. Records or, with `session.notices`, ACP `notice` updates replace the
-  `Warning:` and `Config warning:` text chunks.
-- `unauthorized` and HTTP 401 still end the prompt with the ACP `authRequired` error and no record.
-
-The record goes in the top-level `_meta.sessionFailure` of a `session_info_update` or of the `PromptResponse`:
-
-```json
-{
-  "stopReason": "end_turn",
-  "_meta": {
-    "sessionFailure": {
-      "version": 1,
-      "id": "turn-7:error",
-      "revision": 1,
-      "category": "limit",
-      "severity": "error",
-      "title": "You've hit your usage limit.",
-      "actions": [],
-      "kind": "quota_exhausted"
-    }
-  }
-}
-```
-
-It has the fields of the [AIR record](#record), plus `version` and:
-
-| Field | Required | Type | Meaning |
-| --- | --- | --- | --- |
-| `kind` | yes | open string | The adapter's internal kind of the failure. Ignore a value that you do not know. |
-
-The current kinds are `transport_lost`, `rate_limited`, `quota_exhausted`, `overloaded`, `context_exhausted`,
-`budget_exhausted`, `policy_denied`, `bad_request`, `provider_error`, `internal_error`, and `notice` for a warning
-record that comes from a Codex notice. A retry warning has the kind of its failure.
-
-- Revisions of an id only increase for the whole connection, also across prompts and `session/load`, and a new
-  session-scoped incident always gets a new id. A new adapter process starts over.
-- A client that declares both the AIR `sessionFailure` capability and the client-neutral opt-in gets only the
-  client-neutral form. Its AIR capability list still names `sessionFailure`.
-- AIR clients that do not send the client-neutral opt-in get the AIR form, unchanged. The AIR record has no `kind`.
-
 ## Native subagent sessions
 
-AIR keeps the private subagent contract that predates the ACP Subagent Sessions RFD.
-[Subagent sessions](subagent-sessions.md#air-legacy-contract) describes its lifecycle and the standard contract of other clients.
-This section covers only the AIR bridge.
+ACP v2 always uses the standard subagent contract, including for Air clients.
+[Subagent sessions](subagent-sessions.md) describes its lifecycle, delegated messages, and session references.
+This section covers the private Air bridge on ACP v1.
+It sends `subagent_spawned` and `subagent_state_update`.
 
-- AIR declares `nativeSubagentSessions` in `_meta.jetbrains.air.capabilities`, or on v1 `clientCapabilities.subagents: {}`.
-- Either signal enables native subagent sessions for AIR.
-- The agent advertises `agentCapabilities.sessionCapabilities.subagents` and `nativeSubagentSessions` to AIR only.
-  A client that is not AIR gets neither, because the RFD defines no Agent-side capability.
+- Air v1 declares `nativeSubagentSessions` in `_meta.jetbrains.air.capabilities`, or `clientCapabilities.subagents: {}`.
+- Either signal enables the legacy bridge for Air v1.
+- Only that bridge advertises `agentCapabilities.sessionCapabilities.subagents` and `nativeSubagentSessions`.
 - Without either signal, a Codex subagent stays an ordinary tool call.
-  AIR gets `_meta.jetbrains.air.subagent: true` on a spawn. Another client gets the tool call without `_meta`.
+  Air v1 gets `_meta.jetbrains.air.subagent: true` on a spawn. Another client gets the tool call without `_meta`.
 
 ## Session index
 
 AIR uses `session/list` as its index of Codex threads when it declares `sessionIndex`.
-Everything in this section applies only to such a client, or to a client that is not AIR and opts in as in
-[Client-neutral session index](#client-neutral-session-index). The `initialize` answer to AIR lists `sessionIndex`,
+Everything in this section applies only to such a client. The `initialize` answer to it lists `sessionIndex`,
 `sessionBatchGet`, `sessionArchive`, `sessionRename`, `sessionListSubscribe` and `sessionWorktrees` in `_meta.jetbrains.air.capabilities`.
 Another client, AIR included, keeps the old `session/list`, `session/delete` and `initialize` answers.
 ACP v1 and v2 connections get the same session index.
@@ -1623,39 +1423,6 @@ Remaining differences:
 - Archive stops a session that is open here, as `session/close` does; #2161 leaves execution alone. The ACP session
   list extensions RFD proposes this change to #2161.
 
-### Client-neutral session index
-
-A client that is not AIR gets the same session index without declaring `_meta.jetbrains.air`, which would also
-change its tool call contract and subagent reports. It declares, in `initialize.clientCapabilities._meta`:
-
-```json
-{ "sessionIndex": { "version": 1 } }
-```
-
-- Accepted only when `sessionIndex` is an object whose `version` is an integer of at least 1. Anything else
-  enables nothing.
-- An AIR client is governed only by its `sessionIndex` capability; its top-level `_meta.sessionIndex` is ignored.
-- The opt-in is an ACP v1 extension. On an ACP v2 connection only AIR gets the session index.
-- The `initialize` answer has
-  `_meta.sessionIndex: {"version": 1, "capabilities": ["sessionBatchGet", "sessionArchive", "sessionRename", "sessionListSubscribe", "sessionWorktrees"]}`
-  and no `_meta.jetbrains`.
-
-The payloads and rules are the ones of this section, with `_meta.sessionIndex` in place of `_meta.jetbrains.air`.
-The payloads carry no `version`:
-
-| AIR | Client-neutral |
-| --- | --- |
-| `session/list` `_meta.jetbrains.air.list {limit, includeWorktrees, archived}` | `_meta.sessionIndex.list {limit, includeWorktrees, archived}` |
-| row `_meta.jetbrains.air.{archived, lastPromptAt, model, forkedFrom, state, lastTurnEndedAt, agentWorktree}` | row `_meta.sessionIndex.{…}` |
-| `_session/list/changes` rows | the same rows, `_meta.sessionIndex` |
-| `_session/batch_get` rows | the same rows, `_meta.sessionIndex` |
-| `session_info_update._meta.jetbrains.air.archived` | `session_info_update._meta.sessionIndex.archived` |
-| `_session/batch_get`, `_session/rename`, `_session/archive`, `_session/unarchive`, `_session/list/subscribe`, `_session/list/unsubscribe`, `_session/list/changes` | unchanged |
-
-- The adapter reads the list options only from the client's own namespace.
-- `session/delete` deletes the thread, as for AIR with `sessionIndex`.
-- Everything else is what a client that is not AIR gets: tool calls, subagent reports, `goal` and `async-tasks`.
-
 ## Context compaction
 
 The adapter implements the ACP session compaction RFD. See [Session compaction](session-compaction.md).
@@ -1687,53 +1454,6 @@ It adds this object to the `session/fork` request:
 - When no message matches, the request fails with `invalidParams`.
 - The fork keeps the history up to the turn that holds the message.
 
-### Client-neutral fork point
-
-A client that is not AIR can fork at a message without the `_meta.jetbrains.air` namespace.
-It opts in with `initialize.clientCapabilities._meta`:
-
-```json
-{ "forkPoint": { "version": 1 } }
-```
-
-- Accepted only when `forkPoint` is an object whose `version` is an integer of at least 1. Anything else
-  enables nothing.
-- The opt-in works on ACP v1 and v2. The `initialize` answer of an opted-in client has the top-level
-  `_meta.forkPoint: {"version": 1, "boundary": "turn"}`. `boundary: "turn"` means that a fork keeps the whole
-  turn that holds the message, the items after the message included.
-
-The `session/fork` request carries the fork point in its top-level `_meta`:
-
-```json
-{ "_meta": { "forkPoint": { "messageId": "item-12", "messageFingerprint": "sha256:<64 hex>", "messageOccurrence": 1 } } }
-```
-
-- Without `_meta.forkPoint`, the fork copies the whole session, as before.
-- A client that did not opt in gets `invalidParams` with the data `{"forkPoint": {"reason": "notNegotiated"}}`.
-- `version` is optional; when present it must be `1`.
-- `messageId` must be a non-empty string. It matches the id of any Codex item, the `messageId` of the
-  session update chunks. The `:segment:<n>` suffix of the AIR form is not read.
-- `messageFingerprint` is optional: `sha256:` and 64 lowercase hex digits. It is the SHA-256 digest of the
-  agent message text as the client received it, so with file citations already rendered as Markdown links,
-  against the cwd of the source thread. The adapter uses it when no item has the id.
-- `messageOccurrence` is optional, a positive integer, and `1` by default.
-  It selects among the agent messages of the whole thread with the same fingerprint.
-- An invalid field fails the request with `invalidParams` and the data `{"forkPoint": {"field": "<name>"}}`,
-  where the name is `forkPoint` when the value is not an object.
-- When no message matches, the request fails with `invalidParams` and the data
-  `{"forkPoint": {"messageId": "<requested id>", "reason": "notFound"}}`.
-- When a request has both `_meta.forkPoint` and `_meta.jetbrains.air.fork`, only `_meta.forkPoint` is read.
-
-The `session/fork` answer, on ACP v1 and v2, then says where the fork ends:
-
-```json
-{ "_meta": { "forkPoint": { "boundary": "turn", "messageId": "item-12", "turnId": "turn-4", "lastItemId": "item-15", "matchedBy": "id" } } }
-```
-
-- `messageId` is the id of the matched Codex item, `turnId` the last turn the fork keeps, and `lastItemId`
-  the last item of that turn.
-- `matchedBy` is `id` or `fingerprint`.
-
 ## Presentation hints
 
 The adapter sends these keys only to AIR:
@@ -1747,18 +1467,6 @@ The adapter sends these keys only to AIR:
 - A `$skill` command carries `_meta.jetbrains.air.skillPath`, the absolute path of its `SKILL.md` from `skills/list`.
   The path is an OS-native absolute path, such as `C:\repo\SKILL.md` on Windows. It is not a URI.
   AIR opens this file on a click on the skill chip.
-
-### Client-neutral command presentation
-
-A client that isn't AIR can opt in with `clientCapabilities._meta.commandPresentation: { "version": 1 }`, an object whose `version` is an integer of at least 1, and gets `_meta.commandPresentation: { "version": 1 }` back from `initialize`. ACP v2 ignores the opt-in.
-
-An available command then carries `_meta.commandPresentation`:
-
-- A `$skill` command: `{ "version": 1, "kind": "skill", "skillPath": "<absolute SKILL.md path>" }`, the same path as `skillPath` above.
-- `/plan` and `/goal`: `{ "version": 1, "action": <the commandAction object above> }`.
-- Any other command carries no record.
-
-The record is a presentation hint. The command name and the text the client sends do not change, and a typed `/plan` still toggles plan mode. A client that declares AIR too gets both records.
 
 ## Predicted follow-up prompt
 
@@ -1781,30 +1489,6 @@ After a turn ends normally, the adapter sends AIR the prompt the user is most li
 - A turn that is cancelled or fails produces no prediction.
 - `CODEX_ACP_PROMPT_SUGGESTIONS=false` turns the feature off.
 
-### Client-neutral predicted prompt
-
-A client that is not AIR can get the prediction too, asked for per prompt.
-It declares `initialize.clientCapabilities._meta.promptSuggestions: {"version": 1}` (any integer version of at least 1).
-The adapter answers with `_meta.promptSuggestions: {"version": 1}` in the `initialize` response while the feature is on (see the switch above).
-A `session/prompt` that wants the prediction of its turn names an id, a non-empty string of at most 256 characters:
-
-```json
-{"_meta": {"promptSuggestions": {"id": "<client id of this prompt>"}}}
-```
-
-The prediction of that turn carries the id:
-
-```json
-{"sessionUpdate": "session_info_update", "_meta": {"promptSuggestions": {"suggestions": [{"text": "Run the tests"}], "id": "<client id of this prompt>"}}}
-```
-
-- A prompt without an id costs no model call and gets no prediction.
-- A request is always answered once its sample ends: with `suggestions: []` and the id when the sample gives nothing or fails, and again even when the text repeats the last one.
-  A turn with no sample (plan mode, a cancelled or failed turn) sends nothing; the client must not wait for it forever.
-- The clear at the next prompt carries no id. A prompt that starts first drops the answer, as above.
-- A client that declares both forms gets one update; it carries the id when the prompt named one.
-- ACP v2 ignores the neutral opt-in.
-
 ## Removed keys
 
 These keys moved into the AIR namespace.
@@ -1813,6 +1497,7 @@ AIR gets only the new key. A client that is not AIR gets neither the old key nor
 | Old key | New key |
 | --- | --- |
 | `agent_message_chunk._meta.codex.phase` | `_meta.jetbrains.air.phase`, same values |
+| `initialize._meta.goal`, `session_info_update._meta.goal` | `_meta.jetbrains.air.goal`, same shape |
 | mode `_meta.kind`, config option value `_meta.kind` | `_meta.jetbrains.air.kind` |
 | available command `_meta.commandAction` | `_meta.jetbrains.air.commandAction` |
 | tool call `_meta.contextCompaction` | `_meta.jetbrains.air.contextCompaction` |

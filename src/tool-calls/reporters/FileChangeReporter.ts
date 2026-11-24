@@ -9,10 +9,7 @@ import {
     createEmptyFileGitPatch,
     createRenameGitPatch,
     createUpdateGitPatch,
-    DIFF_PATCH_FORMAT,
     DIFF_PATCH_MAX_BYTES,
-    DIFF_PATCH_VERSION,
-    NEUTRAL_DIFF_PATCH_META_KEY,
 } from "../../GitPatch";
 import {logger} from "../../Logger";
 import type {DiffPatchFormat} from "../ClientCapabilities";
@@ -28,9 +25,8 @@ const FILE_CHANGE_TITLE = "Editing files";
  *
  * An update gets one ACP diff per Codex hunk: `oldText` and `newText` hold the changed lines and the context lines
  * of the hunk, not the whole file. An added or a deleted file gets its whole text. A diff whose text is larger than
- * {@link DIFF_PATCH_MAX_BYTES} is not sent. With the AIR `diffPatch` capability or the client-neutral `diffPatch`
- * opt-in, the diff is a Git patch, see `docs/air-extensions.md#diff-patch`. On ACP v2, each file gets one diff
- * with a Git patch.
+ * {@link DIFF_PATCH_MAX_BYTES} is not sent. With the AIR `diffPatch` capability, the diff is a Git patch,
+ * see `docs/air-extensions.md#diff-patch`. On ACP v2, each file gets one diff with a Git patch.
  */
 export class FileChangeReporter {
     static started(item: FileChangeItem, diffPatch: DiffPatchFormat): ToolFacts {
@@ -72,20 +68,17 @@ export class FileChangeReporter {
     }
 }
 
-/** The ACP v1 wrapper of a Git patch: the AIR extension, the client-neutral `_meta.diffPatch`, or none. */
-type PatchWrapper = "air" | "neutral" | null;
-
 function createPatchContent(change: FileUpdateChange, diffPatch: DiffPatchFormat): ToolCallContent[] {
-    const wrapper: PatchWrapper = diffPatch === "air" || diffPatch === "neutral" ? diffPatch : null;
+    const supportsDiffPatch = diffPatch === "air";
     try {
         if (diffPatch === "acpV2") return createAcpV2Content(change);
         switch (change.kind.type) {
             case "add":
-                return createWholeFileContent(change, "add", wrapper);
+                return createWholeFileContent(change, "add", supportsDiffPatch);
             case "delete":
-                return createWholeFileContent(change, "delete", wrapper);
+                return createWholeFileContent(change, "delete", supportsDiffPatch);
             case "update":
-                return createUpdateFileContent(change, change.kind.move_path, wrapper);
+                return createUpdateFileContent(change, change.kind.move_path, supportsDiffPatch);
         }
     } catch (error) {
         logger.log(`Error processing file update change: ${error}`);
@@ -97,17 +90,16 @@ function createPatchContent(change: FileUpdateChange, diffPatch: DiffPatchFormat
 function createWholeFileContent(
     change: FileUpdateChange,
     kind: "add" | "delete",
-    wrapper: PatchWrapper,
+    supportsDiffPatch: boolean,
 ): ToolCallContent[] {
     if (!fitsDiffLimit(change.diff)) {
         logger.log("Skipped the diff of a file that is too large", {path: change.path});
         return [];
     }
-    if (wrapper !== null) {
-        const patch = kind === "add" ? createAddedFileGitPatch(change.path, change.diff)
-            : createDeletedFileGitPatch(change.path, change.diff);
-        if (patch !== null) return [createPatchOnlyContent(change.path, kind, patch, wrapper)];
-    }
+    const patch = !supportsDiffPatch ? null
+        : kind === "add" ? createAddedFileGitPatch(change.path, change.diff)
+        : createDeletedFileGitPatch(change.path, change.diff);
+    if (patch !== null) return [createPatchOnlyContent(change.path, kind, patch)];
     return [{
         type: "diff",
         oldText: kind === "add" ? null : change.diff,
@@ -121,7 +113,7 @@ function createWholeFileContent(
 function createUpdateFileContent(
     change: FileUpdateChange,
     movePath: string | null,
-    wrapper: PatchWrapper,
+    supportsDiffPatch: boolean,
 ): ToolCallContent[] {
     const unifiedDiff = recoverCorruptedDiff(change.diff);
     const targetPath = movePath ?? change.path;
@@ -130,9 +122,9 @@ function createUpdateFileContent(
         return [];
     }
 
-    if (wrapper !== null) {
-        const gitPatch = createUpdateGitPatch(change.path, targetPath, unifiedDiff);
-        if (gitPatch !== null) return [createPatchOnlyContent(targetPath, "update", gitPatch, wrapper)];
+    const gitPatch = supportsDiffPatch ? createUpdateGitPatch(change.path, targetPath, unifiedDiff) : null;
+    if (gitPatch !== null) {
+        return [createPatchOnlyContent(targetPath, "update", gitPatch)];
     }
 
     // A pure rename has no hunks. Its diff names the new path and changes no line.
@@ -236,21 +228,17 @@ function parseSinglePatch(diff: string): StructuredPatch | null {
     }
 }
 
-function createPatchOnlyContent(
-    path: string,
-    kind: string,
-    patch: string,
-    wrapper: NonNullable<PatchWrapper>,
-): ToolCallContent {
-    const diffPatch = {version: DIFF_PATCH_VERSION, format: DIFF_PATCH_FORMAT, text: patch};
+function createPatchOnlyContent(path: string, kind: string, patch: string): ToolCallContent {
     return {
         type: "diff",
         oldText: null,
         newText: "",
         path,
-        _meta: wrapper === "air"
-            ? withAirMeta({ kind }, AIR_DIFF_PATCH_KEY, diffPatch)
-            : {kind, [NEUTRAL_DIFF_PATCH_META_KEY]: diffPatch},
+        _meta: withAirMeta({ kind }, AIR_DIFF_PATCH_KEY, {
+            version: 1,
+            format: "git_patch",
+            text: patch,
+        }),
     };
 }
 

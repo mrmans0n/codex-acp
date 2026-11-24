@@ -4,7 +4,7 @@ import type {ThreadItem} from "../../app-server/v2";
 import {ACPSessionConnection, type UpdateSessionEvent} from "../../ACPSessionConnection";
 import {CodexAppServerClient} from "../../CodexAppServerClient";
 import type {CodexConnection} from "../../CodexJsonRpcConnection";
-import {CodexBackgroundTerminalTasks} from "../../async-tasks/CodexBackgroundTerminalTasks";
+import {CodexBackgroundTasks} from "../../async-tasks/CodexBackgroundTasks";
 import {ASYNC_TASK_STOP_METHOD} from "../../async-tasks/AsyncTaskExtension";
 import {CodexSubagentEventRouter} from "../../subagents/CodexSubagentEventRouter";
 import type {
@@ -26,13 +26,16 @@ describe("Codex background terminal tasks", () => {
         await fixture.getCodexAcpAgent().initialize({
             protocolVersion: 1,
             clientCapabilities: {
-                _meta: {goal: {}, "async-tasks": true},
+                _meta: {jetbrains: {air: {version: 1, capabilities: ["asyncTasks"]}}},
             },
         });
         const sessionState = createTestSessionState({sessionId: "thread-1"});
-        sessionState.asyncTasks = (fixture.getCodexAcpAgent() as unknown as {
-            createAsyncTasks(sessionId: string): CodexBackgroundTerminalTasks;
-        }).createAsyncTasks(sessionState.sessionId);
+        sessionState.asyncTasks = new CodexBackgroundTasks(
+            true,
+            sessionState.sessionId,
+            fixture.getCodexAppServerClient(),
+            new ACPSessionConnection(fixture.getAcpConnection(), sessionState.sessionId),
+        );
         // @ts-expect-error - register the local session for session-generation checks
         fixture.getCodexAcpAgent().sessions.set(sessionState.sessionId, sessionState);
         const rawCommand = "/bin/zsh -lc 'npm run build'";
@@ -54,13 +57,6 @@ describe("Codex background terminal tasks", () => {
                 name: "npm run build",
                 toolCallId: "command-1",
             })]);
-            expect(fixture.getAcpConnectionEvents([])
-                .filter(event => event.method === "sessionUpdate")
-                .map(event => event.args[0].update)
-                .filter(update => update.sessionUpdate === "tool_call_update"))
-                .not.toEqual(expect.arrayContaining([expect.objectContaining({
-                    _meta: {jetbrains: {air: {asyncTasks: {backgrounded: true}}}},
-                })]));
         });
     });
 
@@ -290,7 +286,7 @@ describe("Codex background terminal tasks", () => {
         }) as unknown as CodexConnection["process"];
         const fixture = createCodexMockTestFixture(undefined, process);
         const sessionState = createTestSessionState({sessionId: "thread-1"});
-        sessionState.asyncTasks = new CodexBackgroundTerminalTasks(
+        sessionState.asyncTasks = new CodexBackgroundTasks(
             true,
             sessionState.sessionId,
             fixture.getCodexAppServerClient(),
@@ -368,12 +364,8 @@ describe("Codex background terminal tasks", () => {
             .toEqual([expect.objectContaining({state: "completed"})]);
     });
 
-    it("routes the provider-neutral async-task stop request to the session task runtime", async () => {
+    it("routes the AIR stop request to the session task runtime", async () => {
         const fixture = createCodexMockTestFixture();
-        await fixture.getCodexAcpAgent().initialize({
-            protocolVersion: 1,
-            clientCapabilities: {_meta: {"async-tasks": true}},
-        });
         const sessionState = createTestSessionState({sessionId: "thread-1"});
         const stop = vi.spyOn(sessionState.asyncTasks, "stop").mockResolvedValue(true);
         // @ts-expect-error - register the local session for the extension request path
@@ -501,7 +493,7 @@ describe("Codex background terminal tasks", () => {
         const sessionState = createTestSessionState({sessionId: "thread-1"});
         const session = new ACPSessionConnection(fixture.getAcpConnection(), sessionState.sessionId);
         sessionState.subagents = new CodexSubagentEventRouter(sessionState.sessionId, true, session, () => {}, () => ({currentModel: null, availableModels: []}));
-        sessionState.asyncTasks = new CodexBackgroundTerminalTasks(
+        sessionState.asyncTasks = new CodexBackgroundTasks(
             true,
             sessionState.sessionId,
             fixture.getCodexAppServerClient(),
@@ -602,7 +594,7 @@ function createFixture(
         updates,
         list,
         terminate,
-        tasks: new CodexBackgroundTerminalTasks(enabled, "thread-1", appServer, session),
+        tasks: new CodexBackgroundTasks(enabled, "thread-1", appServer, session),
     };
 }
 

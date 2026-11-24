@@ -14,27 +14,15 @@ import os from "node:os";
 import {AgentMode} from "../AgentMode";
 import {DEFAULT_COLLABORATION_MODE} from "../CollaborationModeConfig";
 import {afterEach, beforeEach, expect, vi} from "vitest";
-import {once} from "node:events";
 import type {Model, ReasoningEffortOption} from "../app-server/v2";
 import {CodexSubagentEventRouter} from "../subagents/CodexSubagentEventRouter";
 import {CodexEventHandler, SessionFailureIds} from "../CodexEventHandler";
-import {NeutralSessionFailureLedger, type SessionFailureFormat} from "../SessionFailureExtension";
-import {CodexBackgroundTerminalTasks} from "../async-tasks/CodexBackgroundTerminalTasks";
+import type {AccountUpdatedNotification} from "../app-server/v2";
+import {CodexBackgroundTasks} from "../async-tasks/CodexBackgroundTasks";
 import {CodexSessionCompactions} from "../CodexSessionCompactions";
 import {CodexSessionToolCalls} from "../CodexSessionToolCalls";
 import {AUTH_STATUS_UPDATE_METHOD} from "../AuthStatusMeta";
 import {ClientCapabilities} from "../tool-calls/ClientCapabilities";
-
-const nativeTestProcesses = new Set<CodexConnection>();
-afterEach(async () => {
-    await Promise.all([...nativeTestProcesses].map(async native => {
-        if (native.process.exitCode !== null || native.process.signalCode !== null) return;
-        const exited = once(native.process, "exit");
-        native.process.kill();
-        await exited;
-    }));
-    nativeTestProcesses.clear();
-});
 
 export type MethodCallEvent = { method: string; args: any[] };
 
@@ -220,9 +208,6 @@ export function createTestFixture(): TestFixture {
         ...process.env,
         CODEX_HOME: codexHome,
     });
-    // Every test owns its app-server, including tests that mock client methods.
-    // Reap it before deleting the home or starting the next fixture.
-    nativeTestProcesses.add(codexConnection);
     codexConnection.process.on("exit", () => {
         removeDirectoryWithRetry(codexHome);
     });
@@ -483,7 +468,7 @@ export function createTestSessionState(overrides?: Partial<SessionState>): Sessi
             () => {},
             () => ({currentModel: null, availableModels: []}),
         ),
-        asyncTasks: new CodexBackgroundTerminalTasks(
+        asyncTasks: new CodexBackgroundTasks(
             false,
             sessionId,
             {} as CodexAppServerClient,
@@ -620,8 +605,6 @@ export function createTestEventHandler(
     sessionState: SessionState,
     options: {
         typedSessionFailures?: boolean;
-        sessionFailureFormat?: SessionFailureFormat;
-        neutralFailures?: NeutralSessionFailureLedger;
         sessionFailureEpoch?: string;
         collectTurnDiffs?: boolean;
     } = {},
@@ -629,13 +612,12 @@ export function createTestEventHandler(
     return new CodexEventHandler(
         connection,
         sessionState,
-        options.sessionFailureFormat ?? (options.typedSessionFailures ? "air" : "none"),
+        options.typedSessionFailures ?? false,
         new SessionFailureIds(options.sessionFailureEpoch ?? "test-epoch"),
         sessionState.subagents,
         options.collectTurnDiffs ?? false,
         false,
         false,
-        options.neutralFailures ?? new NeutralSessionFailureLedger(),
     );
 }
 

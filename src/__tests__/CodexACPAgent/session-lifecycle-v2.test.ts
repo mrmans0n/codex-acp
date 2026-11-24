@@ -113,12 +113,11 @@ async function connectV2Client(options?: {
     air?: boolean;
     thread?: Partial<Thread>;
     beforeThreadRead?: () => Promise<void>;
+    beforeSettingsUpdate?: () => Promise<void>;
     permissionProfiles?: PermissionProfileSummary[];
     activePermissionProfileId?: string;
     defaultPermissionProfileId?: string;
     serviceTier?: string | null;
-    /** The client capabilities `_meta`, for a client that is not AIR. */
-    capabilitiesMeta?: Record<string, unknown>;
 }) {
     const mocks = createMockConnections();
     const codexRequests: Array<{method: string, params: unknown}> = [];
@@ -133,6 +132,7 @@ async function connectV2Client(options?: {
             return options.listSkills(params as SkillsListParams);
         }
         if (method === "thread/read") await options?.beforeThreadRead?.();
+        if (method === "thread/settings/update") await options?.beforeSettingsUpdate?.();
         if (method === "permissionProfile/list") {
             return {data: options?.permissionProfiles ?? [], nextCursor: null};
         }
@@ -174,20 +174,12 @@ async function connectV2Client(options?: {
             updates.push(ctx.params);
         })
         .connect(acp.ndJsonStream(clientToAgent.writable, agentToClient.readable));
-    const initializeResponse = await connection.agent.request(acpV2.methods.agent.initialize, {
+    await connection.agent.request(acpV2.methods.agent.initialize, {
         protocolVersion: 2,
         info: {name: "test-client", version: "1.0.0"},
         ...(options?.air ? {capabilities: {_meta: {jetbrains: {air: {version: 1}}}}} : {}),
-        ...(options?.capabilitiesMeta ? {capabilities: {_meta: options.capabilitiesMeta}} : {}),
     });
-    return {
-        connection,
-        agent: () => agent!,
-        initializeResponse,
-        codexRequests,
-        updates,
-        emit: mocks.getUnhandledNotificationHandler()!,
-    };
+    return {connection, agent: () => agent!, codexRequests, updates, emit: mocks.getUnhandledNotificationHandler()!};
 }
 
 /**
@@ -289,8 +281,9 @@ describe('Session lifecycle over ACP v2', () => {
     });
 
     it.each([null, {type: "start"}] as const)(
-        'preserves the default profile on an unprompted v2 resume with replayFrom=%s', async replayFrom => {
+        'preserves the profile and speed on an unprompted v2 resume with replayFrom=%s', async replayFrom => {
             const {connection} = await connectV2Client({
+                serviceTier: "priority",
                 permissionProfiles: [{id: "dev", description: null, allowed: true}],
                 activePermissionProfileId: "dev",
                 defaultPermissionProfileId: "dev",
@@ -299,8 +292,11 @@ describe('Session lifecycle over ACP v2', () => {
             closeClient = () => connection.close();
             await connection.agent.request(acpV2.methods.agent.session.new, {cwd});
 
+            const preview = await connection.agent.request(acpV2.methods.agent.session.options, {sessionId, cwd});
             const response = await connection.agent.request(acpV2.methods.agent.session.resume, {sessionId, cwd, replayFrom});
 
+            expect(response.configOptions).toEqual(preview.configOptions);
+            expect(response.configOptions?.find(option => option.configId === FAST_MODE_CONFIG_ID)?.currentValue).toBe(true);
             expect(response.configOptions?.find(option => option.configId === MODE_CONFIG_ID)?.currentValue)
                 .toBe("permission-profile:dev");
         },
@@ -316,6 +312,16 @@ describe('Session lifecycle over ACP v2', () => {
                 scope: "repo", enabled: true, pluginId: null,
             }],
         }],
+    });
+
+    it('rejects duplicate options on an AIR resume before reserving session delivery', async () => {
+        const {connection, agent} = await connectV2Client({air: true});
+        closeClient = () => connection.close();
+        const option = {configId: "model", type: "id" as const, value: "gpt-5"};
+        await expect(connection.agent.request(acpV2.methods.agent.session.resume, {
+            cwd, sessionId, configOptions: [option, option],
+        })).rejects.toMatchObject({code: -32602});
+        expect(agent()["clientDelivery"].sessionSetupReady(sessionId)).toBeNull();
     });
 
     it.each([false, true])('returns skills and text inputs while preserving AIR metadata (AIR: %s)', async (air) => {
@@ -662,6 +668,31 @@ describe('Session lifecycle over ACP v2', () => {
         expect(updates.at(-1)?.update).toEqual({sessionUpdate: "state_update", state: "idle", background: []});
     });
 
+    it('applies initial settings before sending replayed messages', async () => {
+        let release!: () => void;
+        const held = new Promise<void>(resolve => { release = resolve; });
+        const beforeSettingsUpdate = vi.fn(() => held);
+        const {connection, updates} = await connectV2Client({replayTurns, beforeSettingsUpdate});
+        closeClient = () => connection.close();
+        const resumed = connection.agent.request(acpV2.methods.agent.session.resume, {
+            sessionId, cwd, replayFrom: {type: "start"},
+            configOptions: [{configId: "collaboration_mode", type: "id", value: "plan"}],
+        });
+        try {
+            await vi.waitFor(() => expect(beforeSettingsUpdate).toHaveBeenCalledOnce());
+            await connection.agent.request(acpV2.methods.agent.session.list, {});
+            expect(updates).toEqual([]);
+        } finally {
+            release();
+        }
+        const response = await resumed;
+        expect(response.configOptions).toContainEqual(expect.objectContaining({
+            configId: "collaboration_mode", currentValue: "plan",
+        }));
+        expect(updates.some(({update}) => update.sessionUpdate === "agent_message_chunk")).toBe(true);
+        expect(updates.some(({update}) => update.sessionUpdate === "config_option_update")).toBe(false);
+    });
+
     it('does not activate an inactive session at replay_complete', async () => {
         const {connection, agent, updates} = await connectV2Client();
         closeClient = () => connection.close();
@@ -774,45 +805,6 @@ describe('Session lifecycle over ACP v2', () => {
         }).then(() => null, (err) => ({code: err.code, message: err.message}));
 
         await expect(dump(error)).toMatchFileSnapshot('data/session-lifecycle-v2-fork-invalid-params.json');
-    });
-
-    it('negotiates the client-neutral fork point and reports the turn boundary of a fork at a message', async () => {
-        const {connection, initializeResponse} = await connectV2Client({
-            capabilitiesMeta: {forkPoint: {version: 1}},
-            replayTurns: [
-                {id: "turn-1", items: [{type: "agentMessage", id: "msg-1", text: "First"}, {type: "reasoning", id: "r-1"}]},
-                {id: "turn-2", items: [{type: "agentMessage", id: "msg-2", text: "Second"}]},
-            ] as any,
-        });
-        closeClient = () => connection.close();
-
-        expect(initializeResponse._meta?.["forkPoint"]).toEqual({version: 1, boundary: "turn"});
-        const response = await connection.agent.request(acpV2.methods.agent.session.fork, {
-            sessionId,
-            cwd,
-            mcpServers: [],
-            _meta: {forkPoint: {messageId: "msg-1"}},
-        });
-
-        expect(response._meta).toEqual({
-            forkPoint: {boundary: "turn", messageId: "msg-1", turnId: "turn-1", lastItemId: "r-1", matchedBy: "id"},
-        });
-    });
-
-    it('rejects the client-neutral fork point from a client that did not opt in', async () => {
-        const {connection, initializeResponse, codexRequests} = await connectV2Client();
-        closeClient = () => connection.close();
-
-        expect(initializeResponse._meta).not.toHaveProperty("forkPoint");
-        const error = await connection.agent.request(acpV2.methods.agent.session.fork, {
-            sessionId,
-            cwd,
-            mcpServers: [],
-            _meta: {forkPoint: {messageId: "msg-1"}},
-        }).then(() => null, (err) => ({code: err.code, data: err.data}));
-
-        expect(error).toEqual({code: -32602, data: {forkPoint: {reason: "notNegotiated"}}});
-        expect(codexRequests.some(({method}) => method === "thread/fork")).toBe(false);
     });
 
     it('rejects fork of an unknown session with its ACP ID', async () => {

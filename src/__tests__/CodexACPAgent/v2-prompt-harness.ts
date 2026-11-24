@@ -3,7 +3,7 @@ import * as acp from '@agentclientprotocol/sdk/unstable';
 import * as acpV2 from '@agentclientprotocol/sdk/experimental/v2/unstable';
 import {createAcpAgentRouter} from '../../AcpAgentRouter';
 import {CodexAcpServer} from '../../CodexAcpServer';
-import {CodexAcpClient} from '../../CodexAcpClient';
+import {CodexAcpClient, type JsonObject} from '../../CodexAcpClient';
 import {CodexAppServerClient} from '../../CodexAppServerClient';
 import type {ServerNotification} from '../../app-server';
 import type {Thread, ThreadItem, Turn, TurnStatus} from '../../app-server/v2';
@@ -122,7 +122,7 @@ export type PromptSession = {
     appServer: CodexAppServerClient;
     emit(notification: ServerNotification): void;
     /** `signal`, if given, sends `$/cancel_request` for this specific `session/prompt` on abort. */
-    sendPrompt(prompt: acpV2.ContentBlock[], signal?: AbortSignal, meta?: Record<string, unknown>): Promise<any>;
+    sendPrompt(prompt: acpV2.ContentBlock[], signal?: AbortSignal): Promise<any>;
     /** Sends any other agent-bound request (e.g. `session/set_config_option`) on the same connection. */
     request(method: string, params: unknown, signal?: AbortSignal): Promise<any>;
     /** Sends `session/cancel` (a notification, not a request) for this session. */
@@ -144,9 +144,11 @@ export type PromptSession = {
 
 /** Connects a client (v2 by default) to the agent through the router, over a mocked Codex app-server, and opens a session. */
 export async function connectSession(protocolVersion: 1 | 2 = 2, options: {
+    openSession?: boolean,
     mcpServers?: acpV2.McpServer[],
     mcpStartup?: McpStartupResult,
     mcpBridge?: McpOverAcpToHttp,
+    codexConfig?: JsonObject,
     /** Sent on `initialize` (v2 only). */
     clientCapabilities?: acpV2.ClientCapabilities,
     v1ClientCapabilities?: acp.ClientCapabilities,
@@ -197,7 +199,7 @@ export async function connectSession(protocolVersion: 1 | 2 = 2, options: {
         return response;
     });
     const appServer = new CodexAppServerClient(mocks.mockCodexConnection as any);
-    const codexAcpClient = new CodexAcpClient(appServer, undefined, undefined, options.mcpBridge);
+    const codexAcpClient = new CodexAcpClient(appServer, options.codexConfig, undefined, options.mcpBridge);
     if (options.mcpBridge) vi.spyOn(appServer, "hasExperimentalFeature").mockResolvedValue(true);
     vi.spyOn(codexAcpClient, "readAuthRequirement").mockResolvedValue({required: false, account: null});
     vi.spyOn(codexAcpClient, "getAgentConfiguredModelProvider").mockResolvedValue("openai");
@@ -279,10 +281,12 @@ export async function connectSession(protocolVersion: 1 | 2 = 2, options: {
             info: {name: "test-client", version: "1.0.0"},
             ...(options.clientCapabilities ? {capabilities: options.clientCapabilities} : {}),
         });
-        await v2Connection.agent.request(acpV2.methods.agent.session.new, {
-            cwd, ...(options.mcpServers ? {mcpServers: options.mcpServers} : {}),
-            ...(options.newSessionMeta ? {_meta: options.newSessionMeta} : {}),
-        });
+        if (options.openSession !== false) {
+            await v2Connection.agent.request(acpV2.methods.agent.session.new, {
+                cwd, ...(options.mcpServers ? {mcpServers: options.mcpServers} : {}),
+                ...(options.newSessionMeta ? {_meta: options.newSessionMeta} : {}),
+            });
+        }
         connection = v2Connection;
         request = (method, params, signal) => v2Connection.agent.request(
             method as typeof acpV2.methods.agent.session.prompt,
@@ -311,10 +315,12 @@ export async function connectSession(protocolVersion: 1 | 2 = 2, options: {
             protocolVersion: acp.PROTOCOL_VERSION,
             ...(options.v1ClientCapabilities ? {clientCapabilities: options.v1ClientCapabilities} : {}),
         });
-        await v1Connection.agent.request(acp.methods.agent.session.new, {
-            cwd, mcpServers: options.mcpServers ?? [],
-            ...(options.newSessionMeta ? {_meta: options.newSessionMeta} : {}),
-        });
+        if (options.openSession !== false) {
+            await v1Connection.agent.request(acp.methods.agent.session.new, {
+                cwd, mcpServers: options.mcpServers ?? [],
+                ...(options.newSessionMeta ? {_meta: options.newSessionMeta} : {}),
+            });
+        }
         connection = v1Connection;
         request = (method, params, signal) => v1Connection.agent.request(
             method as typeof acp.methods.agent.session.prompt,
@@ -325,7 +331,7 @@ export async function connectSession(protocolVersion: 1 | 2 = 2, options: {
     }
     const promptSpy = vi.spyOn(agent!, "prompt");
     // V1 sends initial commands asynchronously; v2 includes them in the setup response.
-    if (protocolVersion === 1) {
+    if (protocolVersion === 1 && options.openSession !== false) {
         await vi.waitFor(() => expect(setupUpdates.map(update => update.sessionUpdate)).toContain("available_commands_update"));
     }
     recordUpdates = true;
@@ -337,8 +343,8 @@ export async function connectSession(protocolVersion: 1 | 2 = 2, options: {
         else mocks.getUnhandledNotificationHandler()!(notification);
     };
 
-    const sendPrompt = (prompt: acpV2.ContentBlock[], signal?: AbortSignal, meta?: Record<string, unknown>) => {
-        const response = request("session/prompt", {sessionId, prompt, ...(meta ? {_meta: meta} : {})}, signal).then(
+    const sendPrompt = (prompt: acpV2.ContentBlock[], signal?: AbortSignal) => {
+        const response = request("session/prompt", {sessionId, prompt}, signal).then(
             (result) => {
                 transcript.push({promptResponse: result});
                 return result;
@@ -479,12 +485,15 @@ export async function settle() {
     await new Promise(resolve => setTimeout(resolve, 20));
 }
 
-/** The `state_update`s in the transcript, in wire order. */
-export function stateUpdates(transcript: TranscriptEntry[]): Array<{state: string, stopReason?: unknown}> {
-    return transcript.flatMap(entry => "sessionUpdate" in entry && entry.sessionUpdate.sessionUpdate === "state_update"
+/** Foreground transitions in wire order. Background snapshots can repeat the foreground state. */
+export function stateUpdates(transcript: TranscriptEntry[], includeSnapshots = false): Array<{state: string, stopReason?: unknown}> {
+    const states = transcript.flatMap(entry => "sessionUpdate" in entry && entry.sessionUpdate.sessionUpdate === "state_update"
         ? [{...entry.sessionUpdate} as {state: string, stopReason?: unknown}]
         : [])
         .map(({state, stopReason}) => stopReason === undefined ? {state} : {state, stopReason});
+    if (includeSnapshots) return states;
+    return states.filter((state, index) => index === 0 || state.state !== states[index - 1]!.state
+        || state.stopReason !== states[index - 1]!.stopReason);
 }
 
 /** Index of the first transcript entry matching the predicate. */

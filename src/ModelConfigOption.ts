@@ -6,7 +6,6 @@ import {
     AIR_RECOMMENDED_CONFIG_VALUE_KEY,
     withAirMeta,
 } from "./AirExtension";
-import {NEUTRAL_RECOMMENDED_CONFIG_VALUE_META_KEY} from "./permissions/metadata";
 
 export const MODEL_CONFIG_ID = "model";
 export const REASONING_EFFORT_CONFIG_ID = "reasoning_effort";
@@ -67,27 +66,15 @@ function modelOptions(availableModels: ReadonlyArray<Model>, currentBaseModelId:
     return options;
 }
 
-/** Which `_meta` records carry a recommendation. The client can opt into either, or both. */
-export type RecommendationRecords = {readonly air: boolean; readonly neutral: boolean};
-
-function recommendationMeta(value: string, records: RecommendationRecords): Record<string, unknown> {
-    return {
-        ...(records.air ? withAirMeta(undefined, AIR_RECOMMENDED_CONFIG_VALUE_KEY, value) : {}),
-        ...(records.neutral ? {[NEUTRAL_RECOMMENDED_CONFIG_VALUE_META_KEY]: {version: 1, value}} : {}),
-    };
-}
-
 /**
  * The session `model` option. With `withReasoningEfforts`, each model entry carries the AIR effort list of the
  * model in `_meta.jetbrains.air.reasoningEfforts`. An entry of a model without efforts gets no `_meta`.
- * `records` picks the `_meta` records of the option's recommendation.
  */
 export function createModelConfigOption(
     availableModels: Array<Model>,
     currentBaseModelId: string,
     recommendedModelId?: string,
     withReasoningEfforts: boolean = false,
-    records: RecommendationRecords = {air: true, neutral: false},
 ): SessionConfigOption {
     const options = modelOptions(availableModels, currentBaseModelId).map(option => {
         if (!withReasoningEfforts) return option;
@@ -108,7 +95,7 @@ export function createModelConfigOption(
         currentValue: currentBaseModelId,
         options,
         ...(recommendation
-            ? {_meta: recommendationMeta(recommendation, records)}
+            ? {_meta: withAirMeta(undefined, AIR_RECOMMENDED_CONFIG_VALUE_KEY, recommendation)}
             : {}),
     };
 }
@@ -117,7 +104,6 @@ export function createReasoningEffortConfigOption(
     supportedReasoningEfforts: Array<ReasoningEffortOption>,
     currentEffort: string,
     recommendedEffort?: string,
-    records: RecommendationRecords = {air: true, neutral: false},
 ): SessionConfigOption {
     const recommendation = findSupportedEffort(supportedReasoningEfforts, recommendedEffort);
     return {
@@ -134,7 +120,7 @@ export function createReasoningEffortConfigOption(
             description: option.description,
         })),
         ...(recommendation
-            ? {_meta: recommendationMeta(recommendation, records)}
+            ? {_meta: withAirMeta(undefined, AIR_RECOMMENDED_CONFIG_VALUE_KEY, recommendation)}
             : {}),
     };
 }

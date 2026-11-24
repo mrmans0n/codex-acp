@@ -205,114 +205,15 @@ describe("ACP tool call contract", () => {
         const air = new AcpToolCallRenderer(AIR).render(McpToolReporter.progress("mcp", "  line 1\n"));
         expect(air).toEqual({sessionUpdate: "tool_call_update", toolCallId: "mcp"});
     });
-
-    it("keeps a neutral async-task opt-in on the ordinary non-AIR tool contract", () => {
-        expect(render(ClientCapabilities.from({_meta: {goal: {}, "async-tasks": true}})))
-            .toBe(render(ClientCapabilities.from({})));
-    });
-
-    it("keeps a client-neutral session index opt-in on the ordinary non-AIR tool contract", () => {
-        const neutral = ClientCapabilities.from({_meta: {sessionIndex: {version: 1}}});
-        expect(neutral).toEqual(ClientCapabilities.from({}));
-        expect(render(neutral)).toBe(render(ClientCapabilities.from({})));
-    });
 });
 
 describe("ClientCapabilities", () => {
-    it.each([
-        {air: {version: 1, capabilities: []}, enabled: false},
-        {air: {version: 1, capabilities: ["asyncTasks"]}, enabled: true},
-        {air: {capabilities: ["asyncTasks"]}, enabled: false},
-    ])("requires AIR's versioned asyncTasks capability: %s", ({air, enabled}) => {
-        expect(ClientCapabilities.from({_meta: {jetbrains: {air}, "async-tasks": true}}).asyncTasks)
-            .toBe(enabled);
-    });
-
-    it.each([true, false, null, {}, [], "true"])("enables async tasks only for literal true: %s", value => {
-        expect(ClientCapabilities.from({_meta: {"async-tasks": value}} as never).asyncTasks)
-            .toBe(value === true);
-    });
-
-    it("keeps the neutral async-task opt-in an ACP v1 extension and the upstream AIR rule on ACP v2", () => {
-        const airWith = (capabilities: string[]) => ({
-            _meta: {jetbrains: {air: {version: 1, capabilities}}},
-        });
-        expect(ClientCapabilities.fromV2({_meta: {"async-tasks": true}}).asyncTasks).toBe(false);
-        expect(ClientCapabilities.fromV2(airWith(["asyncTasks"])).asyncTasks).toBe(true);
-        expect(ClientCapabilities.fromV2(airWith([])).asyncTasks).toBe(false);
-    });
-
     it("reads the AIR client and the AIR capabilities only from _meta.jetbrains.air", () => {
         expect(AIR.airClient).toBe(true);
         expect(ZED.airClient).toBe(false);
         expect(AIR.air).toEqual({rawInputRendering: true, planContentDelta: true, diffPatch: true});
         expect(ClientCapabilities.from({_meta: {rawInputRendering: true, planContentDelta: true}}).air)
             .toEqual({rawInputRendering: false, planContentDelta: false, diffPatch: false});
-    });
-
-    it.each([
-        {name: "no declaration", meta: {}, expected: "none"},
-        {name: "the AIR capability", meta: {jetbrains: {air: {version: 1, capabilities: ["diffPatch"]}}}, expected: "air"},
-        {name: "the client-neutral opt-in", meta: {diffPatch: {version: 1}}, expected: "neutral"},
-        {name: "a later client-neutral version", meta: {diffPatch: {version: 2}}, expected: "neutral"},
-        {
-            name: "both the AIR capability and the client-neutral opt-in",
-            meta: {jetbrains: {air: {version: 1, capabilities: ["diffPatch"]}}, diffPatch: {version: 1}},
-            expected: "neutral",
-        },
-        {name: "version 0", meta: {diffPatch: {version: 0}}, expected: "none"},
-        {name: "a fractional version", meta: {diffPatch: {version: 1.5}}, expected: "none"},
-        {name: "a string version", meta: {diffPatch: {version: "1"}}, expected: "none"},
-        {name: "no version", meta: {diffPatch: {}}, expected: "none"},
-        {name: "literal true", meta: {diffPatch: true}, expected: "none"},
-        {name: "an array", meta: {diffPatch: [{version: 1}]}, expected: "none"},
-        {name: "null", meta: {diffPatch: null}, expected: "none"},
-    ])("selects the diff patch form from $name", ({meta, expected}) => {
-        expect(ClientCapabilities.from({_meta: meta} as never).diffPatchFormat).toBe(expected);
-    });
-
-    it.each([
-        {name: "no declaration", meta: {}, expected: "none"},
-        {name: "the AIR capability", meta: {jetbrains: {air: {version: 1, capabilities: ["sessionFailure"]}}}, expected: "air"},
-        {name: "the client-neutral opt-in", meta: {sessionFailure: {version: 1}}, expected: "neutral"},
-        {
-            name: "both the AIR capability and the client-neutral opt-in",
-            meta: {jetbrains: {air: {version: 1, capabilities: ["sessionFailure"]}}, sessionFailure: {version: 1}},
-            expected: "neutral",
-        },
-        {
-            name: "the AIR capability and an invalid opt-in",
-            meta: {jetbrains: {air: {version: 1, capabilities: ["sessionFailure"]}}, sessionFailure: {version: 0}},
-            expected: "air",
-        },
-    ])("selects the session failure form from $name", ({meta, expected}) => {
-        expect(ClientCapabilities.from({_meta: meta} as never).sessionFailureFormat).toBe(expected);
-    });
-
-    it.each([
-        {name: "no declaration", meta: {}, expected: "none"},
-        {name: "the AIR capability", meta: {jetbrains: {air: {version: 1, capabilities: ["agentFileChangeReport"]}}}, expected: "air"},
-        {name: "the client-neutral opt-in", meta: {agentFileChangeReport: {version: 1}}, expected: "neutral"},
-        {
-            name: "both the AIR capability and the client-neutral opt-in",
-            meta: {jetbrains: {air: {version: 1, capabilities: ["agentFileChangeReport"]}}, agentFileChangeReport: {version: 1}},
-            expected: "neutral",
-        },
-        {
-            name: "the AIR capability and an invalid opt-in",
-            meta: {jetbrains: {air: {version: 1, capabilities: ["agentFileChangeReport"]}}, agentFileChangeReport: {version: 0}},
-            expected: "air",
-        },
-    ])("selects the agent file-change report form from $name", ({meta, expected}) => {
-        expect(ClientCapabilities.from({_meta: meta} as never).agentFileChangeReportFormat).toBe(expected);
-    });
-
-    it("keeps the AIR diffPatch declaration of a client that also opts into the client-neutral form", () => {
-        const both = ClientCapabilities.from({
-            _meta: {jetbrains: {air: {version: 1, capabilities: ["diffPatch"]}}, diffPatch: {version: 1}},
-        });
-        expect(both.air.diffPatch).toBe(true);
-        expect(both.diffPatchFormat).toBe("neutral");
     });
 
     it("selects the terminal channel that the client declares, and terminal_output_delta for any other client", () => {

@@ -1,34 +1,20 @@
 import type * as acp from "@agentclientprotocol/sdk/unstable";
 import {
-    AIR_AGENT_FILE_CHANGE_REPORT_KEY,
-    AIR_ASYNC_TASKS_KEY,
     AIR_DIFF_PATCH_KEY,
     AIR_PLAN_CONTENT_DELTA_KEY,
     AIR_RAW_INPUT_RENDERING_KEY,
-    AIR_SESSION_FAILURE_KEY,
     clientSupportsAirCapability,
     isAirClient,
 } from "../AirExtension";
-import {type AgentFileChangeReportFormat, clientRequestsNeutralAgentFileChangeReport} from "../AgentFileChangeReport";
-import {clientRequestsNeutralDiffPatch} from "../GitPatch";
-import {PROMPT_SUGGESTIONS_META_KEY} from "../PromptSuggestionGenerator";
-import {clientRequestsNeutralSessionFailure, type SessionFailureFormat} from "../SessionFailureExtension";
-import {
-    clientRequestsNeutralPresentation,
-    NEUTRAL_PERMISSION_PRESENTATION_META_KEY,
-    NEUTRAL_QUESTION_CUSTOM_ANSWER_META_KEY,
-    NEUTRAL_RECOMMENDED_CONFIG_VALUE_META_KEY,
-    NEUTRAL_COMMAND_PRESENTATION_META_KEY,
-} from "../permissions/metadata";
 
 /** The `_meta` key of a command output chunk. */
 type TerminalOutputKey = "terminal_output" | "terminal_output_delta";
 
 /**
  * How a file change diff carries a Git patch: not at all, in the AIR `diffPatch` extension,
- * in the client-neutral top-level `_meta.diffPatch`, or as the patch of an ACP v2 diff.
+ * or as the patch of an ACP v2 diff.
  */
-export type DiffPatchFormat = "none" | "air" | "neutral" | "acpV2";
+export type DiffPatchFormat = "none" | "air" | "acpV2";
 
 /** The AIR capabilities that change the tool call and plan reports. */
 export type AirCapabilities = {
@@ -43,21 +29,12 @@ export type AirCapabilities = {
 type ClientCapabilityValues = {
     readonly airClient: boolean;
     readonly airToolCallContract: boolean;
-    readonly goal: boolean;
-    readonly asyncTasks: boolean;
     readonly terminalOutput: boolean;
     readonly terminalOutputDelta: boolean;
     readonly planUpdates: boolean;
     readonly air: AirCapabilities;
     readonly diffPatchFormat: DiffPatchFormat;
-    readonly sessionFailureFormat: SessionFailureFormat;
-    readonly agentFileChangeReportFormat: AgentFileChangeReportFormat;
     readonly permissionPromptFields: boolean;
-    readonly neutralPermissionPresentation: boolean;
-    readonly neutralQuestionCustomAnswer: boolean;
-    readonly neutralRecommendedConfigValue: boolean;
-    readonly neutralCommandPresentation: boolean;
-    readonly neutralPromptSuggestions: boolean;
 };
 
 /**
@@ -71,31 +48,18 @@ export class ClientCapabilities {
     static readonly DEFAULT = new ClientCapabilities({
         airClient: false,
         airToolCallContract: false,
-        goal: false,
-        asyncTasks: false,
         terminalOutput: false,
         terminalOutputDelta: false,
         planUpdates: false,
         air: {rawInputRendering: false, planContentDelta: false, diffPatch: false},
         diffPatchFormat: "none",
-        sessionFailureFormat: "none",
-        agentFileChangeReportFormat: "none",
         permissionPromptFields: false,
-        neutralPermissionPresentation: false,
-        neutralQuestionCustomAnswer: false,
-        neutralRecommendedConfigValue: false,
-        neutralCommandPresentation: false,
-        neutralPromptSuggestions: false,
     });
 
     /** The client declares `_meta.jetbrains.air`. */
     readonly airClient: boolean;
     /** The client gets the tool call reports of the AIR tool call contract. Only AIR on ACP v1 does. */
     readonly airToolCallContract: boolean;
-    /** The client is AIR or declares `_meta.goal`. */
-    readonly goal: boolean;
-    /** AIR declares its versioned asyncTasks capability; other clients opt in with literal true. */
-    readonly asyncTasks: boolean;
     /** The client declares `_meta.terminal_output`, the Zed convention for command output chunks. */
     readonly terminalOutput: boolean;
     /** The client declares `_meta.terminal_output_delta` and appends the output chunks. */
@@ -104,60 +68,26 @@ export class ClientCapabilities {
     readonly planUpdates: boolean;
     readonly air: AirCapabilities;
     readonly diffPatchFormat: DiffPatchFormat;
-    readonly sessionFailureFormat: SessionFailureFormat;
-    readonly agentFileChangeReportFormat: AgentFileChangeReportFormat;
     /** A permission request has its own `title` and `description` (ACP v2). */
     readonly permissionPromptFields: boolean;
-    /** The client gets the permission presentation in `_meta.permissionPresentation`. Only ACP v1 reads the opt-in. */
-    readonly neutralPermissionPresentation: boolean;
-    /** A question's note field carries `_meta.questionCustomAnswer`. Only ACP v1 reads the opt-in. */
-    readonly neutralQuestionCustomAnswer: boolean;
-    /** Model and effort selectors carry `_meta.recommendedConfigValue`. Only ACP v1 reads the opt-in. */
-    readonly neutralRecommendedConfigValue: boolean;
-    /** Available commands carry `_meta.commandPresentation`. Only ACP v1 reads the opt-in. */
-    readonly neutralCommandPresentation: boolean;
-    /**
-     * A prompt that names `_meta.promptSuggestions.id` gets the predicted follow-up prompt of its turn.
-     * Only ACP v1 reads the opt-in.
-     */
-    readonly neutralPromptSuggestions: boolean;
 
     private constructor(values: ClientCapabilityValues) {
         this.airClient = values.airClient;
         this.airToolCallContract = values.airToolCallContract;
-        this.goal = values.goal;
-        this.asyncTasks = values.asyncTasks;
         this.terminalOutput = values.terminalOutput;
         this.terminalOutputDelta = values.terminalOutputDelta;
         this.planUpdates = values.planUpdates;
         this.air = values.air;
         this.diffPatchFormat = values.diffPatchFormat;
-        this.sessionFailureFormat = values.sessionFailureFormat;
-        this.agentFileChangeReportFormat = values.agentFileChangeReportFormat;
         this.permissionPromptFields = values.permissionPromptFields;
-        this.neutralPermissionPresentation = values.neutralPermissionPresentation;
-        this.neutralQuestionCustomAnswer = values.neutralQuestionCustomAnswer;
-        this.neutralRecommendedConfigValue = values.neutralRecommendedConfigValue;
-        this.neutralCommandPresentation = values.neutralCommandPresentation;
-        this.neutralPromptSuggestions = values.neutralPromptSuggestions;
-    }
-
-    /** Whether the client reads predicted follow-up prompts, in any form. */
-    get predictsPrompts(): boolean {
-        return this.airClient || this.neutralPromptSuggestions;
     }
 
     static from(capabilities: acp.ClientCapabilities | null | undefined): ClientCapabilities {
         const airClient = isAirClient(capabilities);
         const diffPatch = clientSupportsAirCapability(capabilities, AIR_DIFF_PATCH_KEY);
-        const goal = capabilities?._meta?.["goal"];
         return new ClientCapabilities({
             airClient,
             airToolCallContract: airClient,
-            goal: airClient || (goal !== null && typeof goal === "object" && !Array.isArray(goal)),
-            asyncTasks: airClient
-                ? clientSupportsAirCapability(capabilities, AIR_ASYNC_TASKS_KEY)
-                : capabilities?._meta?.["async-tasks"] === true,
             terminalOutput: capabilities?._meta?.["terminal_output"] === true,
             terminalOutputDelta: capabilities?._meta?.["terminal_output_delta"] === true,
             planUpdates: capabilities?.plan != null,
@@ -166,22 +96,8 @@ export class ClientCapabilities {
                 planContentDelta: clientSupportsAirCapability(capabilities, AIR_PLAN_CONTENT_DELTA_KEY),
                 diffPatch,
             },
-            // A client that declares both forms gets only the client-neutral one.
-            diffPatchFormat: clientRequestsNeutralDiffPatch(capabilities) ? "neutral" : diffPatch ? "air" : "none",
-            // Likewise, and the client-neutral form selects the whole typed failure lane.
-            sessionFailureFormat: clientRequestsNeutralSessionFailure(capabilities)
-                ? "neutral"
-                : clientSupportsAirCapability(capabilities, AIR_SESSION_FAILURE_KEY) ? "air" : "none",
-            // Likewise. The request and the report use the selected form.
-            agentFileChangeReportFormat: clientRequestsNeutralAgentFileChangeReport(capabilities)
-                ? "neutral"
-                : clientSupportsAirCapability(capabilities, AIR_AGENT_FILE_CHANGE_REPORT_KEY) ? "air" : "none",
+            diffPatchFormat: diffPatch ? "air" : "none",
             permissionPromptFields: false,
-            neutralPermissionPresentation: clientRequestsNeutralPresentation(capabilities, NEUTRAL_PERMISSION_PRESENTATION_META_KEY),
-            neutralQuestionCustomAnswer: clientRequestsNeutralPresentation(capabilities, NEUTRAL_QUESTION_CUSTOM_ANSWER_META_KEY),
-            neutralRecommendedConfigValue: clientRequestsNeutralPresentation(capabilities, NEUTRAL_RECOMMENDED_CONFIG_VALUE_META_KEY),
-            neutralCommandPresentation: clientRequestsNeutralPresentation(capabilities, NEUTRAL_COMMAND_PRESENTATION_META_KEY),
-            neutralPromptSuggestions: clientRequestsNeutralPresentation(capabilities, PROMPT_SUGGESTIONS_META_KEY),
         });
     }
 
@@ -197,26 +113,12 @@ export class ClientCapabilities {
         return new ClientCapabilities({
             airClient: isAirClient(capabilities),
             airToolCallContract: false,
-            goal: isAirClient(capabilities),
-            asyncTasks: clientSupportsAirCapability(capabilities, AIR_ASYNC_TASKS_KEY),
             terminalOutput: true,
             terminalOutputDelta: false,
             planUpdates: true,
             air: {rawInputRendering: false, planContentDelta: false, diffPatch: false},
             diffPatchFormat: "acpV2",
-            // ACP v2 has its own terminal failure state, so it ignores the client-neutral opt-in.
-            sessionFailureFormat: clientSupportsAirCapability(capabilities, AIR_SESSION_FAILURE_KEY) ? "air" : "none",
-            // The client-neutral report is an ACP v1 extension, so v2 ignores its opt-in.
-            agentFileChangeReportFormat: clientSupportsAirCapability(capabilities, AIR_AGENT_FILE_CHANGE_REPORT_KEY)
-                ? "air"
-                : "none",
             permissionPromptFields: true,
-            // A v2 request has its own title and description, so v2 ignores both client-neutral opt-ins.
-            neutralPermissionPresentation: false,
-            neutralQuestionCustomAnswer: false,
-            neutralRecommendedConfigValue: false,
-            neutralCommandPresentation: false,
-            neutralPromptSuggestions: false,
         });
     }
 
@@ -235,3 +137,4 @@ export class ClientCapabilities {
         return this.airToolCallContract ? null : "terminal_output_delta";
     }
 }
+

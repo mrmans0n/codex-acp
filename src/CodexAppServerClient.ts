@@ -1,6 +1,7 @@
 import {type MessageConnection, RequestType} from "vscode-jsonrpc/node";
 import {AppServerConnectionLostError, ConnectionLoss} from "./app-server-recovery/ConnectionLoss";
 import {explainCodexError} from "./CodexErrorExplanations";
+import {throwIfRequestCancelled, withRequestCancellation} from "./RequestCancellation";
 import {McpOauthCompletions} from "./mcp/McpOauthCompletions";
 import {McpStartupTracker} from "./mcp/McpStartupTracker";
 import type {
@@ -948,6 +949,19 @@ export class CodexAppServerClient {
         });
     }
 
+    /** Waits for an observed turn without replacing its owner's completion listener. */
+    async waitForRunningTurn(threadId: string, turnId: string, signal?: AbortSignal): Promise<void> {
+        throwIfRequestCancelled(signal);
+        if (this.runningTurnId(threadId) !== turnId) return;
+        let release: () => void = () => {};
+        const completed = new Promise<void>(resolve => {
+            release = this.captureTurnCompletions(threadId, event => {
+                if (event.turn.id === turnId && event.turn.status !== "inProgress") resolve();
+            });
+        });
+        await this.waitWhileConnected("the end of the active turn", completed, release, signal);
+    }
+
     async awaitCompactionCompleted(threadId: string): Promise<CompactionCompletedNotification> {
         let releaseCapture: () => void = () => {};
         const completed = new Promise<CompactionCompletedNotification>((resolve) => {
@@ -964,25 +978,23 @@ export class CodexAppServerClient {
      * A JSON-RPC response wait needs no such guard: vscode-jsonrpc rejects it on dispose. A notification wait does.
      * `release` removes the registration behind `wait`; it runs once the wait ends either way.
      */
-    waitWhileConnected<T>(what: string, wait: Promise<T>, release: () => void = () => {}): Promise<T> {
-        return new Promise<T>((resolve, reject) => {
-            let ended = false;
-            const end = () => {
-                if (ended) return false;
-                ended = true;
-                removeListener();
-                release();
-                return true;
-            };
-            let removeListener: () => void = () => {};
-            removeListener = this.connectionLoss.onLost(() => {
-                if (end()) reject(new AppServerConnectionLostError(what));
-            });
-            wait.then(
-                value => { if (end()) resolve(value); },
-                error => { if (end()) reject(error); },
-            );
+    async waitWhileConnected<T>(
+        what: string,
+        wait: Promise<T>,
+        release: () => void = () => {},
+        signal?: AbortSignal,
+    ): Promise<T> {
+        let removeListener: () => void = () => {};
+        const connected = new Promise<T>((resolve, reject) => {
+            removeListener = this.connectionLoss.onLost(() => reject(new AppServerConnectionLostError(what)));
+            void wait.then(resolve, reject);
         });
+        try {
+            return await withRequestCancellation(connected, signal);
+        } finally {
+            removeListener();
+            release();
+        }
     }
 
     resolveTurnInterrupted(threadId: string, turnId: string): void {
@@ -1331,25 +1343,6 @@ export class CodexAppServerClient {
         return [...this.threadLoads.keys()];
     }
 
-    /** Validates a reviewed process/configuration and returns the final synchronous dispatch fence. */
-    hookExecutionGate: ((cwd?: string, modelProvider?: string | null) => Promise<() => void>) | undefined;
-
-    private dispatchRequest<R>(request: CodexRequest): Promise<R> {
-        const activeGoal = request.method === "thread/goal/set" && request.params.status !== "paused";
-        if (this.hookExecutionGate !== undefined && (activeGoal || ["thread/start", "thread/resume", "thread/fork", "turn/start", "review/start"].includes(request.method))) {
-            return this.dispatchReviewedRequest(request, this.hookExecutionGate);
-        }
-        return request.params ? this.connection.sendRequest<R>(request.method, request.params)
-            : this.connection.sendRequest<R>(request.method);
-    }
-
-    private async dispatchReviewedRequest<R>(request: CodexRequest, gate: (cwd?: string, modelProvider?: string | null) => Promise<() => void>): Promise<R> {
-        const params = request.params as {cwd?: string | null; modelProvider?: string | null};
-        const fence = await gate(params.cwd ?? undefined, params.modelProvider);
-        fence();
-        return await this.connection.sendRequest<R>(request.method, request.params);
-    }
-
     private async sendRequest<R>(request: CodexRequest): Promise<R> {
         for (const callback of this.codexEventHandlers) {
             callback({ eventType: "request", ...request});
@@ -1358,7 +1351,12 @@ export class CodexAppServerClient {
         let result: any;
         try {
             if (loadedThreadId === null) {
-                result = await this.dispatchRequest<R>(request);
+                if (request.params) {
+                    result = await this.connection.sendRequest<R>(request.method, request.params)
+                }
+                else {
+                    result = await this.connection.sendRequest<R>(request.method);
+                }
             } else {
                 result = await this.threadLoadGate(loadedThreadId, () => this.sendThreadLoad<R>(loadedThreadId, request));
             }
@@ -1374,7 +1372,7 @@ export class CodexAppServerClient {
     private async sendThreadLoad<R>(threadId: string, request: CodexRequest): Promise<R> {
         this.threadLoads.set(threadId, (this.threadLoads.get(threadId) ?? 0) + 1);
         try {
-            return await this.dispatchRequest<R>(request);
+            return await this.connection.sendRequest<R>(request.method, (request as {params?: unknown}).params);
         } finally {
             const count = (this.threadLoads.get(threadId) ?? 1) - 1;
             if (count > 0) this.threadLoads.set(threadId, count);

@@ -66,12 +66,6 @@ import {
     JETBRAINS_META_KEY,
     withAirMetadata,
 } from "./AirExtension";
-import {
-    NEUTRAL_SESSION_FAILURE_META_KEY,
-    NeutralSessionFailureLedger,
-    SESSION_FAILURE_VERSION,
-    type SessionFailureFormat,
-} from "./SessionFailureExtension";
 import type {SubagentEventRouter} from "./subagents/SubagentEventRouter";
 import {StandardSubagentEventRouter} from "./subagents/StandardSubagentEventRouter";
 import type {SubagentState} from "./subagents/AcpSubagents";
@@ -99,9 +93,6 @@ type SessionFailurePolicy = {
 };
 
 const MAX_SESSION_FAILURE_TITLE_LENGTH = 240;
-
-/** The `kind` of a warning record that comes from a Codex notice, not from a failure. */
-const SESSION_NOTICE_KIND = "notice";
 
 const SESSION_FAILURE_POLICY: Record<CodexFailureKind, SessionFailurePolicy> = {
     transport_lost: {
@@ -247,7 +238,6 @@ export class SessionFailureIds {
 export class CodexEventHandler {
 
     private readonly sessionState: SessionState;
-    /** The typed failure lane, in either form. Only {@link createSessionFailureMeta} reads the form itself. */
     private readonly supportsTypedSessionFailures: boolean;
     private readonly sessionFailureIds: SessionFailureIds;
     private readonly pendingErrors: ErrorNotification[] = [];
@@ -273,25 +263,18 @@ export class CodexEventHandler {
     private readonly collectTurnDiffs: boolean;
     private readonly subagents: SubagentEventRouter;
 
-    /** The typed failure form. Upstream's own callers pass their boolean AIR flag, which means `air` or `none`. */
-    private readonly sessionFailureFormat: SessionFailureFormat;
-
     constructor(
         connection: AcpClientConnection,
         sessionState: SessionState,
-        sessionFailureFormat: SessionFailureFormat | boolean,
+        supportsTypedSessionFailures: boolean,
         sessionFailureIds: SessionFailureIds,
         subagents: SubagentEventRouter,
         collectTurnDiffs: boolean,
         private readonly supportsCompaction: boolean,
         private readonly supportsNotices: boolean,
-        private readonly neutralFailures: NeutralSessionFailureLedger = new NeutralSessionFailureLedger(),
     ) {
         this.sessionState = sessionState;
-        this.sessionFailureFormat = typeof sessionFailureFormat === "boolean"
-            ? (sessionFailureFormat ? "air" : "none")
-            : sessionFailureFormat;
-        this.supportsTypedSessionFailures = this.sessionFailureFormat !== "none";
+        this.supportsTypedSessionFailures = supportsTypedSessionFailures;
         this.sessionFailureIds = sessionFailureIds;
         this.session = new ACPSessionConnection(connection, sessionState.sessionId);
         this.renderer = new AcpToolCallRenderer(sessionState.clientCapabilities);
@@ -534,7 +517,12 @@ export class CodexEventHandler {
                 toolCallTitle(updateEvent),
             );
         }
-        if (handledBySubagents) return;
+        if (handledBySubagents) {
+            if (notification.method === "item/completed") {
+                await this.sessionState.asyncTasks.handleNotification(notification, this.subagents.notificationSessionId(notification));
+            }
+            return;
+        }
         if (ignoredBySubagents) return;
         if (updateEvent === undefined) updateEvent = await this.createUpdateEvent(notification);
         if (updateEvent) {
@@ -796,11 +784,14 @@ export class CodexEventHandler {
                 return this.createThreadGoalUpdatedEvent(notification.params);
             case "thread/goal/cleared":
                 return this.createThreadGoalClearedEvent(notification.params);
-            case "item/commandExecution/terminalInteraction":
-                return this.renderer.render(this.streamsFor(notification.params.threadId).commands.terminalInput(
-                    notification.params.itemId,
-                    notification.params.stdin,
-                ));
+            case "item/commandExecution/terminalInteraction": {
+                const commands = this.streamsFor(notification.params.threadId).commands;
+                if (this.session.forSession(this.subagents.notificationSessionId(notification))
+                    .hasBackgroundItem({type: "terminal", terminalId: notification.params.itemId})) {
+                    commands.observeTerminal(notification.params.itemId);
+                }
+                return this.renderer.render(commands.terminalInput(notification.params.itemId, notification.params.stdin));
+            }
             case "thread/section/changed":
                 // Thread sections have no ACP session update counterpart.
                 return null;
@@ -994,7 +985,7 @@ export class CodexEventHandler {
         }
         this.sessionState.currentGoal = goalSnapshot;
 
-        return goalSessionInfoUpdate(goalSnapshot, this.sessionState.clientCapabilities);
+        return goalSessionInfoUpdate(goalSnapshot, this.sessionState.clientCapabilities.airClient);
     }
 
     private createThreadGoalClearedEvent(_event: ThreadGoalClearedNotification): UpdateSessionEvent | null {
@@ -1004,7 +995,7 @@ export class CodexEventHandler {
         }
         this.sessionState.currentGoal = null;
 
-        return goalSessionInfoUpdate(null, this.sessionState.clientCapabilities);
+        return goalSessionInfoUpdate(null, this.sessionState.clientCapabilities.airClient);
     }
 
     private createReasoningDeltaEvent(
@@ -1280,13 +1271,12 @@ export class CodexEventHandler {
         const previous = this.failuresById.get(id);
         const failure: NonNullable<SessionState["sessionFailure"]> = {
             id,
-            revision: this.sessionFailureRevision(previous, id),
+            revision: nextSessionFailureRevision(previous, id),
             category: policy.category,
             severity,
             title: readableServiceErrorMessage(title),
             ...(details === undefined ? {} : {details}),
             actions: actionsOverride ?? policy.actions,
-            kind,
         };
         this.failuresById.set(id, failure);
         this.failureTurnIdById.set(id, attributeToTurn ? turnId : undefined);
@@ -1303,11 +1293,6 @@ export class CodexEventHandler {
         }
         this.allocatedFailureScopes.add(scope);
         return `${scope}:error:${this.sessionFailureIds.allocate()}`;
-    }
-
-    private sessionFailureRevision(previous: SessionFailure | undefined, id: string): number {
-        const revision = nextSessionFailureRevision(previous, id);
-        return this.sessionFailureFormat === "neutral" ? this.neutralFailures.revision(id, revision) : revision;
     }
 
     /**
@@ -1352,13 +1337,12 @@ export class CodexEventHandler {
             ?? `${this.sessionState.sessionId}:notice:${this.sessionFailureIds.allocate()}`;
         const notice: SessionFailure = {
             id,
-            revision: this.sessionFailureRevision(previous, id),
+            revision: nextSessionFailureRevision(previous, id),
             category: "unknown",
             severity: "warning",
             title,
             ...(details === undefined ? {} : {details}),
             actions: [],
-            kind: SESSION_NOTICE_KIND,
         };
         this.lastSessionNotice = {key, failure: notice};
         return notice;
@@ -1375,16 +1359,11 @@ export class CodexEventHandler {
     private createSessionFailureMeta(
         failure: NonNullable<SessionState["sessionFailure"]>,
     ): Record<string, unknown> {
-        if (this.sessionFailureFormat === "neutral") {
-            return {[NEUTRAL_SESSION_FAILURE_META_KEY]: {version: SESSION_FAILURE_VERSION, ...failure}};
-        }
-        // The AIR record has no `kind`.
-        const {kind: _kind, ...airFailure} = failure;
         return {
             [JETBRAINS_META_KEY]: {
                 [AIR_META_KEY]: {
                     [AIR_EXTENSION_VERSION_KEY]: AIR_EXTENSION_VERSION,
-                    [AIR_SESSION_FAILURE_KEY]: airFailure,
+                    [AIR_SESSION_FAILURE_KEY]: failure,
                 },
             },
         };

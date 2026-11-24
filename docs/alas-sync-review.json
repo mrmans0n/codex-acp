@@ -1,8 +1,8 @@
 {
   "schemaVersion": 2,
-  "fromTag": "v2.9.0",
-  "toTag": "v2.10.0",
-  "toCommit": "44e8deabd3abca977d4463214f89e9005b575a17",
+  "fromTag": "v2.10.0",
+  "toTag": "v2.11.0",
+  "toCommit": "33f613c9e113933253a9f4b28b0fc571007a75d8",
   "canonicalHead": null,
   "patches": [
     {
@@ -15,16 +15,15 @@
       "classification": "overlap",
       "overlappingFiles": [
         "docs/air-extensions.md",
-        "src/CodexAcpServer.ts"
+        "src/CodexAcpServer.ts",
+        "src/CodexEventHandler.ts",
+        "src/__tests__/CodexACPAgent/initialize.test.ts"
       ],
       "resolution": {
-        "action": "retain",
+        "action": null,
         "automatic": false,
-        "rationale": "Overlap through src/CodexAcpServer.ts and docs/air-extensions.md. Upstream v2.10.0 is #789 only (per-model reasoning efforts in the AIR model config option): ModelConfigOption.ts, the createModelConfigOption call in createSessionConfigOptions, one AirExtension constant, a new docs/air-extensions.md section and the session/new line of the AIR scenario recordings. The goal opt-in, goalSessionInfoUpdate and the goal capability negotiation are untouched by #789; the patch only shares the generic isAirClient/withAirMeta helpers, which #789 does not change. It replays cleanly; typecheck, npm test (179 files, 3046 passed, 39 skipped) and build pass on the full exact candidate, and the gates pass on the integration.",
-        "tests": [
-          "src/__tests__/CodexACPAgent/thread-goal-events.test.ts",
-          "src/__tests__/CodexACPAgent/initialize.test.ts"
-        ]
+        "rationale": "",
+        "tests": []
       }
     },
     {
@@ -36,17 +35,15 @@
       "patchId": "7ecbb17adc43b4811fd98cfa53488e04d416d6d0",
       "classification": "overlap",
       "overlappingFiles": [
-        "src/CodexAcpServer.ts"
+        "src/CodexAcpServer.ts",
+        "src/__tests__/CodexACPAgent/async-tasks.test.ts",
+        "src/__tests__/CodexACPAgent/initialize.test.ts"
       ],
       "resolution": {
-        "action": "retain",
+        "action": null,
         "automatic": false,
-        "rationale": "Overlap through src/CodexAcpServer.ts. Upstream v2.10.0 is #789 only (per-model reasoning efforts in the AIR model config option): ModelConfigOption.ts, the createModelConfigOption call in createSessionConfigOptions, one AirExtension constant, a new docs/air-extensions.md section and the session/new line of the AIR scenario recordings. #789 does not touch async task tracking, createAsyncTasks or the backgrounded tool_call_update record. It replays cleanly; typecheck, npm test (179 files, 3046 passed, 39 skipped) and build pass on the full exact candidate, and the gates pass on the integration.",
-        "tests": [
-          "src/__tests__/CodexACPAgent/async-tasks.test.ts",
-          "src/__tests__/CodexACPAgent/initialize.test.ts",
-          "src/__tests__/tool-calls/tool-call-contract.test.ts"
-        ]
+        "rationale": "",
+        "tests": []
       }
     },
     {
@@ -61,12 +58,10 @@
         "src/CodexAcpServer.ts"
       ],
       "resolution": {
-        "action": "retain",
+        "action": null,
         "automatic": false,
-        "rationale": "Overlap through src/CodexAcpServer.ts. Upstream v2.10.0 is #789 only (per-model reasoning efforts in the AIR model config option): ModelConfigOption.ts, the createModelConfigOption call in createSessionConfigOptions, one AirExtension constant, a new docs/air-extensions.md section and the session/new line of the AIR scenario recordings. #789 does not touch the pre-prompt goal subscription, the event handler construction or CodexAcpClient. It replays cleanly; typecheck, npm test (179 files, 3046 passed, 39 skipped) and build pass on the full exact candidate, and the gates pass on the integration.",
-        "tests": [
-          "src/__tests__/CodexACPAgent/CodexAcpClient.test.ts"
-        ]
+        "rationale": "",
+        "tests": []
       }
     },
     {
@@ -78,8 +73,14 @@
       "patchId": "d4891cfc848fceff0d1460598866d6b8f1f2ac4b",
       "classification": "overlap",
       "overlappingFiles": [
+        "README.md",
         "docs/air-extensions.md",
+        "src/CodexAcpClient.ts",
         "src/CodexAcpServer.ts",
+        "src/__tests__/CodexACPAgent/data/initialize-v1-routed-response.json",
+        "src/__tests__/CodexACPAgent/initialize.test.ts",
+        "src/__tests__/acp-test-utils.ts",
+        "src/__tests__/scenarios/baseline.ts",
         "src/__tests__/scenarios/data/air/agent-message-and-reasoning.jsonl",
         "src/__tests__/scenarios/data/air/background-terminal.jsonl",
         "src/__tests__/scenarios/data/air/collab-agent.jsonl",
@@ -115,17 +116,10 @@
         "src/__tests__/scenarios/data/air/web-search.jsonl"
       ],
       "resolution": {
-        "action": "retain",
+        "action": null,
         "automatic": false,
-        "rationale": "Overlap through src/CodexAcpServer.ts, docs/air-extensions.md and 33 AIR scenario recordings. Upstream v2.10.0 is #789 only (per-model reasoning efforts in the AIR model config option): ModelConfigOption.ts, the createModelConfigOption call in createSessionConfigOptions, one AirExtension constant, a new docs/air-extensions.md section and the session/new line of the AIR scenario recordings. In every recording the patch changes only the initialize response (line 0, _meta.systemPrompt) and #789 only the session/new response (the model entries' reasoningEfforts), so git merges them line by line: a check over all 33 recordings finds no line changed by both sides, every downstream line equal to alas's and every other line equal to v2.10.0's, and the scenario snapshots (byte-compared) pass. #789 does not change the systemPrompt conversion, the session instruction paths or the fork alias mapping. It replays cleanly; typecheck, npm test (179 files, 3046 passed, 39 skipped) and build pass on the full exact candidate, and the gates pass on the integration.",
-        "tests": [
-          "src/__tests__/SessionInstructions.test.ts",
-          "src/__tests__/CodexACPAgent/session-instructions.test.ts",
-          "src/__tests__/CodexACPAgent/session-instructions-native.test.ts",
-          "src/__tests__/CodexACPAgent/initialize.test.ts",
-          "src/__tests__/CodexACPAgent/data/initialize-v1-routed-response.json",
-          "src/__tests__/scenarios/client-profiles.test.ts"
-        ]
+        "rationale": "",
+        "tests": []
       }
     },
     {
@@ -138,17 +132,15 @@
       "classification": "overlap",
       "overlappingFiles": [
         "docs/air-extensions.md",
-        "src/CodexAcpServer.ts"
+        "src/CodexAcpServer.ts",
+        "src/__tests__/CodexACPAgent/initialize.test.ts",
+        "src/__tests__/CodexACPAgent/session-index.test.ts"
       ],
       "resolution": {
-        "action": "retain",
+        "action": null,
         "automatic": false,
-        "rationale": "Overlap through src/CodexAcpServer.ts and docs/air-extensions.md. Upstream v2.10.0 is #789 only (per-model reasoning efforts in the AIR model config option): ModelConfigOption.ts, the createModelConfigOption call in createSessionConfigOptions, one AirExtension constant, a new docs/air-extensions.md section and the session/new line of the AIR scenario recordings. #789 does not touch session/list, the session index records or their negotiation; the shared isAirClient/withAirMeta helpers are unchanged. It replays cleanly; typecheck, npm test (179 files, 3046 passed, 39 skipped) and build pass on the full exact candidate, and the gates pass on the integration.",
-        "tests": [
-          "src/__tests__/CodexACPAgent/session-index.test.ts",
-          "src/__tests__/CodexACPAgent/initialize.test.ts",
-          "src/__tests__/tool-calls/tool-call-contract.test.ts"
-        ]
+        "rationale": "",
+        "tests": []
       }
     },
     {
@@ -161,17 +153,17 @@
       "classification": "overlap",
       "overlappingFiles": [
         "docs/air-extensions.md",
-        "src/CodexAcpServer.ts"
+        "src/AcpAgentRouter.ts",
+        "src/CodexAcpServer.ts",
+        "src/CodexAppServerClient.ts",
+        "src/__tests__/CodexACPAgent/initialize.test.ts",
+        "src/__tests__/app-server-recovery/recovery.test.ts"
       ],
       "resolution": {
-        "action": "retain",
+        "action": null,
         "automatic": false,
-        "rationale": "Overlap through src/CodexAcpServer.ts and docs/air-extensions.md. Upstream v2.10.0 is #789 only (per-model reasoning efforts in the AIR model config option): ModelConfigOption.ts, the createModelConfigOption call in createSessionConfigOptions, one AirExtension constant, a new docs/air-extensions.md section and the session/new line of the AIR scenario recordings. #789 does not touch hook review, app-server observation or recovery. It replays cleanly; typecheck, npm test (179 files, 3046 passed, 39 skipped) and build pass on the full exact candidate, and the gates pass on the integration.",
-        "tests": [
-          "src/__tests__/app-server-recovery/recovery.test.ts",
-          "src/__tests__/CodexACPAgent/initialize.test.ts",
-          "src/__tests__/scenarios/client-profiles.test.ts"
-        ]
+        "rationale": "",
+        "tests": []
       }
     },
     {
@@ -183,15 +175,16 @@
       "patchId": "e8a0dfe6d036245afe247fccbf731c4ae31a93c2",
       "classification": "overlap",
       "overlappingFiles": [
-        "src/CodexAcpServer.ts"
+        "src/CodexAcpClient.ts",
+        "src/CodexAcpServer.ts",
+        "src/CodexAppServerClient.ts",
+        "src/__tests__/app-server-recovery/recovery.test.ts"
       ],
       "resolution": {
-        "action": "retain",
+        "action": null,
         "automatic": false,
-        "rationale": "Overlap through src/CodexAcpServer.ts. Upstream v2.10.0 is #789 only (per-model reasoning efforts in the AIR model config option): ModelConfigOption.ts, the createModelConfigOption call in createSessionConfigOptions, one AirExtension constant, a new docs/air-extensions.md section and the session/new line of the AIR scenario recordings. #789 does not touch hook execution or recovery. It replays cleanly; typecheck, npm test (179 files, 3046 passed, 39 skipped) and build pass on the full exact candidate, and the gates pass on the integration.",
-        "tests": [
-          "src/__tests__/app-server-recovery/recovery.test.ts"
-        ]
+        "rationale": "",
+        "tests": []
       }
     },
     {
@@ -203,7 +196,22 @@
       "patchId": "085c003657a8716cee8c6576eead2f6a51f36e05",
       "classification": "absorbed",
       "overlappingFiles": [
-        "src/CodexAcpServer.ts"
+        "README.md",
+        "docs/async-questions.md",
+        "src/ACPSessionConnection.ts",
+        "src/CodexAcpServer.ts",
+        "src/CodexAsyncQuestions.ts",
+        "src/CodexEventHandler.ts",
+        "src/__tests__/CodexACPAgent/async-questions.test.ts",
+        "src/__tests__/CodexACPAgent/data/async-questions-v1-answered.json",
+        "src/__tests__/CodexACPAgent/data/async-questions-v1-dropped.json",
+        "src/__tests__/CodexACPAgent/data/async-questions-v1-rejected.json",
+        "src/__tests__/CodexACPAgent/data/async-questions-v2-answered.json",
+        "src/__tests__/CodexACPAgent/data/async-questions-v2-dropped.json",
+        "src/__tests__/CodexACPAgent/data/async-questions-v2-rejected.json",
+        "src/__tests__/CodexACPAgent/data/v2-resume-replay-async-question-answers.json",
+        "src/__tests__/CodexACPAgent/tool-calls-and-messages-v2.test.ts",
+        "src/__tests__/CodexACPAgent/v2-resume-replay.test.ts"
       ],
       "resolution": {
         "action": "drop",
@@ -228,18 +236,16 @@
       "classification": "overlap",
       "overlappingFiles": [
         "docs/air-extensions.md",
-        "src/CodexAcpServer.ts"
+        "src/CodexAcpServer.ts",
+        "src/SessionMetadata.ts",
+        "src/__tests__/CodexACPAgent/initialize.test.ts",
+        "src/__tests__/CodexACPAgent/session-lifecycle-v2.test.ts"
       ],
       "resolution": {
-        "action": "retain",
+        "action": null,
         "automatic": false,
-        "rationale": "Overlap through src/CodexAcpServer.ts and docs/air-extensions.md. Upstream v2.10.0 is #789 only (per-model reasoning efforts in the AIR model config option): ModelConfigOption.ts, the createModelConfigOption call in createSessionConfigOptions, one AirExtension constant, a new docs/air-extensions.md section and the session/new line of the AIR scenario recordings. #789 does not touch the fork point; a neutral fork answer still builds its config options through createSessionConfigOptions, so it inherits upstream's AIR-only per-model efforts unchanged. It replays cleanly; typecheck, npm test (179 files, 3046 passed, 39 skipped) and build pass on the full exact candidate, and the gates pass on the integration.",
-        "tests": [
-          "src/__tests__/CodexACPAgent/CodexAcpClient.test.ts",
-          "src/__tests__/CodexACPAgent/initialize.test.ts",
-          "src/__tests__/CodexACPAgent/session-fork.test.ts",
-          "src/__tests__/CodexACPAgent/session-lifecycle-v2.test.ts"
-        ]
+        "rationale": "",
+        "tests": []
       }
     },
     {
@@ -252,19 +258,14 @@
       "classification": "overlap",
       "overlappingFiles": [
         "docs/air-extensions.md",
-        "src/CodexAcpServer.ts"
+        "src/CodexAcpServer.ts",
+        "src/__tests__/CodexACPAgent/initialize.test.ts"
       ],
       "resolution": {
-        "action": "retain",
+        "action": null,
         "automatic": false,
-        "rationale": "Overlap through src/CodexAcpServer.ts and docs/air-extensions.md. Upstream v2.10.0 is #789 only (per-model reasoning efforts in the AIR model config option): ModelConfigOption.ts, the createModelConfigOption call in createSessionConfigOptions, one AirExtension constant, a new docs/air-extensions.md section and the session/new line of the AIR scenario recordings. #789 does not touch file change events or their diff records. It replays cleanly; typecheck, npm test (179 files, 3046 passed, 39 skipped) and build pass on the full exact candidate, and the gates pass on the integration.",
-        "tests": [
-          "src/__tests__/CodexACPAgent/file-change-events.test.ts",
-          "src/__tests__/CodexACPAgent/initialize-v2.test.ts",
-          "src/__tests__/CodexACPAgent/initialize.test.ts",
-          "src/__tests__/CodexACPAgent/load-session.test.ts",
-          "src/__tests__/tool-calls/tool-call-contract.test.ts"
-        ]
+        "rationale": "",
+        "tests": []
       }
     },
     {
@@ -277,21 +278,16 @@
       "classification": "overlap",
       "overlappingFiles": [
         "docs/air-extensions.md",
-        "src/CodexAcpServer.ts"
+        "src/CodexAcpServer.ts",
+        "src/CodexEventHandler.ts",
+        "src/__tests__/CodexACPAgent/initialize.test.ts",
+        "src/__tests__/acp-test-utils.ts"
       ],
       "resolution": {
-        "action": "retain",
+        "action": null,
         "automatic": false,
-        "rationale": "Overlap through src/CodexAcpServer.ts and docs/air-extensions.md. Upstream v2.10.0 is #789 only (per-model reasoning efforts in the AIR model config option): ModelConfigOption.ts, the createModelConfigOption call in createSessionConfigOptions, one AirExtension constant, a new docs/air-extensions.md section and the session/new line of the AIR scenario recordings. #789 does not touch SessionFailureIds, the failure and notice reports or the session failure format. It replays cleanly; typecheck, npm test (179 files, 3046 passed, 39 skipped) and build pass on the full exact candidate, and the gates pass on the integration.",
-        "tests": [
-          "src/__tests__/CodexACPAgent/auth-error-events.test.ts",
-          "src/__tests__/CodexACPAgent/initialize-v2.test.ts",
-          "src/__tests__/CodexACPAgent/initialize.test.ts",
-          "src/__tests__/CodexACPAgent/session-notices.test.ts",
-          "src/__tests__/CodexACPAgent/structured-failures-v2.test.ts",
-          "src/__tests__/CodexACPAgent/typed-session-failure-wire.test.ts",
-          "src/__tests__/tool-calls/tool-call-contract.test.ts"
-        ]
+        "rationale": "",
+        "tests": []
       }
     },
     {
@@ -304,20 +300,14 @@
       "classification": "overlap",
       "overlappingFiles": [
         "docs/air-extensions.md",
-        "src/CodexAcpServer.ts"
+        "src/CodexAcpServer.ts",
+        "src/__tests__/CodexACPAgent/initialize.test.ts"
       ],
       "resolution": {
-        "action": "retain",
+        "action": null,
         "automatic": false,
-        "rationale": "Overlap through src/CodexAcpServer.ts and docs/air-extensions.md. Upstream v2.10.0 is #789 only (per-model reasoning efforts in the AIR model config option): ModelConfigOption.ts, the createModelConfigOption call in createSessionConfigOptions, one AirExtension constant, a new docs/air-extensions.md section and the session/new line of the AIR scenario recordings. #789 does not touch the agent file-change report or the session metadata writers. It replays cleanly; typecheck, npm test (179 files, 3046 passed, 39 skipped) and build pass on the full exact candidate, and the gates pass on the integration.",
-        "tests": [
-          "src/__tests__/AgentFileChangeReport.test.ts",
-          "src/__tests__/CodexACPAgent/agent-file-change-report.test.ts",
-          "src/__tests__/CodexACPAgent/session-metadata-writers.test.ts",
-          "src/__tests__/CodexACPAgent/initialize-v2.test.ts",
-          "src/__tests__/CodexACPAgent/initialize.test.ts",
-          "src/__tests__/tool-calls/tool-call-contract.test.ts"
-        ]
+        "rationale": "",
+        "tests": []
       }
     },
     {
@@ -330,43 +320,35 @@
       "classification": "overlap",
       "overlappingFiles": [
         "docs/air-extensions.md",
-        "src/CodexAcpServer.ts"
+        "src/CodexAcpServer.ts",
+        "src/CodexAsyncQuestions.ts",
+        "src/__tests__/CodexACPAgent/initialize.test.ts"
       ],
       "resolution": {
-        "action": "retain",
+        "action": null,
         "automatic": false,
-        "rationale": "Overlap through src/CodexAcpServer.ts and docs/air-extensions.md. Upstream v2.10.0 is #789 only (per-model reasoning efforts in the AIR model config option): ModelConfigOption.ts, the createModelConfigOption call in createSessionConfigOptions, one AirExtension constant, a new docs/air-extensions.md section and the session/new line of the AIR scenario recordings. #789 does not touch permission or elicitation presentation records. It replays cleanly; typecheck, npm test (179 files, 3046 passed, 39 skipped) and build pass on the full exact candidate, and the gates pass on the integration.",
-        "tests": [
-          "src/__tests__/CodexACPAgent/approval-events.test.ts",
-          "src/__tests__/CodexACPAgent/elicitation-events.test.ts",
-          "src/__tests__/CodexACPAgent/initialize-v2.test.ts",
-          "src/__tests__/CodexACPAgent/initialize.test.ts"
-        ]
+        "rationale": "",
+        "tests": []
       }
     },
     {
       "name": "neutral-recommended-config-value",
       "originalCommit": "9181cce81f8c737dc1bbe921f964aa31d3ef11b3",
-      "commit": "ebc3010ea9675c7e7e8ec51bbf6bd7e55265af79",
-      "appliedCommit": "ebc3010ea9675c7e7e8ec51bbf6bd7e55265af79",
+      "commit": "5ace1237e13e82b69ed32172c48ebaf9cf3252fc",
+      "appliedCommit": "5ace1237e13e82b69ed32172c48ebaf9cf3252fc",
       "disposition": "active",
-      "patchId": "52084dbe118df04a35610bbdd54940353580334c",
+      "patchId": "e63a12018b6ef6198040e15a522b01813d82056b",
       "classification": "overlap",
       "overlappingFiles": [
         "docs/air-extensions.md",
         "src/CodexAcpServer.ts",
-        "src/ModelConfigOption.ts"
+        "src/__tests__/CodexACPAgent/initialize.test.ts"
       ],
       "resolution": {
-        "action": "adapt",
-        "commit": "5ace1237e13e82b69ed32172c48ebaf9cf3252fc",
+        "action": null,
         "automatic": false,
-        "rationale": "ebc3010 conflicted semantically with #789 in ModelConfigOption.ts, CodexAcpServer.ts and docs/air-extensions.md: both add a fourth parameter to createModelConfigOption (upstream's `withReasoningEfforts` boolean, which its ModelConfigOption tests pass positionally, and the patch's `records`). The adaptation 5ace123 keeps upstream's call shape, appends `records` as a fifth parameter with the same default, and the server passes both isAirClient and the recommendation records. Per upstream's contract the per-model reasoningEfforts key stays AIR-only, so a client that opts into the neutral record gets the recommendation records but no entry _meta; the client-neutral docs subsection stays in 'Recommended config values' and says so. Two new tests in session-config-options.test.ts pin it (neutral client: no entry _meta; AIR plus neutral: per-model efforts and both records); passing the neutral opt-in as the efforts flag, dropping `records` or dropping the AIR flag each turns them red (upstream's model-reasoning-efforts tests also fail without the AIR flag). The reasoning effort selector, the recommendation choice and the opt-in negotiation are unchanged. Same 8 files as ebc3010. typecheck, npm test (179 files, 3034 passed, 39 skipped) and build pass at the replay point and on the integration.",
-        "tests": [
-          "src/__tests__/CodexACPAgent/session-config-options.test.ts",
-          "src/__tests__/CodexACPAgent/initialize-v2.test.ts",
-          "src/__tests__/CodexACPAgent/initialize.test.ts"
-        ]
+        "rationale": "",
+        "tests": []
       }
     },
     {
@@ -379,17 +361,15 @@
       "classification": "overlap",
       "overlappingFiles": [
         "docs/air-extensions.md",
-        "src/CodexAcpServer.ts"
+        "src/CodexAcpServer.ts",
+        "src/CodexCommands.ts",
+        "src/__tests__/CodexACPAgent/initialize.test.ts"
       ],
       "resolution": {
-        "action": "retain",
+        "action": null,
         "automatic": false,
-        "rationale": "Overlap through src/CodexAcpServer.ts and docs/air-extensions.md. Upstream v2.10.0 is #789 only (per-model reasoning efforts in the AIR model config option): ModelConfigOption.ts, the createModelConfigOption call in createSessionConfigOptions, one AirExtension constant, a new docs/air-extensions.md section and the session/new line of the AIR scenario recordings. #789 does not touch command presentation or CodexAcpClient command records. It replays cleanly; typecheck, npm test (179 files, 3046 passed, 39 skipped) and build pass on the full exact candidate, and the gates pass on the integration.",
-        "tests": [
-          "src/__tests__/CodexACPAgent/CodexAcpClient.test.ts",
-          "src/__tests__/CodexACPAgent/initialize-v2.test.ts",
-          "src/__tests__/CodexACPAgent/initialize.test.ts"
-        ]
+        "rationale": "",
+        "tests": []
       }
     },
     {
@@ -402,21 +382,18 @@
       "classification": "overlap",
       "overlappingFiles": [
         "docs/air-extensions.md",
-        "src/CodexAcpServer.ts"
+        "src/CodexAcpServer.ts",
+        "src/__tests__/CodexACPAgent/initialize.test.ts",
+        "src/__tests__/CodexACPAgent/v2-prompt-harness.ts"
       ],
       "resolution": {
-        "action": "retain",
+        "action": null,
         "automatic": false,
-        "rationale": "Overlap through src/CodexAcpServer.ts and docs/air-extensions.md. Upstream v2.10.0 is #789 only (per-model reasoning efforts in the AIR model config option): ModelConfigOption.ts, the createModelConfigOption call in createSessionConfigOptions, one AirExtension constant, a new docs/air-extensions.md section and the session/new line of the AIR scenario recordings. #789 does not touch prompt suggestions or their generator. It replays cleanly; typecheck, npm test (179 files, 3046 passed, 39 skipped) and build pass on the full exact candidate, and the gates pass on the integration.",
-        "tests": [
-          "src/__tests__/CodexACPAgent/initialize-v2.test.ts",
-          "src/__tests__/CodexACPAgent/initialize.test.ts",
-          "src/__tests__/CodexACPAgent/prompt-suggestions.test.ts",
-          "src/__tests__/PromptSuggestionGenerator.test.ts"
-        ]
+        "rationale": "",
+        "tests": []
       }
     }
   ],
   "preservedCommits": [],
-  "resolved": true
+  "resolved": false
 }
