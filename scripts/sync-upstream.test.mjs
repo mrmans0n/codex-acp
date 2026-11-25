@@ -109,6 +109,13 @@ test("e2e, upstream publish, and protected Alas publish visibly waive live e2e w
   }
 });
 
+test("protected Alas publication passes registry metadata by file, not in an environment value", () => {
+  // A packument over 128 KiB in one environment string makes Linux refuse to start node (E2BIG).
+  assert.match(publish, /ALAS_PUBLISHED_FILE=\/tmp\/alas-published\.json \\\n\s+node scripts\/prepare-alas-package\.mjs/);
+  assert.doesNotMatch(publish, /ALAS_PUBLISHED_JSON/);
+  assert.doesNotMatch(publish, /\$\(cat[^\n]*alas-published\.json/);
+});
+
 test("protected Alas publication reads back npm provenance, immutable tag, and exact GitHub release", () => {
   assert.match(publish, /verify-alas-publication\.mjs/);
   assert.match(publicationVerifier, /dist-tags|dist\.integrity|attestations|provenance/);
