@@ -70,6 +70,10 @@ export const KNOWN_PATCH_IDENTITIES = Object.freeze([
     name: "neutral-prompt-suggestions",
     commit: "62ee6fec6365323b79a1ba1212246864491d7d1d",
   }),
+  Object.freeze({
+    name: "neutral-session-rewind",
+    commit: "ebb1cce3215c0560d39ba05af0e6d69de0260a5d",
+  }),
 ]);
 
 function git(cwd, args, options = {}) {
