@@ -189,7 +189,7 @@ jobs:
       - name: Prepare package
         id: prepare
         run: |
-          ALAS_PUBLISHED_JSON="$(cat /tmp/alas-published.json)" \
+          ALAS_PUBLISHED_FILE=/tmp/alas-published.json \
             node scripts/prepare-alas-package.mjs > /tmp/alas-prepared.json
           node --input-type=module <<'NODE' >> "$GITHUB_OUTPUT"
           import {readFileSync} from 'node:fs';
