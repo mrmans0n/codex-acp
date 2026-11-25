@@ -184,6 +184,9 @@ import {
     type CursorUpdate,
 } from "./SessionCursors";
 import {
+    clientRequestsNeutralSessionRewind,
+    NEUTRAL_SESSION_REWIND_META_KEY,
+    neutralSessionRewindCapability,
     rewindSession,
     SESSION_REWIND_METHOD,
     type SessionRewindRequest,
@@ -1080,6 +1083,10 @@ export class CodexAcpServer {
             // The client-neutral fork point, see `docs/air-extensions.md`.
             ...(this.neutralForkPointSupported ? {
                 [NEUTRAL_FORK_POINT_META_KEY]: neutralForkPointCapability(),
+            } : {}),
+            // The client-neutral session rewind, see `docs/air-extensions.md`. ACP v2 has no `_session/rewind`.
+            ...(protocolVersion === 1 && clientRequestsNeutralSessionRewind(this.clientCapabilities) ? {
+                [NEUTRAL_SESSION_REWIND_META_KEY]: neutralSessionRewindCapability(),
             } : {}),
             // The client-neutral diff patch, see `docs/air-extensions.md`. ACP v2 has its own diff patch,
             // so `ClientCapabilities.fromV2` never selects it.
@@ -4796,9 +4803,12 @@ export class CodexAcpServer {
             .join(" "));
     }
 
-    /** Whether the client is AIR on v1 and declared `sessionRewind`: only it knows `_session/rewind`. */
+    /** Whether the v1 client knows `_session/rewind`: AIR that declared `sessionRewind`, or a client of the client-neutral form. */
     private supportsSessionRewind(): boolean {
-        return this.protocolVersion === 1 && clientSupportsAirCapability(this.clientCapabilities, AIR_SESSION_REWIND_KEY);
+        return this.protocolVersion === 1 && (
+            clientSupportsAirCapability(this.clientCapabilities, AIR_SESSION_REWIND_KEY)
+            || clientRequestsNeutralSessionRewind(this.clientCapabilities)
+        );
     }
 
     /** The cursor as the client gets it: with `rewind` where `_session/rewind` can act. */

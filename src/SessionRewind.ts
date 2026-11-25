@@ -5,7 +5,7 @@ import {logger} from "./Logger";
 import type {CursorTurn} from "./SessionCursors";
 
 /**
- * `_session/rewind` (AIR to agent): removes a user message and everything after it from the context
+ * `_session/rewind` (AIR or a client-neutral client to agent): removes a user message and everything after it from the context
  * of the same session. The position is a session cursor, see `SessionCursors.ts`: the one before the
  * user message to drop. Codex cuts whole turns with `thread/revert`, which persists the cut.
  *
@@ -14,6 +14,25 @@ import type {CursorTurn} from "./SessionCursors";
  * running turn and kills the background terminals. So the refusals are decided before the call.
  */
 export const SESSION_REWIND_METHOD = "_session/rewind";
+
+/** The top-level `_meta` key of the client-neutral session rewind. */
+export const NEUTRAL_SESSION_REWIND_META_KEY = "sessionRewind";
+
+/**
+ * Whether the client opted into the client-neutral session rewind with
+ * `clientCapabilities._meta.sessionRewind: {version}`, an integer of at least 1.
+ */
+export function clientRequestsNeutralSessionRewind(capabilities: {_meta?: Record<string, unknown> | null} | null | undefined): boolean {
+    const declared = capabilities?._meta?.[NEUTRAL_SESSION_REWIND_META_KEY];
+    if (typeof declared !== "object" || declared === null || Array.isArray(declared)) return false;
+    const version = (declared as {version?: unknown}).version;
+    return typeof version === "number" && Number.isInteger(version) && version >= 1;
+}
+
+/** The agent side of the client-neutral session rewind, for the `initialize` `_meta`. */
+export function neutralSessionRewindCapability(): {version: number} {
+    return {version: 1};
+}
 
 export type SessionRewindRequest = {
     sessionId: string;
