@@ -1,6 +1,6 @@
 {
   "schemaVersion": 2,
-  "baseTag": "v2.12.0",
+  "baseTag": "v2.12.1",
   "patches": [
     {
       "name": "goal-opt-in",
@@ -612,8 +612,8 @@
       "disposition": "active",
       "retiredCommits": [],
       "lastResolution": {
-        "fromTag": "v2.10.0",
-        "toTag": "v2.12.0",
+        "fromTag": "v2.12.0",
+        "toTag": "v2.12.1",
         "originalCommit": "62ee6fec6365323b79a1ba1212246864491d7d1d",
         "action": "retain"
       }
@@ -647,7 +647,12 @@
     "a672b73fdc1db8778b0609d060c2179d7c23032d",
     "8b601c3f7c7474d0ee987b95f95f424d55c7e144",
     "0191d4ab454171c54527da1da78a828ffbe5445a",
-    "fd8a43cebc5d9328dcbc5600c3c7ccb396494a5e"
+    "fd8a43cebc5d9328dcbc5600c3c7ccb396494a5e",
+    "10feeb00282b8d7fadd6ae21e865b91658cbfdd6",
+    "e1c2b309066c20776627cc83b46a7d3b21914e4c",
+    "313dcc48ffe9409c792d0d965e772d1f4a0bb791",
+    "694465e91cc13dac07a381c4c470d57d034fe512",
+    "bc1c29702ffa359f06edb2aaa0914b190ad33abf"
   ],
   "preservedTransitions": [],
   "downstreamTransitions": [
@@ -701,6 +706,21 @@
       ],
       "action": "adapt",
       "replacementCommit": "5bd3d59676f4d2e913e0e4d91414f1cea96e9361"
+    },
+    {
+      "fromTag": "v2.12.0",
+      "toTag": "v2.12.1",
+      "commit": "10feeb00282b8d7fadd6ae21e865b91658cbfdd6",
+      "subject": "chore: retain downstream workflows for review",
+      "patchId": "1699c5254935bce735a848f492351c5b2bf851cd",
+      "equivalentCommits": [
+        "e1c2b309066c20776627cc83b46a7d3b21914e4c",
+        "313dcc48ffe9409c792d0d965e772d1f4a0bb791",
+        "694465e91cc13dac07a381c4c470d57d034fe512",
+        "bc1c29702ffa359f06edb2aaa0914b190ad33abf"
+      ],
+      "action": "adapt",
+      "replacementCommit": "4232283925521b3f5428491e89417b9972c464dd"
     }
   ]
 }
