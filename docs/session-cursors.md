@@ -3,7 +3,7 @@
 Status: Experimental
 
 A session cursor is a position of a session that a method can act at, as the unstable ACP session cursors RFD defines.
-The adapter announces them with `cursor_update` and accepts them in `session/fork` and, for AIR, in [`_session/rewind`](air-extensions.md#session-rewind).
+The adapter announces them with `cursor_update` and accepts them in `session/fork` and, for a client that declared it, in [`_session/rewind`](air-extensions.md#session-rewind).
 
 ## Cursors
 
@@ -12,7 +12,7 @@ Codex cuts whole turns, so a cursor lies at a turn boundary.
 
 - `cursorId` is `before:<turnId>`. Codex stores the turn id, so the id is the same live, in every replay and after a restart. The adapter keeps no cursors of its own.
 - ACP v1 clients opt in with `clientCapabilities.session.cursors`. A client that does not declare it gets none. ACP v2 clients always get them.
-- `capabilities` is `{ "fork": {} }`. A declared v1 AIR client with `sessionRewind` gets `{ "fork": {}, "rewind": {} }` on the cursors of a session whose thread has paginated, non-ephemeral history. ACP v2 has no `rewind`.
+- `capabilities` is `{ "fork": {} }`. A v1 client that declared `sessionRewind`, as AIR or in the [client-neutral form](air-extensions.md#client-neutral-session-rewind), gets `{ "fork": {}, "rewind": {} }` on the cursors of a session whose thread has paginated, non-ephemeral history. ACP v2 has no `rewind`.
 
 A turn gets a cursor when it starts with a visible user message and is not the first turn. These turns get none:
 

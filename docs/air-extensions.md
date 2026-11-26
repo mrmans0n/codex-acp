@@ -1753,7 +1753,7 @@ AIR edits a user message by removing that message and everything after it from t
 The response is `{ "rewound": true }`, which means that the cut is live and persisted, or `{ "rewound": false, "reason": "<reason>" }` when nothing changed.
 The client keeps its own history then.
 
-- ACP v1 only. The agent lists `sessionRewind` in its `initialize` capabilities only for an AIR client that declares it. Every other client, and every ACP v2 client, gets the method not found (`-32601`).
+- ACP v1 only. The agent lists `sessionRewind` in its `initialize` capabilities only for an AIR client that declares it. Every other client except one of the [client-neutral form](#client-neutral-session-rewind), and every ACP v2 client, gets the method not found (`-32601`).
 - `cursorId` is a cursor that the session announced with the `rewind` capability: the cursor before a turn that starts with a visible user message.
   The agent adds `rewind` to a cursor only for a declared v1 client, and only when the thread has paginated history and is not ephemeral: Codex cannot revert another thread. Other cursors keep `{ "fork": {} }`, and a request that names one fails with `-32602`.
   The first turn has no cursor, so a client offers no edit for it.
@@ -1781,6 +1781,28 @@ The request fails with `-32602` for:
 - a session id that names a native subagent's child session.
 
 A `sessionId` that the agent does not hold fails with `-32002`.
+
+### Client-neutral session rewind
+
+Any ACP v1 client can use `_session/rewind` without declaring `_meta.jetbrains.air`.
+It opts in at `initialize` with `clientCapabilities._meta.sessionRewind: { "version": 1 }`.
+Only an object whose `version` is an integer of at least 1 opts in; `true`, a string, an array, `null`, a missing `version`, `0` or a fraction enables nothing.
+
+The `initialize` response of an opted-in client carries the agent side at top level:
+
+```json
+{
+  "_meta": {
+    "sessionRewind": { "version": 1 }
+  }
+}
+```
+
+- The request, the response, the refusal reasons and the errors are those of the AIR form above.
+- The session's cursors carry `{ "fork": {}, "rewind": {} }` under the same rules. The client still needs `clientCapabilities.session.cursors` to get any `cursor_update`.
+- The opt-in changes nothing else: the client keeps the tool call, subagent and failure forms of a client that is not AIR, and the AIR capability list does not name `sessionRewind`.
+- An AIR client follows only its AIR capability, and its `initialize` response has no top-level `sessionRewind` unless it opts in here too.
+- ACP v2 ignores the opt-in, as it has no `_session/rewind`.
 
 ### Codex mapping
 

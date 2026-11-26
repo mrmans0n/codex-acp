@@ -617,6 +617,23 @@
         "originalCommit": "62ee6fec6365323b79a1ba1212246864491d7d1d",
         "action": "retain"
       }
+    },
+    {
+      "name": "neutral-session-rewind",
+      "commit": "ebb1cce3215c0560d39ba05af0e6d69de0260a5d",
+      "upstreamPr": null,
+      "files": [
+        "docs/air-extensions.md",
+        "docs/session-cursors.md",
+        "src/CodexAcpServer.ts",
+        "src/SessionRewind.ts",
+        "src/__tests__/CodexACPAgent/session-rewind.test.ts"
+      ],
+      "tests": [
+        "src/__tests__/CodexACPAgent/session-rewind.test.ts"
+      ],
+      "disposition": "active",
+      "retiredCommits": []
     }
   ],
   "retiredCommits": [

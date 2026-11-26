@@ -13,6 +13,9 @@ stubGatewayModelListing(["gpt-5"]);
 const REWIND = "_session/rewind";
 const airCapabilities = (capabilities: string[]) => ({_meta: {jetbrains: {air: {version: 1, capabilities}}}});
 const rewindClient = {session: {cursors: {}}, ...airCapabilities(["sessionRewind"])};
+/** A client that is not AIR and opts into the client-neutral `sessionRewind`. */
+const neutralClient = (sessionRewind: unknown) => ({session: {cursors: {}}, _meta: {sessionRewind}});
+const neutralRewindClient = neutralClient({version: 1});
 
 function turn(id: string, status: TurnStatus, items: ThreadItem[]): Turn {
     return {...createTurn(status, id), itemsView: "summary", items};
@@ -84,8 +87,11 @@ describe("_session/rewind", () => {
 
     const rewind = (cursorId: string, id = sessionId) => client.request(REWIND, {sessionId: id, cursorId});
 
-    it("reverts before the cursor's turn, and the cut cursor is gone", async () => {
-        await connect();
+    it.each([
+        ["an AIR client", rewindClient],
+        ["a client of the neutral form", neutralRewindClient],
+    ])("reverts before the cursor's turn, and the cut cursor is gone, for %s", async (_name, capabilities) => {
+        await connect({capabilities});
 
         await expect(rewind("before:turn-2")).resolves.toEqual({rewound: true});
 
@@ -658,6 +664,27 @@ describe("_session/rewind, advertisement", () => {
 
         expect(Array.isArray(capabilities) && capabilities.includes("sessionRewind")).toBe(listed);
     });
+
+    it.each([
+        ["v1, version 1", 1, {version: 1}, {version: 1}],
+        ["v1, a later version", 1, {version: 2}, {version: 1}],
+        ["v1, true", 1, true, undefined],
+        ["v1, version 0", 1, {version: 0}, undefined],
+        ["v2, version 1", 2, {version: 1}, undefined],
+    ] as const)("the neutral opt-in is answered at top level: %s", async (_name, version, optIn, advertised) => {
+        const capabilities = {_meta: {sessionRewind: optIn}};
+        client = await connectSession(version, {
+            openSession: false,
+            ...(version === 1 ? {v1ClientCapabilities: capabilities as never} : {clientCapabilities: capabilities as never}),
+        });
+        const response = await client.request("initialize", version === 1
+            ? {protocolVersion: 1, clientCapabilities: capabilities}
+            : {protocolVersion: 2, info: {name: "test", version: "1"}, capabilities});
+
+        expect(response._meta?.sessionRewind).toEqual(advertised);
+        // The client stays a non-AIR client: no AIR capability list names the rewind.
+        expect(response._meta?.jetbrains?.air?.capabilities ?? []).not.toContain("sessionRewind");
+    });
 });
 
 describe("_session/rewind, cursor capabilities", () => {
@@ -673,6 +700,8 @@ describe("_session/rewind, cursor capabilities", () => {
         ["declared, paginated", rewindClient, "paginated", {fork: {}, rewind: {}}],
         ["declared, legacy history", rewindClient, "legacy", {fork: {}}],
         ["not declared", {session: {cursors: {}}, ...airCapabilities(["diffPatch"])}, "paginated", {fork: {}}],
+        ["neutral, paginated", neutralRewindClient, "paginated", {fork: {}, rewind: {}}],
+        ["neutral, malformed opt-in", neutralClient(true), "paginated", {fork: {}}],
     ] as const)("a replayed cursor, %s", async (_name, capabilities, historyMode, expected) => {
         client = await connectSession(1, {openSession: false, v1ClientCapabilities: capabilities as never});
         client.setCodexResponse("thread/resume", async () => ({
